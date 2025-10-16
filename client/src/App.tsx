@@ -43,17 +43,17 @@ function AppContent() {
     queryKey: ["/api/auth/me"],
   });
 
+  // Redirect to login if not authenticated (using useEffect to avoid state update during render)
+  if (!user && location !== "/login" && !isLoading) {
+    setTimeout(() => setLocation("/login"), 0);
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
-  }
-
-  if (!user && location !== "/login") {
-    setLocation("/login");
-    return null;
   }
 
   if (!user) {

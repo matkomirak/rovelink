@@ -156,7 +156,9 @@ export default function Templates() {
                                 </SelectItem>
                               ))
                             ) : (
-                              <SelectItem value="site.yml" disabled>No playbooks (sync project first)</SelectItem>
+                              <SelectItem value="_no_playbooks" disabled>
+                                No playbooks (sync project first)
+                              </SelectItem>
                             )}
                           </SelectContent>
                         </Select>

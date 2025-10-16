@@ -33,14 +33,23 @@ export default function Login() {
   });
 
   const loginMutation = useMutation({
-    mutationFn: (data: LoginForm) =>
-      apiRequest("POST", isSignup ? "/api/auth/signup" : "/api/auth/login", data),
-    onSuccess: () => {
+    mutationFn: async (data: LoginForm) => {
+      const response = await apiRequest("POST", isSignup ? "/api/auth/signup" : "/api/auth/login", data);
+      return response.json();
+    },
+    onSuccess: (data: { token: string }) => {
+      // Store token in localStorage
+      localStorage.setItem("auth_token", data.token);
+      
+      // Invalidate auth query to refetch user data
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      
       toast({
         title: isSignup ? "Account created" : "Welcome back",
         description: isSignup ? "Your account has been created successfully" : "You have been logged in",
       });
+      
+      // Redirect to dashboard
       setLocation("/");
     },
     onError: (error: Error) => {

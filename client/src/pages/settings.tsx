@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,14 +36,14 @@ export default function Settings() {
   });
 
   // Update form when settings load
-  useState(() => {
+  useEffect(() => {
     if (settings) {
       form.reset({
         netboxUrl: settings.netboxUrl || "",
         netboxToken: settings.netboxToken || "",
       });
     }
-  });
+  }, [settings, form]);
 
   const saveMutation = useMutation({
     mutationFn: (data: SettingsForm) => apiRequest("POST", "/api/settings", data),

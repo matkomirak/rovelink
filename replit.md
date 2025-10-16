@@ -21,6 +21,10 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - **jobRuns**: Execution history with logs, results, and archive status
 - **notifications**: Email/webhook configurations with trigger conditions
 - **settings**: Key-value configuration storage
+- **providerAccounts**: Provider configurations (Proxmox/VMware/Azure) with credentials
+- **syncRuns**: Provider sync execution history with status and logs
+- **externalObjects**: Provider-to-NetBox object mappings (VMs, IPs) with external IDs
+- **groupCache**: Performance cache for NetBox inventory groups (autocomplete optimization)
 
 ## Features Implemented
 
@@ -77,10 +81,27 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - Mock email sender (console logging for MVP)
 - Real webhook delivery with custom headers and body
 
+### Provider System
+- **Provider Architecture**: Factory pattern with extensible registry for multiple provider types
+- **Proxmox Integration**: Full VM inventory collection with dual authentication (password/API token)
+- **Provider Accounts**: CRUD operations with enable/disable, scheduled sync configuration
+- **Sync Worker**: Orchestrates VM collection, normalization, and NetBox upsert operations
+- **External Objects**: Tracks provider-to-NetBox mappings with unique constraint on (providerAccountId, externalId)
+- **Sync Runs**: Complete execution history with logs, status tracking, and error handling
+- **Group Cache**: Performance-optimized autocomplete cache rebuilt from NetBox inventory
+- **Housekeeping Operations**:
+  - Rebuild Cache: Refresh autocomplete suggestions from NetBox groups
+  - Ensure Schema: Create/update custom fields in NetBox (bridge_provider_id, bridge_external_id)
+  - Prune Stale: Remove objects from disabled/deleted providers
+  - Retry Failed: Re-queue failed sync runs for automatic retry
+- **Provider UI**: Test connection, manual sync trigger, status monitoring, enable/disable toggle
+- **NetBox Write Operations**: Mock upsert for VMs, IPs, and custom field updates
+
 ### Settings
 - NetBox URL and token configuration
 - Connection test capability
 - Environment variable display
+- Provider housekeeping dashboard with maintenance operations
 
 ## API Endpoints
 
@@ -130,6 +151,20 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - `POST /api/notifications` - Create new notification
 - `PATCH /api/notifications/:id` - Update notification
 - `DELETE /api/notifications/:id` - Delete notification
+
+### Providers
+- `GET /api/providers` - List all provider accounts
+- `POST /api/providers` - Create new provider account
+- `PATCH /api/providers/:id` - Update provider account
+- `POST /api/providers/:id/test` - Test provider connection
+- `POST /api/providers/:id/sync` - Trigger manual sync
+- `GET /api/stats/providers` - Get provider statistics and last sync status
+
+### Housekeeping
+- `POST /api/housekeeping/rebuild-cache` - Rebuild group cache from NetBox
+- `POST /api/housekeeping/ensure-schema` - Ensure NetBox custom fields exist
+- `POST /api/housekeeping/prune-stale` - Remove objects from disabled providers
+- `POST /api/housekeeping/retry-failed` - Re-queue failed sync runs
 
 ## Environment Variables
 
@@ -225,3 +260,15 @@ shared/
   - Configurable notifications (email/webhook) with retry logic
   - Variable interpolation in notification templates
   - Automatic notification triggering on run completion/failure
+
+- 2025-10-16: Provider system implementation
+  - Complete provider architecture with factory pattern and registry
+  - Proxmox provider collector with password/API token authentication
+  - Provider sync worker orchestrating VM collection and NetBox upsert
+  - Housekeeping operations: cache rebuild, schema ensure, prune stale, retry failed
+  - Provider accounts CRUD with enable/disable and scheduled sync support
+  - Sync runs tracking with status (queued, running, ok, failed) and logs
+  - External objects mapping with provider-to-NetBox relationship tracking
+  - Group cache optimization for autocomplete performance
+  - Provider UI with test connection, manual sync, and status monitoring
+  - Housekeeping dashboard in Settings for maintenance operations

@@ -1,50 +1,66 @@
 // FakeRunner service - simulates Ansible playbook execution with canned logs
 import type { JobRun } from "@shared/schema";
 
-const ANSIBLE_LOG_TEMPLATES = [
-  "PLAY [all] *********************************************************************",
-  "",
-  "TASK [Gathering Facts] *********************************************************",
-  "ok: [web-01]",
-  "ok: [web-02]",
-  "ok: [web-03]",
-  "",
-  "TASK [Install packages] ********************************************************",
-  "changed: [web-01]",
-  "changed: [web-02]",
-  "changed: [web-03]",
-  "",
-  "TASK [Configure services] ******************************************************",
-  "changed: [web-01]",
-  "ok: [web-02]",
-  "changed: [web-03]",
-  "",
-  "TASK [Restart application] *****************************************************",
-  "changed: [web-01]",
-  "changed: [web-02]",
-  "changed: [web-03]",
-  "",
-  "PLAY RECAP *********************************************************************",
-  "web-01 : ok=4    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
-  "web-02 : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
-  "web-03 : ok=4    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
-];
+function getAnsibleLogTemplates(limitExpr?: string): string[] {
+  const inventoryFlag = "-i inventory/netbox.yml";
+  const limitFlag = limitExpr ? ` --limit="${limitExpr}"` : "";
+  const commandLine = `ansible-playbook ${inventoryFlag}${limitFlag} playbook.yml`;
+  
+  return [
+    `$ ${commandLine}`,
+    "",
+    "PLAY [all] *********************************************************************",
+    "",
+    "TASK [Gathering Facts] *********************************************************",
+    "ok: [web-01]",
+    "ok: [web-02]",
+    "ok: [web-03]",
+    "",
+    "TASK [Install packages] ********************************************************",
+    "changed: [web-01]",
+    "changed: [web-02]",
+    "changed: [web-03]",
+    "",
+    "TASK [Configure services] ******************************************************",
+    "changed: [web-01]",
+    "ok: [web-02]",
+    "changed: [web-03]",
+    "",
+    "TASK [Restart application] *****************************************************",
+    "changed: [web-01]",
+    "changed: [web-02]",
+    "changed: [web-03]",
+    "",
+    "PLAY RECAP *********************************************************************",
+    "web-01 : ok=4    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
+    "web-02 : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
+    "web-03 : ok=4    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
+  ];
+}
 
-const FAILED_LOG_TEMPLATES = [
-  "PLAY [all] *********************************************************************",
-  "",
-  "TASK [Gathering Facts] *********************************************************",
-  "ok: [web-01]",
-  "ok: [web-02]",
-  "",
-  "TASK [Deploy application] ******************************************************",
-  "fatal: [web-01]: FAILED! => {\"msg\": \"Connection timeout\"}",
-  "ok: [web-02]",
-  "",
-  "PLAY RECAP *********************************************************************",
-  "web-01 : ok=1    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0",
-  "web-02 : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
-];
+function getFailedLogTemplates(limitExpr?: string): string[] {
+  const inventoryFlag = "-i inventory/netbox.yml";
+  const limitFlag = limitExpr ? ` --limit="${limitExpr}"` : "";
+  const commandLine = `ansible-playbook ${inventoryFlag}${limitFlag} playbook.yml`;
+  
+  return [
+    `$ ${commandLine}`,
+    "",
+    "PLAY [all] *********************************************************************",
+    "",
+    "TASK [Gathering Facts] *********************************************************",
+    "ok: [web-01]",
+    "ok: [web-02]",
+    "",
+    "TASK [Deploy application] ******************************************************",
+    "fatal: [web-01]: FAILED! => {\"msg\": \"Connection timeout\"}",
+    "ok: [web-02]",
+    "",
+    "PLAY RECAP *********************************************************************",
+    "web-01 : ok=1    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0",
+    "web-02 : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0",
+  ];
+}
 
 export interface RunResult {
   status: "ok" | "failed";
@@ -66,7 +82,9 @@ export class FakeRunner {
     const duration = 10000 + Math.random() * 10000;
     const shouldFail = Math.random() < 0.2; // 20% failure rate
     
-    const logLines = shouldFail ? FAILED_LOG_TEMPLATES : ANSIBLE_LOG_TEMPLATES;
+    const logLines = shouldFail 
+      ? getFailedLogTemplates(run.limitExpr || undefined) 
+      : getAnsibleLogTemplates(run.limitExpr || undefined);
     const delayPerLine = duration / logLines.length;
 
     // Stream logs line by line

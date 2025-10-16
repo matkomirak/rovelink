@@ -128,12 +128,26 @@ export class NetBoxService {
       const warnings: string[] = [];
       let matched = 3;
 
+      // Recognize keyed group patterns
+      const keyedGroupPatterns = [
+        /wave_\w+/i,
+        /customer_\w+/i,
+        /os_\w+/i,
+        /role_\w+/i
+      ];
+      
+      const hasKeyedGroups = keyedGroupPatterns.some(pattern => pattern.test(limitExpr));
+      if (hasKeyedGroups) {
+        // Valid keyed group usage
+        matched = Math.floor(Math.random() * 5) + 1; // Simulate 1-5 matches
+      }
+
       if (limitExpr.includes("missing")) {
         warnings.push("Some hosts are missing primary IP addresses");
         matched = 1;
       }
 
-      if (limitExpr.includes("!")) {
+      if (limitExpr.includes("!") || limitExpr.includes("-")) {
         warnings.push("Negation patterns may exclude unexpected hosts");
       }
 
@@ -148,38 +162,74 @@ export class NetBoxService {
     }
   }
 
-  async getSuggestions(query: string): Promise<string[]> {
+  async getSuggestions(query: string, storage?: any): Promise<string[]> {
     try {
-      // Mock suggestions based on common NetBox tags and groups
-      const allSuggestions = [
+      let allSuggestions: string[] = [
+        // Traditional groups
         "tag_production",
         "tag_staging",
         "tag_development",
-        "tag_customer_x",
-        "tag_customer_y",
-        "tag_nginx",
-        "tag_postgresql",
-        "tag_redis",
-        "tag_os_linux",
-        "tag_os_windows",
         "web-servers",
         "db-servers",
         "app-servers",
         "monitoring",
-        "wave1",
-        "wave2",
-        "wave3",
-        "subwave_A",
-        "subwave_B",
       ];
+      
+      // Add keyed groups from imported VMs if storage is provided
+      if (storage) {
+        try {
+          const vms = await storage.getNetboxVms();
+          const keyedGroups = new Set<string>();
+          
+          vms.forEach((vm: any) => {
+            const cf = vm.customFields || {};
+            
+            // Extract and add keyed groups
+            const patchWave = cf.patch_wave || cf.Patching?.Wave;
+            if (patchWave) keyedGroups.add(`wave_${patchWave}`);
+            
+            if (vm.tags && Array.isArray(vm.tags)) {
+              vm.tags.forEach((tag: string) => {
+                if (tag) keyedGroups.add(`customer_${tag}`);
+              });
+            }
+            
+            if (vm.operatingSystem && vm.operatingSystem !== 'Unknown') {
+              keyedGroups.add(`os_${vm.operatingSystem.toLowerCase().replace(/\s+/g, '_')}`);
+            }
+            
+            const role = cf.role || cf.device_role;
+            if (role) keyedGroups.add(`role_${role.toLowerCase().replace(/\s+/g, '_')}`);
+          });
+          
+          allSuggestions = [...allSuggestions, ...Array.from(keyedGroups)];
+        } catch (error) {
+          console.error("Failed to generate keyed groups for suggestions:", error);
+        }
+      } else {
+        // Fallback keyed group examples when no storage
+        allSuggestions = [
+          ...allSuggestions,
+          "wave_Wave1",
+          "wave_Wave2",
+          "wave_Wave3",
+          "customer_Alpha",
+          "customer_Beta",
+          "os_linux",
+          "os_windows",
+          "role_web",
+          "role_db",
+          "role_app",
+        ];
+      }
 
       if (!query || query.length < 2) {
-        return [];
+        return allSuggestions.slice(0, 10);
       }
 
       return allSuggestions
         .filter(s => s.toLowerCase().includes(query.toLowerCase()))
-        .slice(0, 10);
+        .slice(0, 15);
     } catch (error) {
       console.error("Failed to get suggestions:", error);
       return [];

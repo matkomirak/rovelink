@@ -413,7 +413,7 @@ export default function Templates() {
                             {...field}
                             value={field.value || ""}
                             ref={inputRef}
-                            placeholder="tag_customer_x:&tag_os_linux"
+                            placeholder="customer_Alpha & os_linux & wave_Wave2 - role_db"
                             className={`font-mono ${!syntaxCheck.valid ? 'border-destructive' : ''}`}
                             data-testid="input-limit-expr"
                             onChange={(e) => {
@@ -462,7 +462,9 @@ export default function Templates() {
                       {!syntaxCheck.valid ? (
                         <p className="text-sm text-destructive">{syntaxCheck.error}</p>
                       ) : (
-                        <FormDescription>Pattern to select hosts (use :, &, |, ! for logic)</FormDescription>
+                        <FormDescription>
+                          Use keyed groups: wave_*, customer_*, os_*, role_* (operators: &, |, -, !)
+                        </FormDescription>
                       )}
                       <FormMessage />
                     </FormItem>

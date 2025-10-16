@@ -181,7 +181,12 @@ export const externalObjects = pgTable("external_objects", {
   netboxId: integer("netbox_id"),
   cachedPayload: jsonb("cached_payload").default({}),
   lastSyncedAt: timestamp("last_synced_at").notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueProviderExternal: {
+    columns: [table.providerAccountId, table.externalId],
+    name: "unique_provider_external"
+  },
+}));
 
 export const externalObjectsRelations = relations(externalObjects, ({ one }) => ({
   providerAccount: one(providerAccounts, {

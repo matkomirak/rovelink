@@ -172,6 +172,77 @@ export class NetBoxService {
       return [];
     }
   }
+
+  // Write operations for provider sync (mocked for MVP)
+  async upsertVm(data: {
+    externalId: string;
+    name: string;
+    provider: string;
+    primaryIp4?: string;
+    tags?: string[];
+    customFields?: Record<string, any>;
+  }): Promise<{ id: number; created: boolean }> {
+    try {
+      // Mock upsert - in real implementation, this would:
+      // 1. Search for VM by custom_fields.ext_id
+      // 2. Create or update the VM
+      // 3. Ensure IP address exists and set primary_ip4
+      // 4. Apply tags
+      console.log(`[NetBox Mock] Upsert VM: ${data.name} (${data.externalId})`);
+      
+      // Simulate random ID
+      const id = Math.floor(Math.random() * 10000);
+      const created = Math.random() > 0.5; // Random create vs update
+      
+      return { id, created };
+    } catch (error) {
+      console.error("Failed to upsert VM:", error);
+      throw error;
+    }
+  }
+
+  async ensureCustomFields(fields: string[]): Promise<{ created: string[]; existing: string[] }> {
+    try {
+      // Mock custom field creation
+      console.log(`[NetBox Mock] Ensure custom fields: ${fields.join(", ")}`);
+      
+      // Simulate some fields already exist
+      const created: string[] = [];
+      const existing: string[] = [];
+      
+      fields.forEach(field => {
+        if (Math.random() > 0.5) {
+          created.push(field);
+        } else {
+          existing.push(field);
+        }
+      });
+      
+      return { created, existing };
+    } catch (error) {
+      console.error("Failed to ensure custom fields:", error);
+      throw error;
+    }
+  }
+
+  async listAllGroups(): Promise<Array<{ kind: string; name: string }>> {
+    try {
+      // Mock fetching all group types for cache
+      return [
+        { kind: "site", name: "DC1" },
+        { kind: "site", name: "DC2" },
+        { kind: "tag", name: "production" },
+        { kind: "tag", name: "staging" },
+        { kind: "device_role", name: "web-server" },
+        { kind: "device_role", name: "db-server" },
+        { kind: "tenant", name: "Customer A" },
+        { kind: "tenant", name: "Customer B" },
+      ];
+    } catch (error) {
+      console.error("Failed to list all groups:", error);
+      throw error;
+    }
+  }
 }
 
 export const netboxService = new NetBoxService();

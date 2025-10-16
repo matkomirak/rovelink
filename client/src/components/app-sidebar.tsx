@@ -10,6 +10,7 @@ import {
   BarChart3,
   Bell,
   Cloud,
+  Database,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -39,6 +40,11 @@ const menuItems = [
     title: "Inventory",
     url: "/inventory",
     icon: Server,
+  },
+  {
+    title: "NetBox Inventory",
+    url: "/netbox-inventory",
+    icon: Database,
   },
   {
     title: "Projects",

@@ -21,6 +21,7 @@ import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
 import Providers from "@/pages/providers";
+import NetBoxInventory from "@/pages/netbox-inventory";
 import type { User } from "@shared/schema";
 
 function AuthenticatedRouter() {
@@ -28,6 +29,7 @@ function AuthenticatedRouter() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/inventory" component={Inventory} />
+      <Route path="/netbox-inventory" component={NetBoxInventory} />
       <Route path="/projects" component={Projects} />
       <Route path="/credentials" component={Credentials} />
       <Route path="/providers" component={Providers} />

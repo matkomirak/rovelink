@@ -255,6 +255,74 @@ export class NetBoxService {
       throw error;
     }
   }
+
+  async getVirtualMachines(url?: string, token?: string): Promise<Array<{
+    id: number;
+    name: string;
+    ip?: string;
+    operatingSystem?: string;
+    customFields: Record<string, any>;
+    tags: string[];
+  }>> {
+    try {
+      const apiUrl = url || this.config.url;
+      const apiToken = token || this.config.token;
+
+      if (!apiUrl) {
+        throw new Error("NetBox URL is not configured");
+      }
+
+      console.log(`Fetching VMs from NetBox: ${apiUrl}/api/virtualization/virtual-machines/`);
+
+      const response = await axios.get(`${apiUrl}/api/virtualization/virtual-machines/`, {
+        headers: {
+          Authorization: `Token ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 30000,
+      });
+
+      const vms = response.data.results || [];
+      console.log(`Fetched ${vms.length} VMs from NetBox`);
+
+      return vms.map((vm: any) => {
+        // Extract primary IP
+        const primaryIp = vm.primary_ip4?.address?.split('/')[0] || vm.primary_ip?.address?.split('/')[0] || undefined;
+
+        // Determine operating system from platform or custom fields
+        let os = vm.custom_fields?.operating_system || vm.platform?.name || "Unknown";
+        
+        // Normalize OS to Linux/Windows/Other
+        if (os.toLowerCase().includes('linux') || os.toLowerCase().includes('ubuntu') || 
+            os.toLowerCase().includes('debian') || os.toLowerCase().includes('centos') || 
+            os.toLowerCase().includes('rhel') || os.toLowerCase().includes('fedora')) {
+          os = "Linux";
+        } else if (os.toLowerCase().includes('windows')) {
+          os = "Windows";
+        } else if (os !== "Unknown") {
+          os = "Other";
+        }
+
+        // Extract tags
+        const tags = vm.tags?.map((tag: any) => tag.name || tag.slug || tag) || [];
+
+        // Extract all custom fields
+        const customFields = vm.custom_fields || {};
+
+        return {
+          id: vm.id,
+          name: vm.name,
+          ip: primaryIp,
+          operatingSystem: os,
+          customFields,
+          tags,
+        };
+      });
+    } catch (error: any) {
+      console.error("Failed to fetch VMs from NetBox:", error.message);
+      throw new Error(`Failed to fetch VMs: ${error.message}`);
+    }
+  }
 }
 
 export const netboxService = new NetBoxService();

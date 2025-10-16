@@ -205,6 +205,20 @@ export const groupCache = pgTable("group_cache", {
 
 export const groupCacheRelations = relations(groupCache, () => ({}));
 
+// NetBox VMs (imported from NetBox inventory)
+export const netboxVms = pgTable("netbox_vms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  netboxId: integer("netbox_id").notNull().unique(), // NetBox VM ID
+  name: text("name").notNull(),
+  ip: text("ip"), // Primary IP address (nullable)
+  operatingSystem: text("operating_system"), // Linux/Windows/Other
+  customFields: jsonb("custom_fields").default({}), // All custom fields from NetBox
+  tags: text("tags").array().default([]), // Array of tag names
+  lastImportedAt: timestamp("last_imported_at").notNull().defaultNow(),
+});
+
+export const netboxVmsRelations = relations(netboxVms, () => ({}));
+
 // Insert schemas for forms
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -272,6 +286,11 @@ export const insertGroupCacheSchema = createInsertSchema(groupCache).omit({
   refreshedAt: true,
 });
 
+export const insertNetboxVmSchema = createInsertSchema(netboxVms).omit({
+  id: true,
+  lastImportedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -305,3 +324,6 @@ export type ExternalObject = typeof externalObjects.$inferSelect;
 
 export type InsertGroupCache = z.infer<typeof insertGroupCacheSchema>;
 export type GroupCache = typeof groupCache.$inferSelect;
+
+export type InsertNetboxVm = z.infer<typeof insertNetboxVmSchema>;
+export type NetboxVm = typeof netboxVms.$inferSelect;

@@ -1,7 +1,7 @@
 // Database storage implementation (from javascript_database blueprint)
 import { 
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
-  providerAccounts, syncRuns, externalObjects, groupCache,
+  providerAccounts, syncRuns, externalObjects, groupCache, netboxVms,
   type User, type InsertUser,
   type Project, type InsertProject,
   type Credential, type InsertCredential,
@@ -13,6 +13,7 @@ import {
   type SyncRun, type InsertSyncRun,
   type ExternalObject, type InsertExternalObject,
   type GroupCache, type InsertGroupCache,
+  type NetboxVm, type InsertNetboxVm,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql } from "drizzle-orm";
@@ -77,6 +78,12 @@ export interface IStorage {
   addGroupCache(item: { kind: string; name: string }): Promise<GroupCache>;
   pruneStaleObjects(days: number): Promise<number>;
   getProviderStats(): Promise<any[]>;
+
+  // NetBox VM operations
+  getNetboxVms(): Promise<NetboxVm[]>;
+  getNetboxVm(id: string): Promise<NetboxVm | undefined>;
+  upsertNetboxVm(vm: InsertNetboxVm): Promise<NetboxVm>;
+  deleteAllNetboxVms(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -412,6 +419,41 @@ export class DatabaseStorage implements IStorage {
     }
 
     return stats;
+  }
+
+  // NetBox VM operations
+  async getNetboxVms(): Promise<NetboxVm[]> {
+    return await db.select().from(netboxVms).orderBy(desc(netboxVms.lastImportedAt));
+  }
+
+  async getNetboxVm(id: string): Promise<NetboxVm | undefined> {
+    const [vm] = await db.select().from(netboxVms).where(eq(netboxVms.id, id));
+    return vm || undefined;
+  }
+
+  async upsertNetboxVm(vm: InsertNetboxVm): Promise<NetboxVm> {
+    const existing = await db.select().from(netboxVms).where(eq(netboxVms.netboxId, vm.netboxId));
+    
+    if (existing.length > 0) {
+      // Update existing VM
+      const [updated] = await db
+        .update(netboxVms)
+        .set({ ...vm, lastImportedAt: new Date() })
+        .where(eq(netboxVms.netboxId, vm.netboxId))
+        .returning();
+      return updated;
+    } else {
+      // Insert new VM
+      const [inserted] = await db
+        .insert(netboxVms)
+        .values(vm)
+        .returning();
+      return inserted;
+    }
+  }
+
+  async deleteAllNetboxVms(): Promise<void> {
+    await db.delete(netboxVms);
   }
 }
 

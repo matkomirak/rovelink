@@ -671,6 +671,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // NetBox VM import routes
+  app.post("/api/netbox/import", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const { netboxService } = await import("./services/netbox");
+      
+      // Get NetBox credentials from settings
+      const urlSetting = await storage.getSetting("netbox_url");
+      const tokenSetting = await storage.getSetting("netbox_token");
+
+      if (!urlSetting || !tokenSetting) {
+        return res.status(400).json({ message: "NetBox credentials not configured. Please configure in Settings." });
+      }
+
+      // Fetch VMs from NetBox
+      const vms = await netboxService.getVirtualMachines(urlSetting.value, tokenSetting.value);
+      
+      // Clear existing VMs (full replacement)
+      await storage.deleteAllNetboxVms();
+      
+      // Import all VMs
+      let imported = 0;
+      for (const vm of vms) {
+        await storage.upsertNetboxVm({
+          netboxId: vm.id,
+          name: vm.name,
+          ip: vm.ip || null,
+          operatingSystem: vm.operatingSystem || null,
+          customFields: vm.customFields,
+          tags: vm.tags,
+        });
+        imported++;
+      }
+
+      res.json({ 
+        message: `Successfully imported ${imported} VMs from NetBox`, 
+        count: imported 
+      });
+    } catch (error: any) {
+      console.error("NetBox import failed:", error);
+      res.status(500).json({ message: error.message || "Failed to import VMs from NetBox" });
+    }
+  });
+
+  app.get("/api/netbox/vms", authMiddleware, async (req, res) => {
+    try {
+      const vms = await storage.getNetboxVms();
+      res.json(vms);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get NetBox VMs" });
+    }
+  });
+
   // Stats routes
   app.get("/api/stats/providers", authMiddleware, async (req, res) => {
     try {

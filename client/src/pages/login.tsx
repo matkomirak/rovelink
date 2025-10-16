@@ -1,0 +1,135 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useMutation } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Loader2 } from "lucide-react";
+
+const loginSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+});
+
+type LoginForm = z.infer<typeof loginSchema>;
+
+export default function Login() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const [isSignup, setIsSignup] = useState(false);
+
+  const form = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      username: "",
+      password: "",
+    },
+  });
+
+  const loginMutation = useMutation({
+    mutationFn: (data: LoginForm) =>
+      apiRequest("POST", isSignup ? "/api/auth/signup" : "/api/auth/login", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      toast({
+        title: isSignup ? "Account created" : "Welcome back",
+        description: isSignup ? "Your account has been created successfully" : "You have been logged in",
+      });
+      setLocation("/");
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Authentication failed",
+        description: error.message,
+      });
+    },
+  });
+
+  const onSubmit = (data: LoginForm) => {
+    loginMutation.mutate(data);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <span className="text-xl font-bold">B</span>
+            </div>
+            <div>
+              <CardTitle className="text-2xl">Bridge</CardTitle>
+              <CardDescription>Infrastructure Automation Platform</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Username</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        data-testid="input-username"
+                        placeholder="Enter your username"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Password</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="password"
+                        data-testid="input-password"
+                        placeholder="Enter your password"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loginMutation.isPending}
+                data-testid="button-submit"
+              >
+                {loginMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isSignup ? "Create Account" : "Sign In"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => setIsSignup(!isSignup)}
+                data-testid="button-toggle-mode"
+              >
+                {isSignup ? "Already have an account? Sign in" : "Don't have an account? Sign up"}
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

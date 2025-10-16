@@ -25,6 +25,7 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - **syncRuns**: Provider sync execution history with status and logs
 - **externalObjects**: Provider-to-NetBox object mappings (VMs, IPs) with external IDs
 - **groupCache**: Performance cache for NetBox inventory groups (autocomplete optimization)
+- **netboxVms**: Imported NetBox VMs with name, IP, OS, custom fields, and tags
 
 ## Features Implemented
 
@@ -38,6 +39,12 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - Group and host browsing
 - Preflight validation for limit expressions
 - Inventory health reporting (coverage %, missing IPs/users)
+- **VM Import**: Import virtual machines from NetBox with full metadata
+  - Fetches VMs via NetBox virtualization API
+  - Captures: Name, IP address, Operating System, Custom Fields, Tags
+  - Operating system normalization (Linux/Windows/Other/Unknown)
+  - Full replacement sync with persistence
+  - Admin-only import capability
 
 ### Project Management
 - Git repository CRUD operations
@@ -160,6 +167,10 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - `POST /api/providers/:id/sync` - Trigger manual sync
 - `GET /api/stats/providers` - Get provider statistics and last sync status
 
+### NetBox VM Import
+- `POST /api/netbox/import` - Import VMs from NetBox (admin only, full replacement sync)
+- `GET /api/netbox/vms` - List all imported NetBox VMs
+
 ### Housekeeping
 - `POST /api/housekeeping/rebuild-cache` - Rebuild group cache from NetBox
 - `POST /api/housekeeping/ensure-schema` - Ensure NetBox custom fields exist
@@ -272,3 +283,13 @@ shared/
   - Group cache optimization for autocomplete performance
   - Provider UI with test connection, manual sync, and status monitoring
   - Housekeeping dashboard in Settings for maintenance operations
+
+- 2025-10-16: NetBox VM import feature
+  - Direct VM import from NetBox virtualization API
+  - New netbox_vms database table with complete VM metadata storage
+  - VM attributes captured: Name, IP address, Operating System, Custom Fields, Tags
+  - Operating system normalization (Linux/Windows/Other/Unknown)
+  - Full replacement sync model with persistence
+  - NetBox Inventory page with table view and import button
+  - Admin-only import capability
+  - E2E tested: Successfully imports 50 VMs from NetBox demo instance

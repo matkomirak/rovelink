@@ -16,6 +16,7 @@ import Credentials from "@/pages/credentials";
 import Templates from "@/pages/templates";
 import Runs from "@/pages/runs";
 import RunDetail from "@/pages/run-detail";
+import RunComparison from "@/pages/run-comparison";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import type { User } from "@shared/schema";
@@ -30,6 +31,7 @@ function AuthenticatedRouter() {
       <Route path="/templates" component={Templates} />
       <Route path="/runs" component={Runs} />
       <Route path="/runs/:id" component={RunDetail} />
+      <Route path="/compare" component={RunComparison} />
       <Route path="/reports" component={Reports} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />

@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { PlayCircle, CheckCircle2, XCircle, Clock, ExternalLink } from "lucide-react";
+import { PlayCircle, CheckCircle2, XCircle, Clock, ExternalLink, GitCompare } from "lucide-react";
 import type { JobRun } from "@shared/schema";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export default function Runs() {
+  const [, setLocation] = useLocation();
   const { data: runs, isLoading } = useQuery<JobRun[]>({
     queryKey: ["/api/runs"],
   });
@@ -49,9 +50,17 @@ export default function Runs() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold" data-testid="text-page-title">Job Runs</h1>
-        <p className="text-sm text-muted-foreground">View and monitor automation job executions</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Job Runs</h1>
+          <p className="text-sm text-muted-foreground">View and monitor automation job executions</p>
+        </div>
+        {runs && runs.length >= 2 && (
+          <Button onClick={() => setLocation("/compare")} data-testid="button-compare-runs">
+            <GitCompare className="h-4 w-4 mr-2" />
+            Compare Runs
+          </Button>
+        )}
       </div>
 
       {isLoading ? (

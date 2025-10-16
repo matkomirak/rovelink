@@ -47,6 +47,8 @@ export class NetBoxService {
       const testUrl = url || this.config.url;
       const testToken = token || this.config.token;
       
+      console.log("Testing NetBox connection with URL:", testUrl);
+      
       if (!testUrl) {
         throw new Error("NetBox URL is not configured");
       }

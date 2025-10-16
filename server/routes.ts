@@ -453,6 +453,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const url = netboxUrl?.value || process.env.NETBOX_URL || "";
       const token = netboxToken?.value || process.env.NETBOX_TOKEN || "";
       
+      console.log("Test connection - URL from DB:", netboxUrl?.value, "URL used:", url);
+      
       if (!url) {
         return res.status(400).json({ message: "NetBox URL is not configured" });
       }

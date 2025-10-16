@@ -13,8 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { NetboxInventorySource } from "@shared/schema";
-import { insertNetboxInventorySourceSchema } from "@shared/schema";
+import type { NetboxInventorySource, NetboxVm } from "@shared/schema";
+import { insertNetboxInventorySourceSchema, insertNetboxVmSchema } from "@shared/schema";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const sourceFormSchema = insertNetboxInventorySourceSchema.extend({
   name: z.string().min(1, "Name is required"),
@@ -30,9 +31,16 @@ export default function NetBoxInventories() {
   const [editingSource, setEditingSource] = useState<NetboxInventorySource | null>(null);
   const [testingSource, setTestingSource] = useState<string | null>(null);
   const [testStatus, setTestStatus] = useState<Record<string, "success" | "error" | "idle">>({});
+  const [selectedVmIds, setSelectedVmIds] = useState<Set<string>>(new Set());
+  const [isVmDialogOpen, setIsVmDialogOpen] = useState(false);
+  const [editingVm, setEditingVm] = useState<NetboxVm | null>(null);
 
   const { data: sources = [], isLoading } = useQuery<NetboxInventorySource[]>({
     queryKey: ["/api/netbox-sources"],
+  });
+
+  const { data: vms = [], isLoading: vmsLoading } = useQuery<NetboxVm[]>({
+    queryKey: ["/api/netbox/vms"],
   });
 
   const form = useForm<SourceForm>({
@@ -354,6 +362,141 @@ export default function NetBoxInventories() {
           ))}
         </div>
       )}
+
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-semibold" data-testid="text-vms-title">Imported Virtual Machines</h2>
+            <p className="text-sm text-muted-foreground">
+              {vms.length} VM{vms.length !== 1 ? 's' : ''} imported
+              {selectedVmIds.size > 0 && ` (${selectedVmIds.size} selected)`}
+            </p>
+          </div>
+          {selectedVmIds.size > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedVmIds(new Set())}
+              data-testid="button-clear-selection"
+            >
+              Clear Selection
+            </Button>
+          )}
+        </div>
+
+        {vmsLoading ? (
+          <Card>
+            <CardContent className="py-6">
+              <div className="space-y-3">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="h-12 bg-muted animate-pulse rounded" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ) : vms.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No VMs imported yet. Import VMs from a NetBox source above.
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={selectedVmIds.size === vms.length && vms.length > 0}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedVmIds(new Set(vms.map(v => v.id)));
+                          } else {
+                            setSelectedVmIds(new Set());
+                          }
+                        }}
+                        data-testid="checkbox-select-all"
+                      />
+                    </TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>IP Address</TableHead>
+                    <TableHead>OS</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Tags</TableHead>
+                    <TableHead>Last Imported</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {vms.map((vm) => {
+                    const source = sources.find(s => s.id === vm.sourceId);
+                    return (
+                      <TableRow 
+                        key={vm.id} 
+                        data-testid={`row-vm-${vm.id}`}
+                        className={selectedVmIds.has(vm.id) ? "bg-muted/50" : ""}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedVmIds.has(vm.id)}
+                            onCheckedChange={(checked) => {
+                              const newSet = new Set(selectedVmIds);
+                              if (checked) {
+                                newSet.add(vm.id);
+                              } else {
+                                newSet.delete(vm.id);
+                              }
+                              setSelectedVmIds(newSet);
+                            }}
+                            data-testid={`checkbox-vm-${vm.id}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">{vm.name}</TableCell>
+                        <TableCell className="font-mono text-sm">{vm.ip || <span className="text-muted-foreground">-</span>}</TableCell>
+                        <TableCell>
+                          {vm.operatingSystem ? (
+                            <Badge variant="outline">{vm.operatingSystem}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {source ? (
+                            <Badge variant="secondary">{source.name}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">Unknown</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {vm.tags && vm.tags.length > 0 ? (
+                            <div className="flex gap-1 flex-wrap">
+                              {vm.tags.slice(0, 2).map((tag) => (
+                                <Badge key={tag} variant="outline" className="text-xs">
+                                  {tag}
+                                </Badge>
+                              ))}
+                              {vm.tags.length > 2 && (
+                                <Badge variant="outline" className="text-xs">
+                                  +{vm.tags.length - 2}
+                                </Badge>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(vm.lastImportedAt).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

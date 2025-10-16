@@ -301,6 +301,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         templateId: template.id,
         userId: req.userId!,
         status: "queued",
+        limitExpr: template.limitExpr || null,
       });
 
       // Start execution asynchronously
@@ -368,6 +369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: req.userId!,
         status: "queued",
         scheduledAt: new Date(scheduledAt),
+        limitExpr: template.limitExpr || null,
       });
 
       // In real app, would use a job queue like GoodJob

@@ -42,7 +42,7 @@ const menuItems = [
     icon: Server,
   },
   {
-    title: "NetBox Inventory",
+    title: "NetBox Inventories",
     url: "/netbox-inventory",
     icon: Database,
   },

@@ -1,7 +1,7 @@
 // Database storage implementation (from javascript_database blueprint)
 import { 
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
-  providerAccounts, syncRuns, externalObjects, groupCache, netboxVms,
+  providerAccounts, syncRuns, externalObjects, groupCache, netboxVms, netboxInventorySources,
   type User, type InsertUser,
   type Project, type InsertProject,
   type Credential, type InsertCredential,
@@ -14,6 +14,7 @@ import {
   type ExternalObject, type InsertExternalObject,
   type GroupCache, type InsertGroupCache,
   type NetboxVm, type InsertNetboxVm,
+  type NetboxInventorySource, type InsertNetboxInventorySource,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql } from "drizzle-orm";
@@ -85,6 +86,13 @@ export interface IStorage {
   getNetboxVm(id: string): Promise<NetboxVm | undefined>;
   upsertNetboxVm(vm: InsertNetboxVm): Promise<NetboxVm>;
   deleteAllNetboxVms(): Promise<void>;
+
+  // NetBox Inventory Source operations
+  getNetboxInventorySources(): Promise<NetboxInventorySource[]>;
+  getNetboxInventorySource(id: string): Promise<NetboxInventorySource | undefined>;
+  createNetboxInventorySource(source: InsertNetboxInventorySource): Promise<NetboxInventorySource>;
+  updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>): Promise<NetboxInventorySource | undefined>;
+  deleteNetboxInventorySource(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -442,14 +450,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertNetboxVm(vm: InsertNetboxVm): Promise<NetboxVm> {
-    const existing = await db.select().from(netboxVms).where(eq(netboxVms.netboxId, vm.netboxId));
+    // Check for existing VM by sourceId and netboxId
+    const existing = await db.select().from(netboxVms).where(
+      and(
+        eq(netboxVms.sourceId, vm.sourceId || ""),
+        eq(netboxVms.netboxId, vm.netboxId)
+      )
+    );
     
     if (existing.length > 0) {
       // Update existing VM
       const [updated] = await db
         .update(netboxVms)
         .set({ ...vm, lastImportedAt: new Date() })
-        .where(eq(netboxVms.netboxId, vm.netboxId))
+        .where(
+          and(
+            eq(netboxVms.sourceId, vm.sourceId || ""),
+            eq(netboxVms.netboxId, vm.netboxId)
+          )
+        )
         .returning();
       return updated;
     } else {
@@ -464,6 +483,37 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllNetboxVms(): Promise<void> {
     await db.delete(netboxVms);
+  }
+
+  // NetBox Inventory Source operations
+  async getNetboxInventorySources(): Promise<NetboxInventorySource[]> {
+    return await db.select().from(netboxInventorySources).orderBy(desc(netboxInventorySources.createdAt));
+  }
+
+  async getNetboxInventorySource(id: string): Promise<NetboxInventorySource | undefined> {
+    const [source] = await db.select().from(netboxInventorySources).where(eq(netboxInventorySources.id, id));
+    return source || undefined;
+  }
+
+  async createNetboxInventorySource(insertSource: InsertNetboxInventorySource): Promise<NetboxInventorySource> {
+    const [source] = await db
+      .insert(netboxInventorySources)
+      .values(insertSource)
+      .returning();
+    return source;
+  }
+
+  async updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>): Promise<NetboxInventorySource | undefined> {
+    const [updated] = await db
+      .update(netboxInventorySources)
+      .set(data)
+      .where(eq(netboxInventorySources.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteNetboxInventorySource(id: string): Promise<void> {
+    await db.delete(netboxInventorySources).where(eq(netboxInventorySources.id, id));
   }
 }
 

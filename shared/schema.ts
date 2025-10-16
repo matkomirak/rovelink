@@ -205,19 +205,45 @@ export const groupCache = pgTable("group_cache", {
 
 export const groupCacheRelations = relations(groupCache, () => ({}));
 
+// NetBox Inventory Sources (multiple NetBox instances)
+export const netboxInventorySources = pgTable("netbox_inventory_sources", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  token: text("token").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  lastImportAt: timestamp("last_import_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const netboxInventorySourcesRelations = relations(netboxInventorySources, ({ many }) => ({
+  vms: many(netboxVms),
+}));
+
 // NetBox VMs (imported from NetBox inventory)
 export const netboxVms = pgTable("netbox_vms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  netboxId: integer("netbox_id").notNull().unique(), // NetBox VM ID
+  sourceId: varchar("source_id").references(() => netboxInventorySources.id, { onDelete: "cascade" }), // Optional: which source imported this VM
+  netboxId: integer("netbox_id").notNull(), // NetBox VM ID
   name: text("name").notNull(),
   ip: text("ip"), // Primary IP address (nullable)
   operatingSystem: text("operating_system"), // Linux/Windows/Other
   customFields: jsonb("custom_fields").default({}), // All custom fields from NetBox
   tags: text("tags").array().default([]), // Array of tag names
   lastImportedAt: timestamp("last_imported_at").notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueSourceNetbox: {
+    columns: [table.sourceId, table.netboxId],
+    name: "unique_source_netbox"
+  },
+}));
 
-export const netboxVmsRelations = relations(netboxVms, () => ({}));
+export const netboxVmsRelations = relations(netboxVms, ({ one }) => ({
+  source: one(netboxInventorySources, {
+    fields: [netboxVms.sourceId],
+    references: [netboxInventorySources.id],
+  }),
+}));
 
 // Insert schemas for forms
 export const insertUserSchema = createInsertSchema(users).omit({
@@ -291,6 +317,12 @@ export const insertNetboxVmSchema = createInsertSchema(netboxVms).omit({
   lastImportedAt: true,
 });
 
+export const insertNetboxInventorySourceSchema = createInsertSchema(netboxInventorySources).omit({
+  id: true,
+  createdAt: true,
+  lastImportAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -327,3 +359,6 @@ export type GroupCache = typeof groupCache.$inferSelect;
 
 export type InsertNetboxVm = z.infer<typeof insertNetboxVmSchema>;
 export type NetboxVm = typeof netboxVms.$inferSelect;
+
+export type InsertNetboxInventorySource = z.infer<typeof insertNetboxInventorySourceSchema>;
+export type NetboxInventorySource = typeof netboxInventorySources.$inferSelect;

@@ -8,7 +8,9 @@ import { storage } from "./storage";
 import { netboxService } from "./services/netbox";
 import { fakeRunner } from "./services/fake-runner";
 import { notificationService } from "./services/notificationService";
-import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema } from "@shared/schema";
+import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, netboxVms } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 
@@ -718,26 +720,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // NetBox VM import routes
   app.post("/api/netbox/import", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
+      const { sourceId } = req.body;
+      
+      if (!sourceId) {
+        return res.status(400).json({ message: "Source ID is required" });
+      }
+
       const { netboxService } = await import("./services/netbox");
       
-      // Get NetBox credentials from settings
-      const urlSetting = await storage.getSetting("netbox_url");
-      const tokenSetting = await storage.getSetting("netbox_token");
+      // Get NetBox source
+      const source = await storage.getNetboxInventorySource(sourceId);
+      
+      if (!source) {
+        return res.status(404).json({ message: "NetBox source not found" });
+      }
 
-      if (!urlSetting || !tokenSetting) {
-        return res.status(400).json({ message: "NetBox credentials not configured. Please configure in Settings." });
+      if (!source.enabled) {
+        return res.status(400).json({ message: "NetBox source is disabled" });
       }
 
       // Fetch VMs from NetBox
-      const vms = await netboxService.getVirtualMachines(urlSetting.value, tokenSetting.value);
+      const vms = await netboxService.getVirtualMachines(source.url, source.token);
       
-      // Clear existing VMs (full replacement)
-      await storage.deleteAllNetboxVms();
+      // Clear existing VMs from this source
+      await db.delete(netboxVms).where(eq(netboxVms.sourceId, sourceId));
       
-      // Import all VMs
+      // Import all VMs with sourceId
       let imported = 0;
       for (const vm of vms) {
         await storage.upsertNetboxVm({
+          sourceId: sourceId,
           netboxId: vm.id,
           name: vm.name,
           ip: vm.ip || null,
@@ -748,8 +760,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imported++;
       }
 
+      // Update last import timestamp
+      await storage.updateNetboxInventorySource(sourceId, { lastImportAt: new Date() });
+
       res.json({ 
-        message: `Successfully imported ${imported} VMs from NetBox`, 
+        message: `Successfully imported ${imported} VMs from ${source.name}`, 
         count: imported 
       });
     } catch (error: any) {
@@ -764,6 +779,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(vms);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get NetBox VMs" });
+    }
+  });
+
+  // NetBox Inventory Source routes
+  app.get("/api/netbox-sources", authMiddleware, async (req, res) => {
+    try {
+      const sources = await storage.getNetboxInventorySources();
+      res.json(sources);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get NetBox inventory sources" });
+    }
+  });
+
+  app.get("/api/netbox-sources/:id", authMiddleware, async (req, res) => {
+    try {
+      const source = await storage.getNetboxInventorySource(req.params.id);
+      if (!source) {
+        return res.status(404).json({ message: "NetBox inventory source not found" });
+      }
+      res.json(source);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get NetBox inventory source" });
+    }
+  });
+
+  app.post("/api/netbox-sources", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const insertSource = insertNetboxInventorySourceSchema.parse(req.body);
+      const source = await storage.createNetboxInventorySource(insertSource);
+      res.status(201).json(source);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message || "Failed to create NetBox inventory source" });
+    }
+  });
+
+  app.patch("/api/netbox-sources/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const source = await storage.updateNetboxInventorySource(req.params.id, req.body);
+      if (!source) {
+        return res.status(404).json({ message: "NetBox inventory source not found" });
+      }
+      res.json(source);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message || "Failed to update NetBox inventory source" });
+    }
+  });
+
+  app.delete("/api/netbox-sources/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      await storage.deleteNetboxInventorySource(req.params.id);
+      res.status(204).send();
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to delete NetBox inventory source" });
     }
   });
 

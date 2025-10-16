@@ -1,12 +1,13 @@
 // Database storage implementation (from javascript_database blueprint)
 import { 
-  users, projects, credentials, jobTemplates, jobRuns, settings,
+  users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
   type User, type InsertUser,
   type Project, type InsertProject,
   type Credential, type InsertCredential,
   type JobTemplate, type InsertJobTemplate,
   type JobRun, type InsertJobRun,
   type Setting, type InsertSetting,
+  type Notification, type InsertNotification,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte } from "drizzle-orm";
@@ -46,6 +47,13 @@ export interface IStorage {
   getSetting(key: string): Promise<Setting | undefined>;
   setSetting(key: string, value: string): Promise<Setting>;
   getAllSettings(): Promise<Setting[]>;
+
+  // Notification operations
+  getNotifications(): Promise<Notification[]>;
+  getNotification(id: string): Promise<Notification | undefined>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  updateNotification(id: string, data: Partial<Notification>): Promise<Notification | undefined>;
+  deleteNotification(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -212,6 +220,37 @@ export class DatabaseStorage implements IStorage {
 
   async getAllSettings(): Promise<Setting[]> {
     return await db.select().from(settings);
+  }
+
+  // Notification operations
+  async getNotifications(): Promise<Notification[]> {
+    return await db.select().from(notifications).orderBy(desc(notifications.createdAt));
+  }
+
+  async getNotification(id: string): Promise<Notification | undefined> {
+    const [notification] = await db.select().from(notifications).where(eq(notifications.id, id));
+    return notification || undefined;
+  }
+
+  async createNotification(insertNotification: InsertNotification): Promise<Notification> {
+    const [notification] = await db
+      .insert(notifications)
+      .values(insertNotification)
+      .returning();
+    return notification;
+  }
+
+  async updateNotification(id: string, data: Partial<Notification>): Promise<Notification | undefined> {
+    const [updated] = await db
+      .update(notifications)
+      .set(data)
+      .where(eq(notifications.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteNotification(id: string): Promise<void> {
+    await db.delete(notifications).where(eq(notifications.id, id));
   }
 }
 

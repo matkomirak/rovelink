@@ -19,6 +19,7 @@ import RunDetail from "@/pages/run-detail";
 import RunComparison from "@/pages/run-comparison";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
+import Notifications from "@/pages/notifications";
 import type { User } from "@shared/schema";
 
 function AuthenticatedRouter() {
@@ -33,6 +34,7 @@ function AuthenticatedRouter() {
       <Route path="/runs/:id" component={RunDetail} />
       <Route path="/compare" component={RunComparison} />
       <Route path="/reports" component={Reports} />
+      <Route path="/notifications" component={Notifications} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>

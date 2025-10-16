@@ -7,6 +7,7 @@ import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { netboxService } from "./services/netbox";
 import { fakeRunner } from "./services/fake-runner";
+import { notificationService } from "./services/notificationService";
 import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema } from "@shared/schema";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
@@ -260,17 +261,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           });
 
-          await storage.updateJobRun(run.id, {
+          const updatedRun = await storage.updateJobRun(run.id, {
             status: result.status,
             completedAt: new Date(),
             logs: result.logs,
             resultSummary: result.summary,
           });
+
+          // Trigger notifications
+          if (updatedRun) {
+            await notificationService.triggerNotifications(updatedRun);
+          }
         } catch (error) {
-          await storage.updateJobRun(run.id, {
+          const failedRun = await storage.updateJobRun(run.id, {
             status: "failed",
             completedAt: new Date(),
           });
+
+          // Trigger notifications for failure
+          if (failedRun) {
+            await notificationService.triggerNotifications(failedRun);
+          }
         }
       });
 
@@ -444,6 +455,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Connection test failed" });
+    }
+  });
+
+  // Notification routes
+  app.get("/api/notifications", authMiddleware, async (req, res) => {
+    try {
+      const notifications = await storage.getNotifications();
+      res.json(notifications);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to fetch notifications" });
+    }
+  });
+
+  app.post("/api/notifications", authMiddleware, async (req, res) => {
+    try {
+      const notification = await storage.createNotification(req.body);
+      res.json(notification);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to create notification" });
+    }
+  });
+
+  app.patch("/api/notifications/:id", authMiddleware, async (req, res) => {
+    try {
+      const notification = await storage.updateNotification(req.params.id, req.body);
+      if (!notification) {
+        return res.status(404).json({ message: "Notification not found" });
+      }
+      res.json(notification);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to update notification" });
+    }
+  });
+
+  app.delete("/api/notifications/:id", authMiddleware, async (req, res) => {
+    try {
+      await storage.deleteNotification(req.params.id);
+      res.json({ message: "Notification deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to delete notification" });
     }
   });
 

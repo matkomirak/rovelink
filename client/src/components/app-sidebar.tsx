@@ -8,6 +8,7 @@ import {
   FileText,
   PlayCircle,
   BarChart3,
+  Bell,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -62,6 +63,11 @@ const menuItems = [
     title: "Reports",
     url: "/reports",
     icon: BarChart3,
+  },
+  {
+    title: "Notifications",
+    url: "/notifications",
+    icon: Bell,
   },
   {
     title: "Settings",

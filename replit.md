@@ -18,7 +18,8 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - **projects**: Git repositories with Ansible playbooks
 - **credentials**: Mock credential references (no real secrets stored)
 - **jobTemplates**: Job configuration with playbook, limits, extra vars
-- **jobRuns**: Execution history with logs and results
+- **jobRuns**: Execution history with logs, results, and archive status
+- **notifications**: Email/webhook configurations with trigger conditions
 - **settings**: Key-value configuration storage
 
 ## Features Implemented
@@ -67,6 +68,15 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - Run Statistics: success rate, total counts, recent failures
 - Visual metrics with progress bars and status indicators
 
+### Notifications
+- Configurable email and webhook notifications
+- Trigger conditions: on success, on failure, specific templates
+- Email templates with variable interpolation ({{run.id}}, {{run.status}}, etc.)
+- Webhook delivery with retry logic and exponential backoff
+- Enable/disable toggle for each notification
+- Mock email sender (console logging for MVP)
+- Real webhook delivery with custom headers and body
+
 ### Settings
 - NetBox URL and token configuration
 - Connection test capability
@@ -100,8 +110,10 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - `POST /api/templates/:id/schedule` - Schedule future run
 
 ### Runs
-- `GET /api/runs` - List all job runs
+- `GET /api/runs` - List all job runs with filters (status, archived, date range)
 - `GET /api/runs/:id` - Get run details
+- `POST /api/runs/:id/archive` - Archive a run
+- `POST /api/runs/:id/unarchive` - Unarchive a run
 - `GET /api/runs/:id/csv` - Download run results as CSV
 - `WS /ws/runs/:id` - WebSocket stream for live logs
 
@@ -112,6 +124,12 @@ Bridge is a full-stack infrastructure automation UI that integrates with NetBox 
 - `GET /api/settings` - Get configuration
 - `POST /api/settings` - Update configuration
 - `POST /api/settings/test-connection` - Test NetBox connectivity
+
+### Notifications
+- `GET /api/notifications` - List all notification configurations
+- `POST /api/notifications` - Create new notification
+- `PATCH /api/notifications/:id` - Update notification
+- `DELETE /api/notifications/:id` - Delete notification
 
 ## Environment Variables
 
@@ -182,13 +200,13 @@ shared/
 
 ## Next Steps (Post-MVP)
 - Implement real Git sync using simple-git library
-- Add limit expression autocomplete
-- JSON Schema validation for extra_vars
-- Run comparison view
-- Configurable notifications (email/webhook)
-- Advanced scheduling with persistent job queue
-- Multi-tenancy support
-- Audit logging
+- Advanced scheduling with persistent job queue (e.g., BullMQ, GoodJob)
+- Real email delivery via SMTP (nodemailer integration)
+- Multi-tenancy support with organization scoping
+- Audit logging for all CRUD operations
+- Role-based permission enforcement on API routes
+- Advanced notification features (Slack, PagerDuty integrations)
+- Template versioning and rollback capability
 
 ## Recent Changes
 - 2025-01-16: Initial MVP implementation completed
@@ -198,3 +216,12 @@ shared/
   - FakeRunner with real-time WebSocket log streaming
   - Reports dashboard with inventory health metrics
   - Dark-first UI with professional design system
+  
+- 2025-01-16: Advanced features implementation
+  - Limit expression autocomplete with real-time host suggestions
+  - JSON Schema validation for extra_vars with inline error display
+  - Run comparison view with side-by-side diff analysis
+  - Run archival system with advanced filtering (status, date range, archived state)
+  - Configurable notifications (email/webhook) with retry logic
+  - Variable interpolation in notification templates
+  - Automatic notification triggering on run completion/failure

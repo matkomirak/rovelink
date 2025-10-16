@@ -108,6 +108,31 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Notification Configurations
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: text("type").notNull(), // "email" or "webhook"
+  enabled: boolean("enabled").notNull().default(true),
+  // Trigger conditions
+  onSuccess: boolean("on_success").notNull().default(false),
+  onFailure: boolean("on_failure").notNull().default(true),
+  templateIds: text("template_ids").array(), // null = all templates
+  // Email specific
+  emailTo: text("email_to"),
+  emailSubject: text("email_subject"),
+  emailBody: text("email_body"),
+  // Webhook specific
+  webhookUrl: text("webhook_url"),
+  webhookMethod: text("webhook_method").default("POST"),
+  webhookHeaders: jsonb("webhook_headers"),
+  webhookBody: text("webhook_body"),
+  webhookRetryCount: integer("webhook_retry_count").default(3),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const notificationRelations = relations(notifications, () => ({}));
+
 // Insert schemas for forms
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -147,6 +172,11 @@ export const insertSettingSchema = createInsertSchema(settings).omit({
   updatedAt: true,
 });
 
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -165,3 +195,6 @@ export type JobRun = typeof jobRuns.$inferSelect;
 
 export type InsertSetting = z.infer<typeof insertSettingSchema>;
 export type Setting = typeof settings.$inferSelect;
+
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;

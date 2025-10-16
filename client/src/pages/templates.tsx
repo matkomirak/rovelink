@@ -16,11 +16,19 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { insertJobTemplateSchema, type JobTemplate, type InsertJobTemplate, type Project, type Credential } from "@shared/schema";
 
+const COMMON_VAR_TEMPLATES = [
+  { name: "Basic Variables", value: '{\n  "env": "production",\n  "version": "1.0.0"\n}' },
+  { name: "Database Config", value: '{\n  "db_host": "localhost",\n  "db_port": 5432,\n  "db_name": "myapp"\n}' },
+  { name: "Deploy Config", value: '{\n  "deploy_user": "deploy",\n  "deploy_path": "/var/www/app",\n  "restart_service": true\n}' },
+];
+
 export default function Templates() {
   const [open, setOpen] = useState(false);
   const [limitExpr, setLimitExpr] = useState("");
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
+  const [extraVarsText, setExtraVarsText] = useState('{}');
+  const [jsonError, setJsonError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -363,24 +371,73 @@ export default function Templates() {
                   name="extraVars"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Extra Variables (JSON)</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          {...field}
-                          value={typeof field.value === 'string' ? field.value : JSON.stringify(field.value, null, 2)}
-                          onChange={(e) => {
-                            try {
-                              const parsed = JSON.parse(e.target.value);
-                              field.onChange(parsed);
-                            } catch {
-                              field.onChange(e.target.value);
+                      <div className="flex items-center justify-between">
+                        <FormLabel>Extra Variables (JSON)</FormLabel>
+                        <Select
+                          onValueChange={(value) => {
+                            const template = COMMON_VAR_TEMPLATES.find(t => t.name === value);
+                            if (template) {
+                              setExtraVarsText(template.value);
+                              try {
+                                const parsed = JSON.parse(template.value);
+                                field.onChange(parsed);
+                                setJsonError(null);
+                              } catch (e: any) {
+                                setJsonError(e.message);
+                              }
                             }
                           }}
-                          placeholder='{"env": "production"}'
-                          className="font-mono text-sm"
-                          data-testid="input-extra-vars"
-                        />
+                        >
+                          <SelectTrigger className="w-48 h-8" data-testid="select-var-template">
+                            <SelectValue placeholder="Load template..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {COMMON_VAR_TEMPLATES.map((template) => (
+                              <SelectItem key={template.name} value={template.name}>
+                                {template.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <FormControl>
+                        <div className="relative">
+                          <Textarea
+                            value={extraVarsText}
+                            onChange={(e) => {
+                              setExtraVarsText(e.target.value);
+                              try {
+                                const parsed = JSON.parse(e.target.value);
+                                field.onChange(parsed);
+                                setJsonError(null);
+                              } catch (e: any) {
+                                field.onChange(e.target.value);
+                                setJsonError(e.message);
+                              }
+                            }}
+                            placeholder='{"env": "production"}'
+                            className={`font-mono text-sm min-h-32 ${jsonError ? 'border-destructive' : ''}`}
+                            data-testid="input-extra-vars"
+                          />
+                          {!jsonError && extraVarsText !== '{}' && (
+                            <div className="absolute right-2 top-2">
+                              <Check className="h-4 w-4 text-green-500" />
+                            </div>
+                          )}
+                          {jsonError && (
+                            <div className="absolute right-2 top-2">
+                              <X className="h-4 w-4 text-destructive" />
+                            </div>
+                          )}
+                        </div>
                       </FormControl>
+                      {jsonError ? (
+                        <p className="text-sm text-destructive">{jsonError}</p>
+                      ) : (
+                        <FormDescription>
+                          Key-value pairs passed to playbook. Must be valid JSON.
+                        </FormDescription>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, Plus, Play, Calendar, Loader2, AlertTriangle } from "lucide-react";
+import { FileText, Plus, Play, Calendar, Loader2, AlertTriangle, Check, X } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { insertJobTemplateSchema, type JobTemplate, type InsertJobTemplate, type Project, type Credential } from "@shared/schema";
@@ -19,6 +19,9 @@ import { insertJobTemplateSchema, type JobTemplate, type InsertJobTemplate, type
 export default function Templates() {
   const [open, setOpen] = useState(false);
   const [limitExpr, setLimitExpr] = useState("");
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const { data: templates, isLoading } = useQuery<JobTemplate[]>({
@@ -37,6 +40,86 @@ export default function Templates() {
     queryKey: ["/api/inventory/preflight", limitExpr],
     enabled: limitExpr.length > 2,
   });
+
+  const [autocompleteQuery, setAutocompleteQuery] = useState("");
+  const { data: suggestions } = useQuery<string[]>({
+    queryKey: ["/api/inventory/suggest", autocompleteQuery],
+    enabled: autocompleteQuery.length >= 2,
+  });
+
+  const getWordAtCursor = (text: string, position: number) => {
+    const before = text.substring(0, position);
+    const after = text.substring(position);
+    const wordBefore = before.match(/[a-zA-Z0-9_-]*$/)?.[0] || "";
+    const wordAfter = after.match(/^[a-zA-Z0-9_-]*/)?.[0] || "";
+    const start = position - wordBefore.length;
+    return { word: wordBefore + wordAfter, start, end: position + wordAfter.length };
+  };
+
+  const handleLimitExprChange = (value: string, position: number) => {
+    setLimitExpr(value);
+    setCursorPosition(position);
+    
+    const { word } = getWordAtCursor(value, position);
+    if (word.length >= 2) {
+      setAutocompleteQuery(word);
+      setShowAutocomplete(true);
+    } else {
+      setShowAutocomplete(false);
+    }
+  };
+
+  const handleSelectSuggestion = (suggestion: string, field: any) => {
+    if (!inputRef.current) return;
+    
+    const { start, end } = getWordAtCursor(limitExpr, cursorPosition);
+    const before = limitExpr.substring(0, start);
+    const after = limitExpr.substring(end);
+    const newValue = before + suggestion + after;
+    
+    field.onChange({ target: { value: newValue } });
+    setLimitExpr(newValue);
+    setShowAutocomplete(false);
+    
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(start + suggestion.length, start + suggestion.length);
+      }
+    }, 0);
+  };
+
+  // Syntax validation
+  const validateLimitSyntax = (expr: string): { valid: boolean; error?: string } => {
+    if (!expr) return { valid: true };
+    
+    // Check for unmatched operators
+    const openParens = (expr.match(/\(/g) || []).length;
+    const closeParens = (expr.match(/\)/g) || []).length;
+    if (openParens !== closeParens) {
+      return { valid: false, error: "Unmatched parentheses" };
+    }
+    
+    // Check for invalid characters
+    if (!/^[a-zA-Z0-9_\-:&|!() ]*$/.test(expr)) {
+      return { valid: false, error: "Invalid characters in expression" };
+    }
+    
+    // Check for double operators
+    if (/[:&|!]{2,}/.test(expr)) {
+      return { valid: false, error: "Invalid operator sequence" };
+    }
+    
+    return { valid: true };
+  };
+
+  const syntaxCheck = validateLimitSyntax(limitExpr);
+
+  useEffect(() => {
+    const handleClickOutside = () => setShowAutocomplete(false);
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   const form = useForm<InsertJobTemplate>({
     resolver: zodResolver(insertJobTemplateSchema),
@@ -199,18 +282,61 @@ export default function Templates() {
                     <FormItem>
                       <FormLabel>Limit Expression</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          placeholder="tag_customer_x:&tag_os_linux"
-                          className="font-mono"
-                          data-testid="input-limit-expr"
-                          onChange={(e) => {
-                            field.onChange(e);
-                            setLimitExpr(e.target.value);
-                          }}
-                        />
+                        <div className="relative">
+                          <Input
+                            {...field}
+                            ref={inputRef}
+                            placeholder="tag_customer_x:&tag_os_linux"
+                            className={`font-mono ${!syntaxCheck.valid ? 'border-destructive' : ''}`}
+                            data-testid="input-limit-expr"
+                            onChange={(e) => {
+                              field.onChange(e);
+                              handleLimitExprChange(e.target.value, e.target.selectionStart || 0);
+                            }}
+                            onClick={(e) => {
+                              const target = e.target as HTMLInputElement;
+                              handleLimitExprChange(field.value || "", target.selectionStart || 0);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') {
+                                setShowAutocomplete(false);
+                              }
+                            }}
+                          />
+                          {!syntaxCheck.valid && (
+                            <div className="absolute right-2 top-2.5">
+                              <X className="h-4 w-4 text-destructive" />
+                            </div>
+                          )}
+                          {syntaxCheck.valid && limitExpr && (
+                            <div className="absolute right-2 top-2.5">
+                              <Check className="h-4 w-4 text-green-500" />
+                            </div>
+                          )}
+                          {showAutocomplete && suggestions && suggestions.length > 0 && (
+                            <div 
+                              className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-auto"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {suggestions.map((suggestion, i) => (
+                                <div
+                                  key={i}
+                                  className="px-3 py-2 hover-elevate cursor-pointer text-sm font-mono"
+                                  onClick={() => handleSelectSuggestion(suggestion, field)}
+                                  data-testid={`suggestion-${i}`}
+                                >
+                                  {suggestion}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </FormControl>
-                      <FormDescription>Pattern to select hosts</FormDescription>
+                      {!syntaxCheck.valid ? (
+                        <p className="text-sm text-destructive">{syntaxCheck.error}</p>
+                      ) : (
+                        <FormDescription>Pattern to select hosts (use :, &, |, ! for logic)</FormDescription>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}

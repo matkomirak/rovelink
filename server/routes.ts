@@ -127,6 +127,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/inventory/suggest", authMiddleware, async (req, res) => {
+    try {
+      const query = req.query.q as string || "";
+      const suggestions = await netboxService.getSuggestions(query);
+      res.json(suggestions);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get suggestions" });
+    }
+  });
+
   // Projects routes
   app.get("/api/projects", authMiddleware, async (req, res) => {
     try {

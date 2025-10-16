@@ -134,6 +134,44 @@ export class NetBoxService {
       throw new Error("Preflight validation failed");
     }
   }
+
+  async getSuggestions(query: string): Promise<string[]> {
+    try {
+      // Mock suggestions based on common NetBox tags and groups
+      const allSuggestions = [
+        "tag_production",
+        "tag_staging",
+        "tag_development",
+        "tag_customer_x",
+        "tag_customer_y",
+        "tag_nginx",
+        "tag_postgresql",
+        "tag_redis",
+        "tag_os_linux",
+        "tag_os_windows",
+        "web-servers",
+        "db-servers",
+        "app-servers",
+        "monitoring",
+        "wave1",
+        "wave2",
+        "wave3",
+        "subwave_A",
+        "subwave_B",
+      ];
+
+      if (!query || query.length < 2) {
+        return [];
+      }
+
+      return allSuggestions
+        .filter(s => s.toLowerCase().includes(query.toLowerCase()))
+        .slice(0, 10);
+    } catch (error) {
+      console.error("Failed to get suggestions:", error);
+      return [];
+    }
+  }
 }
 
 export const netboxService = new NetBoxService();

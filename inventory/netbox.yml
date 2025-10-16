@@ -1,0 +1,28 @@
+plugin: netbox.netbox.nb_inventory
+api_endpoint: "{{ lookup('env','NETBOX_URL') }}/api/"
+token: "{{ lookup('env','NETBOX_TOKEN') }}"
+validate_certs: true
+
+# Expose key values as host vars (handles both a flat CF and nested JSON CF)
+compose:
+  patch_wave: >-
+    {{ custom_fields.patch_wave
+       | default(custom_fields.Patching.Wave, true) }}
+  customer: "{{ tenant.name | default('') }}"
+  os: "{{ platform.slug | default('') }}"
+  role: "{{ device_role.slug | default('') }}"
+
+# Turn those host vars into inventory groups
+keyed_groups:
+  - key: patch_wave
+    prefix: wave
+    separator: "_"
+  - key: customer
+    prefix: customer
+    separator: "_"
+  - key: os
+    prefix: os
+    separator: "_"
+  - key: role
+    prefix: role
+    separator: "_"

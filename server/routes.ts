@@ -661,7 +661,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/housekeeping/rebuild-groups-cache", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const { netboxService } = await import("./services/netbox");
-      const groups = await netboxService.listAllGroups();
+      const groups = await netboxService.listAllGroups(storage);
       
       await storage.clearGroupCache();
       for (const group of groups) {

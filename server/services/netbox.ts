@@ -238,10 +238,66 @@ export class NetBoxService {
     }
   }
 
-  async listAllGroups(): Promise<Array<{ kind: string; name: string }>> {
+  async listAllGroups(storage?: any): Promise<Array<{ kind: string; name: string }>> {
     try {
-      // Mock fetching all group types for cache
-      return [
+      const groups: Array<{ kind: string; name: string }> = [];
+      
+      // If storage is provided, generate keyed groups from imported VMs
+      if (storage) {
+        const vms = await storage.getNetboxVms();
+        const waveSet = new Set<string>();
+        const customerSet = new Set<string>();
+        const osSet = new Set<string>();
+        const roleSet = new Set<string>();
+        
+        // Extract unique values from VMs
+        vms.forEach((vm: any) => {
+          const customFields = vm.customFields || {};
+          
+          // Extract patch_wave (supports both flat and nested)
+          const patchWave = customFields.patch_wave || customFields.Patching?.Wave;
+          if (patchWave && typeof patchWave === 'string' && patchWave.trim() !== '') {
+            waveSet.add(patchWave);
+          }
+          
+          // Extract customer from tags (looking for customer_* pattern)
+          if (vm.tags && Array.isArray(vm.tags)) {
+            vm.tags.forEach((tag: string) => {
+              if (tag && typeof tag === 'string' && tag.trim() !== '') {
+                customerSet.add(tag);
+              }
+            });
+          }
+          
+          // Extract OS
+          if (vm.operatingSystem && vm.operatingSystem.trim() !== '' && vm.operatingSystem !== 'Unknown') {
+            osSet.add(vm.operatingSystem.toLowerCase().replace(/\s+/g, '_'));
+          }
+          
+          // Extract role from custom fields
+          const role = customFields.role || customFields.device_role;
+          if (role && typeof role === 'string' && role.trim() !== '') {
+            roleSet.add(role.toLowerCase().replace(/\s+/g, '_'));
+          }
+        });
+        
+        // Convert sets to groups with prefixes
+        waveSet.forEach(wave => {
+          groups.push({ kind: 'keyed_group', name: `wave_${wave}` });
+        });
+        customerSet.forEach(customer => {
+          groups.push({ kind: 'keyed_group', name: `customer_${customer}` });
+        });
+        osSet.forEach(os => {
+          groups.push({ kind: 'keyed_group', name: `os_${os}` });
+        });
+        roleSet.forEach(role => {
+          groups.push({ kind: 'keyed_group', name: `role_${role}` });
+        });
+      }
+      
+      // Also include traditional groups (sites, tags, device roles, tenants)
+      groups.push(
         { kind: "site", name: "DC1" },
         { kind: "site", name: "DC2" },
         { kind: "tag", name: "production" },
@@ -249,8 +305,10 @@ export class NetBoxService {
         { kind: "device_role", name: "web-server" },
         { kind: "device_role", name: "db-server" },
         { kind: "tenant", name: "Customer A" },
-        { kind: "tenant", name: "Customer B" },
-      ];
+        { kind: "tenant", name: "Customer B" }
+      );
+      
+      return groups;
     } catch (error) {
       console.error("Failed to list all groups:", error);
       throw error;

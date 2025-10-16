@@ -1,0 +1,88 @@
+Here’s what to give your Replit dev to implement **Option A (keyed_groups in NetBox inventory)**.
+
+---
+
+# Implement Option A: key–value → groups via NetBox inventory
+
+## 1) Add/replace the runner inventory file
+
+Create `inventory/netbox.yml` (used by the runner) with:
+
+```yaml
+plugin: netbox.netbox.nb_inventory
+api_endpoint: "{{ lookup('env','NETBOX_URL') }}/api/"
+token: "{{ lookup('env','NETBOX_TOKEN') }}"
+validate_certs: true
+
+# Expose key values as host vars (handles both a flat CF and nested JSON CF)
+compose:
+  patch_wave: >-
+    {{ custom_fields.patch_wave
+       | default(custom_fields.Patching.Wave, true) }}
+  customer: "{{ tenant.name | default('') }}"
+  os: "{{ platform.slug | default('') }}"
+  role: "{{ device_role.slug | default('') }}"
+
+# Turn those host vars into inventory groups
+keyed_groups:
+  - key: patch_wave
+    prefix: wave
+    separator: "_"
+  - key: customer
+    prefix: customer
+    separator: "_"
+  - key: os
+    prefix: os
+    separator: "_"
+  - key: role
+    prefix: role
+    separator: "_"
+```
+
+Notes:
+
+* **Do not** hardcode URLs/tokens; we read them from env.
+* This creates groups like `wave_Wave2`, `customer_Alpha`, `os_linux`, `role_db`.
+
+## 2) Ensure the runner uses this file
+
+Wherever the FakeRunner/LocalRunner builds the command, it must use:
+
+```
+-i inventory/netbox.yml
+```
+
+(Keep everything else the same.)
+
+## 3) Update preflight + autocomplete expectations
+
+* Preflight and the Limit Expression validator should recognize the new group naming:
+
+  * `wave_*`, `customer_*`, `os_*`, `role_*`
+* Housekeeping → **Rebuild Group Cache** should refresh from this inventory source (parse `ansible-inventory --graph -i inventory/netbox.yml` or reuse our backend reader to compute the same group names).
+
+## 4) UI guidance (placeholder text under Limit Expression)
+
+Show examples:
+
+```
+customer_Alpha & os_linux & wave_Wave2 - role_db
+```
+
+## 5) Acceptance tests
+
+* Given a VM with CFs like `Patching.Wave=Wave2`, tenant “Alpha”, platform “linux”, device role “db”:
+
+  * The inventory produces groups: `wave_Wave2`, `customer_Alpha`, `os_linux`, `role_db`.
+* Preflight for:
+
+  * `customer_Alpha & os_linux` → includes the VM.
+  * `customer_Alpha & os_linux & wave_Wave2 - role_db` → excludes it.
+* Autocomplete suggests `wave_Wave2` after **Rebuild Group Cache**.
+
+## 6) Edge cases
+
+* If a value is missing, the group isn’t created (that’s fine).
+* If your OS isn’t in `platform.slug`, change `compose.os` to the correct CF path (e.g., `custom_fields.os`).
+
+That’s it—once this is in, you can target **key–value pairs as groups** directly in the template limits.

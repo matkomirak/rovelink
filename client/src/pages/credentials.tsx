@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Key, Plus, Loader2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Key, Plus, Loader2, Pencil, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { insertCredentialSchema, type Credential, type InsertCredential } from "@shared/schema";
@@ -23,6 +24,9 @@ const credentialKinds = [
 
 export default function Credentials() {
   const [open, setOpen] = useState(false);
+  const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [credentialToDelete, setCredentialToDelete] = useState<Credential | null>(null);
   const { toast } = useToast();
 
   const { data: credentials, isLoading } = useQuery<Credential[]>({
@@ -31,7 +35,12 @@ export default function Credentials() {
 
   const form = useForm<InsertCredential>({
     resolver: zodResolver(insertCredentialSchema),
-    defaultValues: {
+    defaultValues: editingCredential ? {
+      name: editingCredential.name,
+      kind: editingCredential.kind,
+      metadata: editingCredential.metadata || {},
+      secretRef: editingCredential.secretRef || "",
+    } : {
       name: "",
       kind: "ssh_key",
       metadata: {},
@@ -44,13 +53,68 @@ export default function Credentials() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/credentials"] });
       toast({ title: "Credential created successfully" });
-      setOpen(false);
-      form.reset();
+      handleCloseDialog();
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Failed to create credential", description: error.message });
     },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertCredential> }) => 
+      apiRequest("PATCH", `/api/credentials/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/credentials"] });
+      toast({ title: "Credential updated successfully" });
+      handleCloseDialog();
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to update credential", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/credentials/${id}`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/credentials"] });
+      toast({ title: "Credential deleted successfully" });
+      setDeleteDialogOpen(false);
+      setCredentialToDelete(null);
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to delete credential", description: error.message });
+    },
+  });
+
+  const handleCloseDialog = () => {
+    setOpen(false);
+    setEditingCredential(null);
+    form.reset();
+  };
+
+  const handleEdit = (credential: Credential) => {
+    setEditingCredential(credential);
+    form.reset({
+      name: credential.name,
+      kind: credential.kind,
+      metadata: credential.metadata || {},
+      secretRef: credential.secretRef || "",
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = (credential: Credential) => {
+    setCredentialToDelete(credential);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleSubmit = (data: InsertCredential) => {
+    if (editingCredential) {
+      updateMutation.mutate({ id: editingCredential.id, data });
+    } else {
+      createMutation.mutate(data);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -59,7 +123,7 @@ export default function Credentials() {
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Credentials</h1>
           <p className="text-sm text-muted-foreground">Manage authentication credentials (references only)</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={handleCloseDialog}>
           <DialogTrigger asChild>
             <Button data-testid="button-create-credential">
               <Plus className="h-4 w-4 mr-2" />
@@ -68,10 +132,10 @@ export default function Credentials() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create Credential</DialogTitle>
+              <DialogTitle>{editingCredential ? "Edit Credential" : "Create Credential"}</DialogTitle>
             </DialogHeader>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit((data) => createMutation.mutate(data))} className="space-y-4">
+              <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
                 <FormField
                   control={form.control}
                   name="name"
@@ -128,9 +192,14 @@ export default function Credentials() {
                     </FormItem>
                   )}
                 />
-                <Button type="submit" className="w-full" disabled={createMutation.isPending} data-testid="button-submit">
-                  {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create Credential
+                <Button 
+                  type="submit" 
+                  className="w-full" 
+                  disabled={createMutation.isPending || updateMutation.isPending} 
+                  data-testid="button-submit"
+                >
+                  {(createMutation.isPending || updateMutation.isPending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {editingCredential ? "Update Credential" : "Create Credential"}
                 </Button>
               </form>
             </Form>
@@ -166,12 +235,32 @@ export default function Credentials() {
                   </Badge>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Secret Reference</p>
                   <p className="text-sm font-mono truncate">
                     {cred.secretRef || <span className="text-muted-foreground">Not configured</span>}
                   </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => handleEdit(cred)}
+                    data-testid={`button-edit-${cred.id}`}
+                  >
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDelete(cred)}
+                    data-testid={`button-delete-${cred.id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -190,6 +279,29 @@ export default function Credentials() {
           </CardContent>
         </Card>
       )}
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Credential</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{credentialToDelete?.name}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => credentialToDelete && deleteMutation.mutate(credentialToDelete.id)}
+              disabled={deleteMutation.isPending}
+              data-testid="button-confirm-delete"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

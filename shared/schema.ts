@@ -85,6 +85,7 @@ export const jobRuns = pgTable("job_runs", {
   scheduledAt: timestamp("scheduled_at"),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
+  limitExpr: text("limit_expr"), // Host limit expression copied from template
   logs: text("logs").default(""), // Full log output
   resultSummary: jsonb("result_summary").default({}), // JSON summary (hosts, tasks, ok/failed counts)
   createdAt: timestamp("created_at").notNull().defaultNow(),

@@ -156,7 +156,11 @@ export default function NetBoxInventory() {
                             {Object.entries(vm.customFields).map(([key, value]) => (
                               <div key={key} className="flex gap-2">
                                 <span className="text-muted-foreground">{key}:</span>
-                                <span className="font-medium">{String(value)}</span>
+                                <span className="font-medium">
+                                  {value === null ? "null" : 
+                                   typeof value === "object" ? JSON.stringify(value) : 
+                                   String(value)}
+                                </span>
                               </div>
                             ))}
                           </div>

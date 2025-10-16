@@ -1,6 +1,7 @@
 // Database storage implementation (from javascript_database blueprint)
 import { 
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
+  providerAccounts, syncRuns, externalObjects, groupCache,
   type User, type InsertUser,
   type Project, type InsertProject,
   type Credential, type InsertCredential,
@@ -8,9 +9,13 @@ import {
   type JobRun, type InsertJobRun,
   type Setting, type InsertSetting,
   type Notification, type InsertNotification,
+  type ProviderAccount, type InsertProviderAccount,
+  type SyncRun, type InsertSyncRun,
+  type ExternalObject, type InsertExternalObject,
+  type GroupCache, type InsertGroupCache,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, lte } from "drizzle-orm";
+import { eq, desc, gte, lte, and, lt, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -54,6 +59,24 @@ export interface IStorage {
   createNotification(notification: InsertNotification): Promise<Notification>;
   updateNotification(id: string, data: Partial<Notification>): Promise<Notification | undefined>;
   deleteNotification(id: string): Promise<void>;
+
+  // Provider operations
+  getProviders(): Promise<ProviderAccount[]>;
+  getProvider(id: string): Promise<ProviderAccount | undefined>;
+  createProvider(provider: InsertProviderAccount): Promise<ProviderAccount>;
+  updateProvider(id: string, data: Partial<ProviderAccount>): Promise<ProviderAccount | undefined>;
+  
+  // Sync Run operations
+  createSyncRun(run: InsertSyncRun): Promise<SyncRun>;
+  getSyncRun(id: string): Promise<SyncRun | undefined>;
+  getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]>;
+  getLastFailedSyncRuns(): Promise<SyncRun[]>;
+
+  // Housekeeping operations
+  clearGroupCache(): Promise<void>;
+  addGroupCache(item: { kind: string; name: string }): Promise<GroupCache>;
+  pruneStaleObjects(days: number): Promise<number>;
+  getProviderStats(): Promise<any[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -251,6 +274,144 @@ export class DatabaseStorage implements IStorage {
 
   async deleteNotification(id: string): Promise<void> {
     await db.delete(notifications).where(eq(notifications.id, id));
+  }
+
+  // Provider operations
+  async getProviders(): Promise<ProviderAccount[]> {
+    return await db.select().from(providerAccounts).orderBy(desc(providerAccounts.createdAt));
+  }
+
+  async getProvider(id: string): Promise<ProviderAccount | undefined> {
+    const [provider] = await db.select().from(providerAccounts).where(eq(providerAccounts.id, id));
+    return provider || undefined;
+  }
+
+  async createProvider(insertProvider: InsertProviderAccount): Promise<ProviderAccount> {
+    const [provider] = await db
+      .insert(providerAccounts)
+      .values({
+        ...insertProvider,
+        updatedAt: new Date(),
+      })
+      .returning();
+    return provider;
+  }
+
+  async updateProvider(id: string, data: Partial<ProviderAccount>): Promise<ProviderAccount | undefined> {
+    const [updated] = await db
+      .update(providerAccounts)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(providerAccounts.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  // Sync Run operations
+  async createSyncRun(insertRun: InsertSyncRun): Promise<SyncRun> {
+    const [run] = await db
+      .insert(syncRuns)
+      .values(insertRun)
+      .returning();
+    return run;
+  }
+
+  async getSyncRun(id: string): Promise<SyncRun | undefined> {
+    const [run] = await db.select().from(syncRuns).where(eq(syncRuns.id, id));
+    return run || undefined;
+  }
+
+  async getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]> {
+    return await db
+      .select()
+      .from(syncRuns)
+      .where(eq(syncRuns.providerAccountId, providerAccountId))
+      .orderBy(desc(syncRuns.createdAt))
+      .limit(limit);
+  }
+
+  async getLastFailedSyncRuns(): Promise<SyncRun[]> {
+    // Get the most recent failed run for each provider
+    const subquery = db
+      .select({
+        providerAccountId: syncRuns.providerAccountId,
+        maxCreatedAt: sql`MAX(${syncRuns.createdAt})`.as('max_created_at'),
+      })
+      .from(syncRuns)
+      .where(eq(syncRuns.status, 'failed'))
+      .groupBy(syncRuns.providerAccountId)
+      .as('latest_failed');
+
+    return await db
+      .select()
+      .from(syncRuns)
+      .innerJoin(
+        subquery,
+        and(
+          eq(syncRuns.providerAccountId, subquery.providerAccountId),
+          sql`${syncRuns.createdAt} = ${subquery.maxCreatedAt}`
+        )
+      )
+      .then(rows => rows.map(row => row.sync_runs));
+  }
+
+  // Housekeeping operations
+  async clearGroupCache(): Promise<void> {
+    await db.delete(groupCache);
+  }
+
+  async addGroupCache(item: { kind: string; name: string }): Promise<GroupCache> {
+    const [cached] = await db
+      .insert(groupCache)
+      .values(item)
+      .returning();
+    return cached;
+  }
+
+  async pruneStaleObjects(days: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+
+    const result = await db
+      .delete(externalObjects)
+      .where(lt(externalObjects.lastSyncedAt, cutoffDate));
+    
+    return result.rowCount || 0;
+  }
+
+  async getProviderStats(): Promise<any[]> {
+    const providers = await this.getProviders();
+    const stats = [];
+
+    for (const provider of providers) {
+      // Get last sync run
+      const lastRuns = await this.getProviderRuns(provider.id, 1);
+      const lastRun = lastRuns[0];
+
+      // Calculate next run time (simplified - would use cron parser in real implementation)
+      let nextRun: Date | null = null;
+      if (provider.scheduleCron && provider.enabled) {
+        nextRun = new Date(Date.now() + 60 * 60 * 1000); // Placeholder: 1 hour from now
+      }
+
+      stats.push({
+        id: provider.id,
+        name: provider.name,
+        kind: provider.kind,
+        enabled: provider.enabled,
+        lastSync: lastRun ? {
+          id: lastRun.id,
+          status: lastRun.status,
+          finishedAt: lastRun.finishedAt,
+          counts: lastRun.counts,
+        } : null,
+        nextRun,
+      });
+    }
+
+    return stats;
   }
 }
 

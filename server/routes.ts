@@ -498,6 +498,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Provider routes
+  app.get("/api/providers", authMiddleware, async (req, res) => {
+    try {
+      const providers = await storage.getProviders();
+      res.json(providers);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get providers" });
+    }
+  });
+
+  app.post("/api/providers", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const provider = await storage.createProvider(req.body);
+      res.json(provider);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to create provider" });
+    }
+  });
+
+  app.patch("/api/providers/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const provider = await storage.updateProvider(req.params.id, req.body);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+      res.json(provider);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to update provider" });
+    }
+  });
+
+  app.post("/api/providers/:id/test", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      const { getProviderCollector } = await import("./services/providers/registry");
+      const collector = getProviderCollector(provider.kind, provider.config);
+      const result = await collector.testConnection();
+      
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to test connection" });
+    }
+  });
+
+  app.post("/api/providers/:id/sync", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      // Create sync run
+      const syncRun = await storage.createSyncRun({
+        providerAccountId: provider.id,
+        type: "provider-sync",
+        status: "queued",
+      });
+
+      // Execute sync in background
+      const { SyncWorker } = await import("./services/syncWorker");
+      const worker = new SyncWorker();
+      worker.executeSyncRun(syncRun.id).catch(console.error);
+
+      res.json({ runId: syncRun.id });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to start sync" });
+    }
+  });
+
+  app.get("/api/providers/:id/runs", authMiddleware, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const runs = await storage.getProviderRuns(req.params.id, limit);
+      res.json(runs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get provider runs" });
+    }
+  });
+
+  // Housekeeping routes
+  app.post("/api/housekeeping/rebuild-groups-cache", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const { netboxService } = await import("./services/netbox");
+      const groups = await netboxService.listAllGroups();
+      
+      await storage.clearGroupCache();
+      for (const group of groups) {
+        await storage.addGroupCache(group);
+      }
+      
+      res.json({ message: `Rebuilt cache with ${groups.length} groups` });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to rebuild cache" });
+    }
+  });
+
+  app.post("/api/housekeeping/ensure-netbox-schema", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const { netboxService } = await import("./services/netbox");
+      const fields = ["ext_id", "ext_provider", "patch_wave", "patch_subwave", "ansible_user"];
+      const result = await netboxService.ensureCustomFields(fields);
+      
+      res.json({
+        message: `Ensured ${fields.length} custom fields`,
+        created: result.created,
+        existing: result.existing,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to ensure schema" });
+    }
+  });
+
+  app.post("/api/housekeeping/prune-stale", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const days = parseInt(req.body.days as string) || 30;
+      const count = await storage.pruneStaleObjects(days);
+      
+      res.json({ message: `Pruned ${count} stale objects (not seen in ${days} days)` });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to prune stale objects" });
+    }
+  });
+
+  app.post("/api/housekeeping/retry-last-failed", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const failedRuns = await storage.getLastFailedSyncRuns();
+      const retried: string[] = [];
+      
+      const { SyncWorker } = await import("./services/syncWorker");
+      
+      for (const run of failedRuns) {
+        const newRun = await storage.createSyncRun({
+          providerAccountId: run.providerAccountId,
+          type: "provider-sync",
+          status: "queued",
+        });
+        
+        const worker = new SyncWorker();
+        worker.executeSyncRun(newRun.id).catch(console.error);
+        retried.push(newRun.id);
+      }
+      
+      res.json({ message: `Retried ${retried.length} failed syncs`, runs: retried });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to retry syncs" });
+    }
+  });
+
+  app.post("/api/housekeeping/rotate-tokens", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      // Stub implementation
+      res.json({ message: "Token rotation checked (stub)", checkedAt: new Date().toISOString() });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to rotate tokens" });
+    }
+  });
+
+  // Stats routes
+  app.get("/api/stats/providers", authMiddleware, async (req, res) => {
+    try {
+      const stats = await storage.getProviderStats();
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get provider stats" });
+    }
+  });
+
   // Create HTTP server
   const httpServer = createServer(app);
 

@@ -43,6 +43,7 @@ export interface IStorage {
   getJobTemplates(): Promise<JobTemplate[]>;
   getJobTemplate(id: string): Promise<JobTemplate | undefined>;
   createJobTemplate(template: InsertJobTemplate): Promise<JobTemplate>;
+  updateJobTemplate(id: string, data: Partial<JobTemplate>): Promise<JobTemplate | undefined>;
   deleteJobTemplate(id: string): Promise<void>;
 
   // Job Run operations
@@ -85,6 +86,7 @@ export interface IStorage {
   getNetboxVms(): Promise<NetboxVm[]>;
   getNetboxVm(id: string): Promise<NetboxVm | undefined>;
   upsertNetboxVm(vm: InsertNetboxVm): Promise<NetboxVm>;
+  updateNetboxVm(id: string, updates: Partial<NetboxVm>): Promise<NetboxVm | null>;
   deleteAllNetboxVms(): Promise<void>;
 
   // NetBox Inventory Source operations
@@ -193,6 +195,15 @@ export class DatabaseStorage implements IStorage {
       .values(insertTemplate)
       .returning();
     return template;
+  }
+
+  async updateJobTemplate(id: string, data: Partial<JobTemplate>): Promise<JobTemplate | undefined> {
+    const [updated] = await db
+      .update(jobTemplates)
+      .set(data)
+      .where(eq(jobTemplates.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   async deleteJobTemplate(id: string): Promise<void> {
@@ -483,6 +494,15 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllNetboxVms(): Promise<void> {
     await db.delete(netboxVms);
+  }
+
+  async updateNetboxVm(id: string, updates: Partial<NetboxVm>): Promise<NetboxVm | null> {
+    const [updated] = await db
+      .update(netboxVms)
+      .set(updates)
+      .where(eq(netboxVms.id, id))
+      .returning();
+    return updated || null;
   }
 
   // NetBox Inventory Source operations

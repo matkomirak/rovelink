@@ -272,6 +272,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/templates/:id", authMiddleware, async (req, res) => {
+    try {
+      const template = await storage.updateJobTemplate(req.params.id, req.body);
+      res.json(template);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message || "Failed to update template" });
+    }
+  });
+
+  app.delete("/api/templates/:id", authMiddleware, async (req, res) => {
+    try {
+      await storage.deleteJobTemplate(req.params.id);
+      res.json({ message: "Template deleted successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to delete template" });
+    }
+  });
+
   app.post("/api/templates/:id/launch", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const template = await storage.getJobTemplate(req.params.id);
@@ -779,6 +797,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(vms);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get NetBox VMs" });
+    }
+  });
+
+  app.patch("/api/netbox/vms/:id", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      const updatedVm = await storage.updateNetboxVm(id, updates);
+      if (!updatedVm) {
+        return res.status(404).json({ message: "VM not found" });
+      }
+      res.json(updatedVm);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to update VM" });
     }
   });
 

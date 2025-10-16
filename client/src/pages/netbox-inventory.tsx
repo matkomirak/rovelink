@@ -409,14 +409,34 @@ export default function NetBoxInventories() {
               </p>
             </div>
             {selectedVmIds.size > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSelectedVmIds(new Set())}
-                data-testid="button-clear-selection"
-              >
-                Clear Selection
-              </Button>
+              <div className="flex gap-2">
+                {selectedVmIds.size === 1 && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => {
+                      const vmId = Array.from(selectedVmIds)[0];
+                      const vm = vms.find(v => v.id === vmId);
+                      if (vm) {
+                        setEditingVm(vm);
+                        setIsVmDialogOpen(true);
+                      }
+                    }}
+                    data-testid="button-edit-vm"
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit VM
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedVmIds(new Set())}
+                  data-testid="button-clear-selection"
+                >
+                  Clear Selection
+                </Button>
+              </div>
             )}
           </div>
 
@@ -534,6 +554,79 @@ export default function NetBoxInventories() {
         )}
         </div>
       )}
+
+      <Dialog open={isVmDialogOpen} onOpenChange={(open) => {
+        setIsVmDialogOpen(open);
+        if (!open) setEditingVm(null);
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Virtual Machine</DialogTitle>
+            <DialogDescription>
+              Update VM details. Changes are saved to the local database only.
+            </DialogDescription>
+          </DialogHeader>
+          {editingVm && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium">Name</label>
+                <Input
+                  defaultValue={editingVm.name}
+                  onChange={(e) => setEditingVm({ ...editingVm, name: e.target.value })}
+                  data-testid="input-vm-name"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">IP Address</label>
+                <Input
+                  defaultValue={editingVm.ip || ""}
+                  onChange={(e) => setEditingVm({ ...editingVm, ip: e.target.value })}
+                  data-testid="input-vm-ip"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Operating System</label>
+                <Input
+                  defaultValue={editingVm.operatingSystem || ""}
+                  onChange={(e) => setEditingVm({ ...editingVm, operatingSystem: e.target.value })}
+                  data-testid="input-vm-os"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Tags (comma-separated)</label>
+                <Input
+                  defaultValue={editingVm.tags?.join(", ") || ""}
+                  onChange={(e) => setEditingVm({ ...editingVm, tags: e.target.value.split(",").map(t => t.trim()).filter(Boolean) })}
+                  data-testid="input-vm-tags"
+                />
+              </div>
+              <Button
+                className="w-full"
+                onClick={async () => {
+                  try {
+                    await apiRequest("PATCH", `/api/netbox/vms/${editingVm.id}`, {
+                      name: editingVm.name,
+                      ip: editingVm.ip,
+                      operatingSystem: editingVm.operatingSystem,
+                      tags: editingVm.tags,
+                    });
+                    queryClient.invalidateQueries({ queryKey: ["/api/netbox/vms"] });
+                    toast({ title: "VM updated successfully" });
+                    setIsVmDialogOpen(false);
+                    setEditingVm(null);
+                    setSelectedVmIds(new Set());
+                  } catch (error: any) {
+                    toast({ title: "Failed to update VM", description: error.message, variant: "destructive" });
+                  }
+                }}
+                data-testid="button-save-vm"
+              >
+                Save Changes
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

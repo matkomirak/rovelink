@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, PlayCircle, TestTube, Loader2, CheckCircle, XCircle, Clock, Eye } from "lucide-react";
+import { Plus, PlayCircle, TestTube, Loader2, CheckCircle, XCircle, Clock, Eye, Pencil, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { insertProviderAccountSchema, type ProviderAccount } from "@shared/schema";
@@ -57,6 +57,8 @@ export default function Providers() {
       verify_ssl: true,
     },
   });
+
+  const [editingProvider, setEditingProvider] = useState<ProviderAccount | null>(null);
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -146,6 +148,37 @@ export default function Providers() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+      const { base_url, auth_method, username, password, token_id, token_secret, realm, verify_ssl, ...providerData } = data;
+      const config: any = { base_url, auth_method, realm, verify_ssl };
+      if (auth_method === "password") {
+        config.username = username;
+        config.password = password;
+      } else {
+        config.username = username;
+        config.token_id = token_id;
+        config.token_secret = token_secret;
+      }
+      return apiRequest("PATCH", `/api/providers/${id}`, { ...providerData, config });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/providers"] });
+      toast({ title: "Provider updated successfully" });
+      setOpen(false);
+      setEditingProvider(null);
+      form.reset();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/providers/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/providers"] });
+      toast({ title: "Provider deleted successfully" });
+    },
+  });
+
   const getStatusBadge = (status: string | undefined) => {
     if (!status) return <Badge variant="outline">Never Run</Badge>;
     switch (status) {
@@ -166,6 +199,33 @@ export default function Providers() {
     return new Date(date).toLocaleString();
   };
 
+  const handleEdit = (provider: ProviderAccount) => {
+    setEditingProvider(provider);
+    const config = provider.config as any;
+    form.reset({
+      name: provider.name,
+      kind: provider.kind,
+      enabled: provider.enabled,
+      config: provider.config,
+      base_url: config?.base_url || "",
+      auth_method: config?.auth_method || "password",
+      username: config?.username || "",
+      password: config?.password || "",
+      token_id: config?.token_id || "",
+      token_secret: config?.token_secret || "",
+      realm: config?.realm || "pam",
+      verify_ssl: config?.verify_ssl !== false,
+    });
+    setSelectedKind(provider.kind);
+    setOpen(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm("Are you sure you want to delete this provider?")) {
+      deleteMutation.mutate(id);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
@@ -173,7 +233,13 @@ export default function Providers() {
           <h1 className="text-3xl font-bold" data-testid="text-providers-title">Providers</h1>
           <p className="text-muted-foreground mt-1">Manage provider accounts and sync inventory to NetBox</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(isOpen) => {
+          setOpen(isOpen);
+          if (!isOpen) {
+            setEditingProvider(null);
+            form.reset();
+          }
+        }}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-provider">
               <Plus className="w-4 h-4 mr-2" />
@@ -182,10 +248,16 @@ export default function Providers() {
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add Provider Account</DialogTitle>
+              <DialogTitle>{editingProvider ? "Edit" : "Add"} Provider Account</DialogTitle>
             </DialogHeader>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit((data) => createMutation.mutate(data))} className="space-y-4">
+              <form onSubmit={form.handleSubmit((data) => {
+                if (editingProvider) {
+                  updateMutation.mutate({ id: editingProvider.id, data });
+                } else {
+                  createMutation.mutate(data);
+                }
+              })} className="space-y-4">
                 <FormField
                   control={form.control}
                   name="name"
@@ -438,10 +510,26 @@ export default function Providers() {
                         />
                       </TableCell>
                       <TableCell>
-                        <div className="flex gap-2">
+                        <div className="flex gap-1">
                           <Button
-                            size="sm"
-                            variant="outline"
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleEdit(provider)}
+                            data-testid={`button-edit-${provider.id}`}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleDelete(provider.id)}
+                            data-testid={`button-delete-${provider.id}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
                             onClick={() => testMutation.mutate(provider.id)}
                             disabled={testMutation.isPending}
                             data-testid={`button-test-${provider.id}`}
@@ -449,7 +537,8 @@ export default function Providers() {
                             <TestTube className="w-4 h-4" />
                           </Button>
                           <Button
-                            size="sm"
+                            size="icon"
+                            variant="ghost"
                             onClick={() => syncMutation.mutate(provider.id)}
                             disabled={syncMutation.isPending}
                             data-testid={`button-sync-${provider.id}`}

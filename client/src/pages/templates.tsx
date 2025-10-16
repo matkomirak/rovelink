@@ -11,10 +11,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, Plus, Play, Calendar, Loader2, AlertTriangle, Check, X } from "lucide-react";
+import { FileText, Plus, Play, Calendar, Loader2, AlertTriangle, Check, X, Pencil, Trash2, Search } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { insertJobTemplateSchema, type JobTemplate, type InsertJobTemplate, type Project, type Credential } from "@shared/schema";
+import { insertJobTemplateSchema, type JobTemplate, type InsertJobTemplate, type Project, type Credential, type NetboxInventorySource } from "@shared/schema";
 
 const COMMON_VAR_TEMPLATES = [
   { name: "Basic Variables", value: '{\n  "env": "production",\n  "version": "1.0.0"\n}' },
@@ -24,6 +24,8 @@ const COMMON_VAR_TEMPLATES = [
 
 export default function Templates() {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [editingTemplate, setEditingTemplate] = useState<JobTemplate | null>(null);
   const [limitExpr, setLimitExpr] = useState("");
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
@@ -43,6 +45,16 @@ export default function Templates() {
   const { data: credentials } = useQuery<Credential[]>({
     queryKey: ["/api/credentials"],
   });
+
+  const { data: inventories } = useQuery<NetboxInventorySource[]>({
+    queryKey: ["/api/netbox-sources"],
+  });
+
+  // Filter templates by search query
+  const filteredTemplates = templates?.filter(template =>
+    template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    template.playbook.toLowerCase().includes(searchQuery.toLowerCase())
+  ) || [];
 
   const { data: preflight } = useQuery<{ matched: number; warnings: string[] }>({
     queryKey: ["/api/inventory/preflight", limitExpr],
@@ -136,6 +148,7 @@ export default function Templates() {
       projectId: "",
       playbook: "",
       credentialId: "",
+      inventoryId: "",
       limitExpr: "",
       extraVars: {},
       checkMode: false,
@@ -156,6 +169,31 @@ export default function Templates() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertJobTemplate> }) => apiRequest("PATCH", `/api/templates/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+      toast({ title: "Template updated successfully" });
+      setOpen(false);
+      setEditingTemplate(null);
+      form.reset();
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to update template", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/templates/${id}`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+      toast({ title: "Template deleted successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to delete template", description: error.message });
+    },
+  });
+
   const launchMutation = useMutation({
     mutationFn: (templateId: string) => apiRequest("POST", `/api/templates/${templateId}/launch`, {}),
     onSuccess: () => {
@@ -167,28 +205,77 @@ export default function Templates() {
     },
   });
 
+  const handleEdit = (template: JobTemplate) => {
+    setEditingTemplate(template);
+    form.reset({
+      name: template.name,
+      projectId: template.projectId,
+      playbook: template.playbook,
+      credentialId: template.credentialId || "",
+      inventoryId: template.inventoryId || "",
+      limitExpr: template.limitExpr || "",
+      extraVars: template.extraVars || {},
+      checkMode: template.checkMode || false,
+      diffMode: template.diffMode || false,
+    });
+    setLimitExpr(template.limitExpr || "");
+    setExtraVarsText(JSON.stringify(template.extraVars || {}, null, 2));
+    setOpen(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm("Are you sure you want to delete this template?")) {
+      deleteMutation.mutate(id);
+    }
+  };
+
+  const handleSubmit = (data: InsertJobTemplate) => {
+    if (editingTemplate) {
+      updateMutation.mutate({ id: editingTemplate.id, data });
+    } else {
+      createMutation.mutate(data);
+    }
+  };
+
   const selectedProject = projects?.find(p => p.id === form.watch("projectId"));
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1">
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Job Templates</h1>
           <p className="text-sm text-muted-foreground">Configure and launch automation jobs</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-create-template">
-              <Plus className="h-4 w-4 mr-2" />
-              New Template
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Create Job Template</DialogTitle>
-            </DialogHeader>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit((data) => createMutation.mutate(data))} className="space-y-4">
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search templates..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 w-64"
+              data-testid="input-search-templates"
+            />
+          </div>
+          <Dialog open={open} onOpenChange={(isOpen) => {
+            setOpen(isOpen);
+            if (!isOpen) {
+              setEditingTemplate(null);
+              form.reset();
+            }
+          }}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-create-template">
+                <Plus className="h-4 w-4 mr-2" />
+                New Template
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{editingTemplate ? "Edit" : "Create"} Job Template</DialogTitle>
+              </DialogHeader>
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
                 <FormField
                   control={form.control}
                   name="name"
@@ -278,6 +365,34 @@ export default function Templates() {
                           {credentials?.map((cred) => (
                             <SelectItem key={cred.id} value={cred.id}>
                               {cred.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="inventoryId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Inventory (Optional)</FormLabel>
+                      <Select 
+                        onValueChange={(value) => field.onChange(value === "none" ? "" : value)} 
+                        value={field.value || "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger data-testid="select-inventory">
+                            <SelectValue placeholder="Select inventory" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {inventories?.map((inv) => (
+                            <SelectItem key={inv.id} value={inv.id}>
+                              {inv.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -488,6 +603,7 @@ export default function Templates() {
             </Form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {isLoading ? (
@@ -506,15 +622,33 @@ export default function Templates() {
             </Card>
           ))}
         </div>
-      ) : templates && templates.length > 0 ? (
+      ) : filteredTemplates && filteredTemplates.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {templates.map((template) => (
+          {filteredTemplates.map((template) => (
             <Card key={template.id} data-testid={`card-template-${template.id}`}>
               <CardHeader>
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2">
                     <FileText className="h-5 w-5 text-primary" />
                     <CardTitle className="text-lg">{template.name}</CardTitle>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      onClick={() => handleEdit(template)}
+                      data-testid={`button-edit-${template.id}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      onClick={() => handleDelete(template.id)}
+                      data-testid={`button-delete-${template.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
               </CardHeader>

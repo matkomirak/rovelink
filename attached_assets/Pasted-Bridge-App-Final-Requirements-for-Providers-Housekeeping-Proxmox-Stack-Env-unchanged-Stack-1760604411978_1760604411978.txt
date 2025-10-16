@@ -1,0 +1,238 @@
+Bridge App – Final Requirements for Providers, Housekeeping & Proxmox
+Stack & Env (unchanged)
+
+Stack: Full-stack JS → React (UI) + Express (API) + PostgreSQL.
+
+Secrets (Replit): DATABASE_URL, NETBOX_URL, NETBOX_TOKEN (read-only), JWT_SECRET.
+
+Constraint: No real Ansible execution on Replit. Keep FakeRunner. All NetBox calls go through backend.
+
+New Navigation & Pages
+1) Providers (new)
+
+Table per provider account (Azure, VMware, Proxmox, …): Name · Kind · Enabled · Last Sync · Next Run · Status.
+
+Row actions: Sync Now, Test Connection, View Runs, Edit, Disable.
+
+Add Provider modal (choose Kind → fields per kind).
+
+Schedule editor (cron) with inline validator; show “Next run at …”.
+
+Provider Run Details page: counts {created, updated, unchanged, removed, errors}, top errors, log tail.
+
+2) Settings → Housekeeping (new section)
+
+Buttons w/ confirmation + result toast:
+
+Rebuild Group Cache (refresh NetBox inventory groups for limit autocomplete).
+
+Ensure NetBox Schema (create/verify custom fields: ext_id, ext_provider, patch_wave, patch_subwave, ansible_user).
+
+Prune Stale External Objects (mark removed if not seen for N days; N is a setting).
+
+Retry Last Failed Sync per Provider.
+
+Rotate Tokens (no-op UI stub; just surface “expiring in …” if known).
+
+3) Runs
+
+Add filter Type: provider-sync | playbook-run.
+
+Provider run detail links from Providers page.
+
+Data Model (Postgres)
+
+Create/confirm these tables:
+
+provider_accounts
+
+id UUID PK, kind text (enum: azure|vmware|proxmox), name text, enabled bool,
+
+schedule_cron text, config jsonb (provider-specific), timestamps.
+
+sync_runs
+
+id UUID PK, provider_account_id FK, type text (provider-sync),
+
+status text (queued|running|ok|failed|error), started_at, finished_at,
+
+counts jsonb ({created,updated,unchanged,removed,errors}),
+
+error text, log_path text.
+
+external_objects
+
+provider_account_id FK, provider_kind text, external_id text,
+
+netbox_type text (e.g., virtualization.virtual_machines),
+
+netbox_id int, cached_payload jsonb, last_synced_at.
+
+group_cache
+
+id serial, kind text (e.g., site|device_role|tag|tenant), name text, refreshed_at.
+
+Indexes: (provider_account_id, external_id), sync_runs(provider_account_id, started_at), group_cache(kind, name).
+
+Backend Endpoints (Express)
+Providers
+
+GET /api/providers → list accounts + last/next run + status.
+
+POST /api/providers → create account {kind, name, config, enabled, schedule_cron}.
+
+PATCH /api/providers/:id → update config|enabled|schedule_cron|name.
+
+POST /api/providers/:id/test → do a lightweight provider call; return {ok, details}.
+
+POST /api/providers/:id/sync → enqueue immediate sync; return run id.
+
+GET /api/providers/:id/runs?limit=50 → recent runs for the provider.
+
+Housekeeping
+
+POST /api/housekeeping/rebuild-groups-cache
+
+POST /api/housekeeping/ensure-netbox-schema
+
+POST /api/housekeeping/prune-stale
+
+POST /api/housekeeping/retry-last-failed
+
+POST /api/housekeeping/rotate-tokens (stub, record “checked at …”)
+
+Stats
+
+GET /api/stats/providers → per account: last sync result, next run time, error badge.
+
+AuthZ: admin can create/edit providers & schedules and run housekeeping; operator can Sync Now and view runs; viewer read-only.
+
+Scheduler & Workers
+
+Scheduler reads provider_accounts.schedule_cron and enqueues sync jobs (use any cron lib).
+
+Sync Worker (per provider account):
+
+Load account config → instantiate collector by kind.
+
+listVms() (normalized array) → map to NetBox payloads.
+
+Upsert to NetBox (idempotent): create/update VM, ensure IP, set primary_ip4, custom fields (ext_id, ext_provider), apply tags.
+
+Update external_objects + record a sync_runs entry with counts & errors.
+
+On error, set status=failed and store first N errors.
+
+Group Cache job calls NetBox to list groups (site, device_role, tag, tenant) and stores them in group_cache.
+
+Provider Registry & Normalized Types
+
+Registry: kind → collector.
+
+NormalizedVm (what collectors return):
+
+externalId (stable), name, provider, primaryIp4?, tags[], tenant?, site?, role?, raw?.
+
+Proxmox Provider (must-have now)
+
+Config fields (UI & DB config JSON):
+
+base_url (e.g., https://pve.example:8006)
+
+auth_method: password | api_token
+
+username, password (when password)
+
+token_id, token_secret (when api_token)
+
+realm (default pam)
+
+verify_ssl (bool)
+
+Optional filters: include_nodes[], exclude_nodes[]
+
+Test connection
+
+If password: POST /api2/json/access/ticket (expect ticket + CSRFPreventionToken).
+
+If api_token: set Authorization: PVEAPIToken=USER!TOKENID=SECRET.
+
+GET /api2/json/nodes → return {ok:true, nodes:n} (and Proxmox version if available).
+
+Collector behavior
+
+List nodes: GET /api2/json/nodes.
+
+For each node: GET /api2/json/nodes/{node}/qemu.
+
+(Optional) IPs via agent: .../qemu/{vmid}/agent/network-get-interfaces. If agent absent → leave primaryIp4 empty.
+
+Normalize:
+
+externalId = "${node}-${vmid}"
+
+name = vm.name
+
+provider = "proxmox"
+
+primaryIp4 = extracted IP (if any)
+
+tags = ["provider/proxmox", "node/#{node}"]
+
+Upsert to NetBox
+
+Ensure VM exists; set custom_fields.ext_id, custom_fields.ext_provider="proxmox".
+
+Ensure IP and set primary_ip4 if available.
+
+Apply tags; site/tenant/role mapping can be left blank for MVP.
+
+Edge cases to handle
+
+401 after ticket expires → re-login once and retry.
+
+Self-signed certs → honor verify_ssl=false.
+
+No agent → warn in sync run summary (count “no IP found”).
+
+NetBox Read/Write (reminder)
+
+WRITE: your existing NetBox client: upsert VM/IP/tags/custom fields; set primary_ip4.
+
+READ: existing read endpoints for groups/hosts/preflight (used by Inventory & limit autocomplete).
+
+Ensure Schema: Housekeeping action must verify/create:
+
+Custom fields: ext_id (string), ext_provider (string), patch_wave (string), patch_subwave (string), ansible_user (string).
+
+UI Micro-requirements
+
+Providers table badges: OK / Warning / Failed based on last run; show counts tooltip.
+
+Sync Now modal: live log tail (stream short lines from worker) + final counts.
+
+Schedule editor: presets (15m, hourly, daily 02:00) + freeform cron; show Next run.
+
+Housekeeping buttons: spinner + result text (“Created fields: patch_wave, patch_subwave”).
+
+Inventory limit autocomplete already planned → ensure it uses group_cache.
+
+Acceptance Criteria (for this increment)
+
+I can add a Proxmox account, Test connection, and Sync now to NetBox.
+
+The sync run shows counts and errors; VMs appear in NetBox with ext_id, ext_provider, tags, and primary_ip4 where agent is present.
+
+Providers page shows Last sync and Next run; I can set a cron schedule and see it enqueue automatically.
+
+Housekeeping actions work and report results; group cache refresh updates the limit autocomplete.
+
+Runs list can filter by provider-sync and open run details.
+
+Nice-to-have (optional if time remains)
+
+Proxmox “Agent coverage” metric per run (percentage of VMs with an IP).
+
+Diff view (added/changed/removed) with CSV export from the provider run.
+
+Warning banner on Providers page if NetBox schema is missing fields.

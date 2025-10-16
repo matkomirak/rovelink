@@ -133,6 +133,73 @@ export const notifications = pgTable("notifications", {
 
 export const notificationRelations = relations(notifications, () => ({}));
 
+// Provider Accounts (Azure, VMware, Proxmox, etc.)
+export const providerAccounts = pgTable("provider_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kind: text("kind").notNull(), // azure, vmware, proxmox
+  name: text("name").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  scheduleCron: text("schedule_cron"), // Cron expression for automatic sync
+  config: jsonb("config").notNull().default({}), // Provider-specific configuration
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const providerAccountsRelations = relations(providerAccounts, ({ many }) => ({
+  syncRuns: many(syncRuns),
+  externalObjects: many(externalObjects),
+}));
+
+// Sync Runs (Provider sync execution history)
+export const syncRuns = pgTable("sync_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerAccountId: varchar("provider_account_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  type: text("type").notNull().default("provider-sync"), // provider-sync
+  status: text("status").notNull().default("queued"), // queued, running, ok, failed, error
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  counts: jsonb("counts").default({}), // {created, updated, unchanged, removed, errors}
+  error: text("error"),
+  logs: text("logs").default(""), // Full log output
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const syncRunsRelations = relations(syncRuns, ({ one }) => ({
+  providerAccount: one(providerAccounts, {
+    fields: [syncRuns.providerAccountId],
+    references: [providerAccounts.id],
+  }),
+}));
+
+// External Objects (cached provider objects and NetBox mapping)
+export const externalObjects = pgTable("external_objects", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerAccountId: varchar("provider_account_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  providerKind: text("provider_kind").notNull(),
+  externalId: text("external_id").notNull(), // Provider's unique ID
+  netboxType: text("netbox_type"), // e.g., virtualization.virtual_machines
+  netboxId: integer("netbox_id"),
+  cachedPayload: jsonb("cached_payload").default({}),
+  lastSyncedAt: timestamp("last_synced_at").notNull().defaultNow(),
+});
+
+export const externalObjectsRelations = relations(externalObjects, ({ one }) => ({
+  providerAccount: one(providerAccounts, {
+    fields: [externalObjects.providerAccountId],
+    references: [providerAccounts.id],
+  }),
+}));
+
+// Group Cache (NetBox groups for autocomplete)
+export const groupCache = pgTable("group_cache", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  kind: text("kind").notNull(), // site, device_role, tag, tenant
+  name: text("name").notNull(),
+  refreshedAt: timestamp("refreshed_at").notNull().defaultNow(),
+});
+
+export const groupCacheRelations = relations(groupCache, () => ({}));
+
 // Insert schemas for forms
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -177,6 +244,29 @@ export const insertNotificationSchema = createInsertSchema(notifications).omit({
   createdAt: true,
 });
 
+export const insertProviderAccountSchema = createInsertSchema(providerAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSyncRunSchema = createInsertSchema(syncRuns).omit({
+  id: true,
+  createdAt: true,
+  startedAt: true,
+  finishedAt: true,
+  logs: true,
+});
+
+export const insertExternalObjectSchema = createInsertSchema(externalObjects).omit({
+  id: true,
+  lastSyncedAt: true,
+});
+
+export const insertGroupCacheSchema = createInsertSchema(groupCache).omit({
+  refreshedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -198,3 +288,15 @@ export type Setting = typeof settings.$inferSelect;
 
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
+
+export type InsertProviderAccount = z.infer<typeof insertProviderAccountSchema>;
+export type ProviderAccount = typeof providerAccounts.$inferSelect;
+
+export type InsertSyncRun = z.infer<typeof insertSyncRunSchema>;
+export type SyncRun = typeof syncRuns.$inferSelect;
+
+export type InsertExternalObject = z.infer<typeof insertExternalObjectSchema>;
+export type ExternalObject = typeof externalObjects.$inferSelect;
+
+export type InsertGroupCache = z.infer<typeof insertGroupCacheSchema>;
+export type GroupCache = typeof groupCache.$inferSelect;

@@ -1,0 +1,118 @@
+UI changes
+New nav item: Providers
+
+Card/table per account (Azure, vCenter, Proxmox, …) showing:
+
+Name / Kind / Enabled
+
+Last sync (time, result, items added/updated/errors)
+
+Next run (from schedule)
+
+Buttons: Sync now, Test connection, View runs, Edit, Disable
+
+Schedule (cron) with inline validator + “Save”
+
+Settings → Housekeeping
+
+Buttons:
+
+Rebuild group cache (refresh NetBox groups for limit autocomplete)
+
+Ensure NetBox schema (create/verify custom fields: ext_id, ext_provider, patch_wave, patch_subwave, ansible_user)
+
+Prune stale external objects (seen in NetBox? if not → mark removed)
+
+Retry last failed provider sync
+
+Rotate provider tokens (where applicable)
+Each shows a confirmation + result toast.
+
+Runs page
+
+Filter: Type = provider-sync | playbook-run
+
+Clicking a provider run opens details (diff counts, error list)
+
+Backend endpoints (Express)
+
+Providers
+
+GET /api/providers
+
+POST /api/providers (kind, name, config JSON; enabled=true/false)
+
+POST /api/providers/:id/test
+
+POST /api/providers/:id/sync ← “Sync now”
+
+PATCH /api/providers/:id (update enabled, schedule_cron, config)
+
+GET /api/providers/:id/runs?limit=50
+
+Housekeeping
+
+POST /api/housekeeping/rebuild-groups-cache
+
+POST /api/housekeeping/ensure-netbox-schema
+
+POST /api/housekeeping/prune-stale
+
+POST /api/housekeeping/retry-last-failed
+
+POST /api/housekeeping/rotate-tokens
+
+Stats
+
+GET /api/stats/providers → per-account last/next run, error counts
+
+Auth: admin can edit schedules/config; operator can Sync now & view runs; viewer read-only.
+
+Data model (Postgres)
+
+provider_accounts
+id, kind, name, enabled bool, schedule_cron text, config jsonb, created_at, updated_at
+
+sync_runs
+id, provider_account_id, started_at, finished_at, status text, counts jsonb, error text, log_path text
+
+external_objects
+provider_account_id, external_id, provider_kind, netbox_type, netbox_id int, cached_payload jsonb, last_synced_at
+
+Scheduler + workers
+
+Scheduler service reads provider_accounts.schedule_cron and enqueues syncs (use a cron lib; validate with a parser).
+
+Sync worker steps per account:
+
+Get collector by kind.
+
+listVms() → normalize.
+
+Map to NetBox payloads; upsert (idempotent).
+
+Record sync_runs with counts: {created, updated, unchanged, errors, removed}.
+
+On error, set status=failed and save first 20 errors.
+
+Group cache: a small table or JSON file with NetBox groups for the limit autocomplete; refresh on demand + nightly.
+
+Housekeeping job definitions
+
+Ensure NetBox schema: verify/create custom fields & required tags; report changes.
+
+Prune stale: mark external_objects not seen for N days as removed; optional delete (flag first).
+
+Retry last failed sync: find most recent status=failed per provider; enqueue.
+
+Rotate tokens: if config has expiring tokens, prompt/flag; for Azure client creds, just test/alert.
+
+UX details
+
+Sync now shows a small modal with live log tail and final counts.
+
+Schedule field has helper: presets (15m / hourly / daily 02:00), plus free-form cron.
+
+Status badges on Providers: OK, Warning (last run had partial errors), Failed.
+
+Empty state on Providers page: CTA to Add provider.

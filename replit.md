@@ -293,3 +293,17 @@ shared/
   - NetBox Inventory page with table view and import button
   - Admin-only import capability
   - E2E tested: Successfully imports 50 VMs from NetBox demo instance
+
+- 2025-10-16: Multi-source NetBox inventory system
+  - Implemented netboxInventorySources table for multiple NetBox instances
+  - Each source has independent URL, token, and enabled status
+  - Complete CRUD operations for NetBox sources (add/edit/delete)
+  - Renamed "NetBox Inventory" to "NetBox Inventories" (plural)
+  - Moved NetBox configuration from Settings to NetBox Inventories page
+  - Settings page now focuses on housekeeping operations only
+  - VM table with composite unique constraint (sourceId, netboxId) for multi-source support
+  - Selectable VMs with checkboxes (individual and select-all)
+  - Clear selection functionality with visual feedback
+  - VM import targets specific NetBox source via sourceId parameter
+  - Projects and Credentials pages enhanced with edit/delete capabilities
+  - E2E tested: Source management and VM selection functionality verified

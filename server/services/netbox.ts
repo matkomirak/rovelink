@@ -42,10 +42,20 @@ export class NetBoxService {
     };
   }
 
-  async testConnection(): Promise<boolean> {
+  async testConnection(url?: string, token?: string): Promise<boolean> {
     try {
-      const response = await axios.get(`${this.config.url}/api/status/`, {
-        headers: this.getHeaders(),
+      const testUrl = url || this.config.url;
+      const testToken = token || this.config.token;
+      
+      if (!testUrl) {
+        throw new Error("NetBox URL is not configured");
+      }
+      
+      const response = await axios.get(`${testUrl}/api/status/`, {
+        headers: {
+          Authorization: `Token ${testToken}`,
+          "Content-Type": "application/json",
+        },
         timeout: 5000,
       });
       return response.status === 200;

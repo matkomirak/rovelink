@@ -447,7 +447,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/settings/test-connection", authMiddleware, async (req, res) => {
     try {
-      const connected = await netboxService.testConnection();
+      const netboxUrl = await storage.getSetting("netbox_url");
+      const netboxToken = await storage.getSetting("netbox_token");
+      
+      const url = netboxUrl?.value || process.env.NETBOX_URL || "";
+      const token = netboxToken?.value || process.env.NETBOX_TOKEN || "";
+      
+      if (!url) {
+        return res.status(400).json({ message: "NetBox URL is not configured" });
+      }
+      
+      const connected = await netboxService.testConnection(url, token);
       if (connected) {
         res.json({ message: "Connection successful" });
       } else {

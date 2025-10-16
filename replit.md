@@ -50,3 +50,18 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - Custom fields shown in edit dialog as read-only reference
   - Displays up to 2 custom fields in table with "+N more" indicator for additional fields
   - All NetBox custom fields are properly imported and stored as JSON in the database
+
+- 2025-10-16: Keyed Groups for NetBox Inventory (Option A)
+  - Created `inventory/netbox.yml` with keyed_groups configuration using NetBox inventory plugin
+  - Keyed groups automatically generated from custom fields and metadata:
+    - `wave_*` - Groups VMs by patch wave (from custom_fields.patch_wave or custom_fields.Patching.Wave)
+    - `customer_*` - Groups VMs by customer/tags (from tenant.name or tags)
+    - `os_*` - Groups VMs by operating system (from platform.slug)
+    - `role_*` - Groups VMs by device role (from device_role.slug or custom_fields.role)
+  - Updated FakeRunner to use `-i inventory/netbox.yml` and show `--limit` flag with keyed group expressions in logs
+  - Enhanced preflight validation to recognize keyed group patterns (wave_*, customer_*, os_*, role_*)
+  - Autocomplete suggestions now include keyed groups generated from imported NetBox VMs
+  - Updated template UI with keyed group examples in placeholder and help text
+  - Added limitExpr field to job_runs schema to preserve limit expressions from templates through execution
+  - Rebuild Group Cache functionality now generates keyed groups from NetBox VM custom fields
+  - Templates support limit expressions like: `customer_Alpha & os_linux & wave_Wave2 - role_db`

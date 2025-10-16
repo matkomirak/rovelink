@@ -44,7 +44,8 @@ export class NetBoxService {
 
   async testConnection(url?: string, token?: string): Promise<boolean> {
     try {
-      const testUrl = url || this.config.url;
+      // Remove trailing slash from URL to avoid double slashes
+      const testUrl = (url || this.config.url)?.replace(/\/+$/, '');
       const testToken = token || this.config.token;
       
       console.log("Testing NetBox connection with URL:", testUrl);
@@ -265,7 +266,8 @@ export class NetBoxService {
     tags: string[];
   }>> {
     try {
-      const apiUrl = url || this.config.url;
+      // Remove trailing slash from URL to avoid double slashes
+      const apiUrl = (url || this.config.url)?.replace(/\/+$/, '');
       const apiToken = token || this.config.token;
 
       if (!apiUrl) {

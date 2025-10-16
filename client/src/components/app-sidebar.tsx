@@ -9,6 +9,7 @@ import {
   PlayCircle,
   BarChart3,
   Bell,
+  Cloud,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -48,6 +49,11 @@ const menuItems = [
     title: "Credentials",
     url: "/credentials",
     icon: Key,
+  },
+  {
+    title: "Providers",
+    url: "/providers",
+    icon: Cloud,
   },
   {
     title: "Templates",

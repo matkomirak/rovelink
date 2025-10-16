@@ -8,13 +8,17 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { FolderGit2, Plus, RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { FolderGit2, Plus, RefreshCw, CheckCircle2, AlertCircle, Loader2, Pencil, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { insertProjectSchema, type Project, type InsertProject } from "@shared/schema";
 
 export default function Projects() {
   const [open, setOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const { toast } = useToast();
 
   const { data: projects, isLoading } = useQuery<Project[]>({
@@ -23,7 +27,11 @@ export default function Projects() {
 
   const form = useForm<InsertProject>({
     resolver: zodResolver(insertProjectSchema),
-    defaultValues: {
+    defaultValues: editingProject ? {
+      name: editingProject.name,
+      gitUrl: editingProject.gitUrl,
+      gitRef: editingProject.gitRef,
+    } : {
       name: "",
       gitUrl: "",
       gitRef: "main",
@@ -35,13 +43,67 @@ export default function Projects() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       toast({ title: "Project created successfully" });
-      setOpen(false);
-      form.reset();
+      handleCloseDialog();
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Failed to create project", description: error.message });
     },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertProject> }) => 
+      apiRequest("PATCH", `/api/projects/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      toast({ title: "Project updated successfully" });
+      handleCloseDialog();
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to update project", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/projects/${id}`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      toast({ title: "Project deleted successfully" });
+      setDeleteDialogOpen(false);
+      setProjectToDelete(null);
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Failed to delete project", description: error.message });
+    },
+  });
+
+  const handleCloseDialog = () => {
+    setOpen(false);
+    setEditingProject(null);
+    form.reset();
+  };
+
+  const handleEdit = (project: Project) => {
+    setEditingProject(project);
+    form.reset({
+      name: project.name,
+      gitUrl: project.gitUrl,
+      gitRef: project.gitRef,
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = (project: Project) => {
+    setProjectToDelete(project);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleSubmit = (data: InsertProject) => {
+    if (editingProject) {
+      updateMutation.mutate({ id: editingProject.id, data });
+    } else {
+      createMutation.mutate(data);
+    }
+  };
 
   const syncMutation = useMutation({
     mutationFn: (projectId: string) => apiRequest("POST", `/api/projects/${projectId}/sync`, {}),
@@ -78,7 +140,7 @@ export default function Projects() {
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Projects</h1>
           <p className="text-sm text-muted-foreground">Manage Git repositories with Ansible playbooks</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={handleCloseDialog}>
           <DialogTrigger asChild>
             <Button data-testid="button-create-project">
               <Plus className="h-4 w-4 mr-2" />
@@ -87,10 +149,10 @@ export default function Projects() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create Project</DialogTitle>
+              <DialogTitle>{editingProject ? "Edit Project" : "Create Project"}</DialogTitle>
             </DialogHeader>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit((data) => createMutation.mutate(data))} className="space-y-4">
+              <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
                 <FormField
                   control={form.control}
                   name="name"
@@ -135,9 +197,14 @@ export default function Projects() {
                     </FormItem>
                   )}
                 />
-                <Button type="submit" className="w-full" disabled={createMutation.isPending} data-testid="button-submit">
-                  {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create Project
+                <Button 
+                  type="submit" 
+                  className="w-full" 
+                  disabled={createMutation.isPending || updateMutation.isPending} 
+                  data-testid="button-submit"
+                >
+                  {(createMutation.isPending || updateMutation.isPending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {editingProject ? "Update Project" : "Create Project"}
                 </Button>
               </form>
             </Form>
@@ -191,17 +258,35 @@ export default function Projects() {
                     </p>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => syncMutation.mutate(project.id)}
-                  disabled={syncMutation.isPending || project.syncStatus === "syncing"}
-                  data-testid={`button-sync-${project.id}`}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-                  Sync Repository
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => syncMutation.mutate(project.id)}
+                    disabled={syncMutation.isPending || project.syncStatus === "syncing"}
+                    data-testid={`button-sync-${project.id}`}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                    Sync
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEdit(project)}
+                    data-testid={`button-edit-${project.id}`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDelete(project)}
+                    data-testid={`button-delete-${project.id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -219,6 +304,29 @@ export default function Projects() {
           </CardContent>
         </Card>
       )}
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{projectToDelete?.name}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => projectToDelete && deleteMutation.mutate(projectToDelete.id)}
+              disabled={deleteMutation.isPending}
+              data-testid="button-confirm-delete"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

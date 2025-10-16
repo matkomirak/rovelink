@@ -186,6 +186,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/projects/:id", authMiddleware, async (req, res) => {
+    try {
+      const data = insertProjectSchema.partial().parse(req.body);
+      const project = await storage.updateProject(req.params.id, data);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+      res.json(project);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message || "Failed to update project" });
+    }
+  });
+
+  app.delete("/api/projects/:id", authMiddleware, async (req, res) => {
+    try {
+      await storage.deleteProject(req.params.id);
+      res.json({ message: "Project deleted successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to delete project" });
+    }
+  });
+
   // Credentials routes
   app.get("/api/credentials", authMiddleware, async (req, res) => {
     try {
@@ -203,6 +225,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(credential);
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Failed to create credential" });
+    }
+  });
+
+  app.patch("/api/credentials/:id", authMiddleware, async (req, res) => {
+    try {
+      const data = insertCredentialSchema.partial().parse(req.body);
+      const credential = await storage.updateCredential(req.params.id, data);
+      if (!credential) {
+        return res.status(404).json({ message: "Credential not found" });
+      }
+      res.json(credential);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message || "Failed to update credential" });
+    }
+  });
+
+  app.delete("/api/credentials/:id", authMiddleware, async (req, res) => {
+    try {
+      await storage.deleteCredential(req.params.id);
+      res.json({ message: "Credential deleted successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to delete credential" });
     }
   });
 

@@ -35,6 +35,7 @@ export interface IStorage {
   getCredentials(): Promise<Credential[]>;
   getCredential(id: string): Promise<Credential | undefined>;
   createCredential(credential: InsertCredential): Promise<Credential>;
+  updateCredential(id: string, data: Partial<Credential>): Promise<Credential | undefined>;
   deleteCredential(id: string): Promise<void>;
 
   // Job Template operations
@@ -153,6 +154,15 @@ export class DatabaseStorage implements IStorage {
       .values(insertCredential)
       .returning();
     return credential;
+  }
+
+  async updateCredential(id: string, data: Partial<Credential>): Promise<Credential | undefined> {
+    const [updated] = await db
+      .update(credentials)
+      .set(data)
+      .where(eq(credentials.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   async deleteCredential(id: string): Promise<void> {

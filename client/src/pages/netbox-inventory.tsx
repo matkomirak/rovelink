@@ -34,14 +34,20 @@ export default function NetBoxInventories() {
   const [selectedVmIds, setSelectedVmIds] = useState<Set<string>>(new Set());
   const [isVmDialogOpen, setIsVmDialogOpen] = useState(false);
   const [editingVm, setEditingVm] = useState<NetboxVm | null>(null);
+  const [selectedSource, setSelectedSource] = useState<NetboxInventorySource | null>(null);
 
   const { data: sources = [], isLoading } = useQuery<NetboxInventorySource[]>({
     queryKey: ["/api/netbox-sources"],
   });
 
-  const { data: vms = [], isLoading: vmsLoading } = useQuery<NetboxVm[]>({
+  const { data: allVms = [], isLoading: vmsLoading } = useQuery<NetboxVm[]>({
     queryKey: ["/api/netbox/vms"],
   });
+
+  // Filter VMs by selected source
+  const vms = selectedSource 
+    ? allVms.filter(vm => vm.sourceId === selectedSource.id)
+    : [];
 
   const form = useForm<SourceForm>({
     resolver: zodResolver(sourceFormSchema),
@@ -164,25 +170,45 @@ export default function NetBoxInventories() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">NetBox Inventories</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage multiple NetBox inventory sources
-          </p>
-        </div>
-        <Dialog open={isDialogOpen} onOpenChange={(open) => {
-          setIsDialogOpen(open);
-          if (!open) {
-            setEditingSource(null);
-            form.reset();
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-source">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Source
+        <div className="flex items-center gap-3">
+          {selectedSource && (
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={() => {
+                setSelectedSource(null);
+                setSelectedVmIds(new Set());
+              }}
+              data-testid="button-back-to-sources"
+            >
+              <RefreshCw className="h-4 w-4 rotate-180" />
             </Button>
-          </DialogTrigger>
+          )}
+          <div>
+            <h1 className="text-2xl font-bold">
+              {selectedSource ? selectedSource.name : "NetBox Inventories"}
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              {selectedSource 
+                ? `Virtual machines from ${selectedSource.name}` 
+                : "Manage multiple NetBox inventory sources"}
+            </p>
+          </div>
+        </div>
+        {!selectedSource && (
+          <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              setEditingSource(null);
+              form.reset();
+            }
+          }}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-add-source">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Source
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>{editingSource ? "Edit NetBox Source" : "Add NetBox Source"}</DialogTitle>
@@ -261,128 +287,138 @@ export default function NetBoxInventories() {
             </Form>
           </DialogContent>
         </Dialog>
+        )}
       </div>
 
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[...Array(2)].map((_, i) => (
-            <Card key={i}>
-              <CardHeader>
-                <div className="h-6 bg-muted animate-pulse rounded w-3/4" />
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="h-4 bg-muted animate-pulse rounded" />
-                  <div className="h-4 bg-muted animate-pulse rounded w-1/2" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : sources.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            No NetBox sources configured. Click "Add Source" to get started.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {sources.map((source) => (
-            <Card key={source.id} data-testid={`card-source-${source.id}`}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="flex items-center gap-2">
-                      {source.name}
-                      <Badge variant={source.enabled ? "default" : "secondary"}>
-                        {source.enabled ? "Enabled" : "Disabled"}
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription className="mt-1 font-mono text-xs">
-                      {source.url}
-                    </CardDescription>
+      {!selectedSource ? (
+        isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[...Array(2)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <div className="h-6 bg-muted animate-pulse rounded w-3/4" />
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <div className="h-4 bg-muted animate-pulse rounded" />
+                    <div className="h-4 bg-muted animate-pulse rounded w-1/2" />
                   </div>
-                  <div className="flex gap-1">
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      onClick={() => handleEdit(source)}
-                      data-testid={`button-edit-${source.id}`}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      onClick={() => handleDelete(source.id)}
-                      data-testid={`button-delete-${source.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="text-sm text-muted-foreground">
-                  {source.lastImportAt ? (
-                    <p>Last import: {new Date(source.lastImportAt).toLocaleString()}</p>
-                  ) : (
-                    <p>Never imported</p>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleTestConnection(source)}
-                    disabled={testingSource === source.id}
-                    data-testid={`button-test-${source.id}`}
-                  >
-                    {testingSource === source.id ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : testStatus[source.id] === "success" ? (
-                      <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
-                    ) : testStatus[source.id] === "error" ? (
-                      <XCircle className="mr-2 h-4 w-4 text-destructive" />
-                    ) : null}
-                    Test Connection
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => handleImport(source)}
-                    disabled={!source.enabled}
-                    data-testid={`button-import-${source.id}`}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Import VMs
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-xl font-semibold" data-testid="text-vms-title">Imported Virtual Machines</h2>
-            <p className="text-sm text-muted-foreground">
-              {vms.length} VM{vms.length !== 1 ? 's' : ''} imported
-              {selectedVmIds.size > 0 && ` (${selectedVmIds.size} selected)`}
-            </p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
-          {selectedVmIds.size > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSelectedVmIds(new Set())}
-              data-testid="button-clear-selection"
-            >
-              Clear Selection
-            </Button>
-          )}
-        </div>
+        ) : sources.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No NetBox sources configured. Click "Add Source" to get started.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {sources.map((source) => (
+              <Card key={source.id} data-testid={`card-source-${source.id}`}>
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <CardTitle className="flex items-center gap-2">
+                        {source.name}
+                        <Badge variant={source.enabled ? "default" : "secondary"}>
+                          {source.enabled ? "Enabled" : "Disabled"}
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription className="mt-1 font-mono text-xs">
+                        {source.url}
+                      </CardDescription>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        onClick={() => handleEdit(source)}
+                        data-testid={`button-edit-${source.id}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        onClick={() => handleDelete(source.id)}
+                        data-testid={`button-delete-${source.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="text-sm text-muted-foreground">
+                    {source.lastImportAt ? (
+                      <p>Last import: {new Date(source.lastImportAt).toLocaleString()}</p>
+                    ) : (
+                      <p>Never imported</p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSelectedSource(source)}
+                      data-testid={`button-view-vms-${source.id}`}
+                    >
+                      View VMs
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection(source)}
+                      disabled={testingSource === source.id}
+                      data-testid={`button-test-${source.id}`}
+                    >
+                      {testingSource === source.id ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : testStatus[source.id] === "success" ? (
+                        <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
+                      ) : testStatus[source.id] === "error" ? (
+                        <XCircle className="mr-2 h-4 w-4 text-destructive" />
+                      ) : null}
+                      Test
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleImport(source)}
+                      disabled={!source.enabled}
+                      data-testid={`button-import-${source.id}`}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Import
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )
+      ) : (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-semibold" data-testid="text-vms-title">Virtual Machines</h2>
+              <p className="text-sm text-muted-foreground">
+                {vms.length} VM{vms.length !== 1 ? 's' : ''} from {selectedSource?.name}
+                {selectedVmIds.size > 0 && ` (${selectedVmIds.size} selected)`}
+              </p>
+            </div>
+            {selectedVmIds.size > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedVmIds(new Set())}
+                data-testid="button-clear-selection"
+              >
+                Clear Selection
+              </Button>
+            )}
+          </div>
 
         {vmsLoading ? (
           <Card>
@@ -496,7 +532,8 @@ export default function NetBoxInventories() {
             </CardContent>
           </Card>
         )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -182,6 +182,7 @@ export default function Credentials() {
                       <FormControl>
                         <Input
                           {...field}
+                          value={field.value || ""}
                           placeholder="vault://secrets/prod-ssh"
                           data-testid="input-secret-ref"
                           className="font-mono text-sm"

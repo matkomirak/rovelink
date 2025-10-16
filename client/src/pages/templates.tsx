@@ -44,7 +44,7 @@ export default function Templates() {
     queryKey: ["/api/credentials"],
   });
 
-  const { data: preflight } = useQuery({
+  const { data: preflight } = useQuery<{ matched: number; warnings: string[] }>({
     queryKey: ["/api/inventory/preflight", limitExpr],
     enabled: limitExpr.length > 2,
   });
@@ -264,14 +264,17 @@ export default function Templates() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Credential (Optional)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                      <Select 
+                        onValueChange={(value) => field.onChange(value === "none" ? "" : value)} 
+                        value={field.value || "none"}
+                      >
                         <FormControl>
                           <SelectTrigger data-testid="select-credential">
                             <SelectValue placeholder="Select credential" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">None</SelectItem>
+                          <SelectItem value="none">None</SelectItem>
                           {credentials?.map((cred) => (
                             <SelectItem key={cred.id} value={cred.id}>
                               {cred.name}
@@ -293,6 +296,7 @@ export default function Templates() {
                         <div className="relative">
                           <Input
                             {...field}
+                            value={field.value || ""}
                             ref={inputRef}
                             placeholder="tag_customer_x:&tag_os_linux"
                             className={`font-mono ${!syntaxCheck.valid ? 'border-destructive' : ''}`}
@@ -450,7 +454,7 @@ export default function Templates() {
                       <FormItem className="flex items-center gap-2 space-y-0">
                         <FormControl>
                           <Checkbox
-                            checked={field.value}
+                            checked={!!field.value}
                             onCheckedChange={field.onChange}
                             data-testid="checkbox-check-mode"
                           />
@@ -466,7 +470,7 @@ export default function Templates() {
                       <FormItem className="flex items-center gap-2 space-y-0">
                         <FormControl>
                           <Checkbox
-                            checked={field.value}
+                            checked={!!field.value}
                             onCheckedChange={field.onChange}
                             data-testid="checkbox-diff-mode"
                           />

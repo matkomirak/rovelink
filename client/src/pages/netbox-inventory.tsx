@@ -479,6 +479,7 @@ export default function NetBoxInventories() {
                     <TableHead>IP Address</TableHead>
                     <TableHead>OS</TableHead>
                     <TableHead>Source</TableHead>
+                    <TableHead>Custom Fields</TableHead>
                     <TableHead>Tags</TableHead>
                     <TableHead>Last Imported</TableHead>
                   </TableRow>
@@ -521,6 +522,24 @@ export default function NetBoxInventories() {
                             <Badge variant="secondary">{source.name}</Badge>
                           ) : (
                             <span className="text-muted-foreground">Unknown</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {vm.customFields && Object.keys(vm.customFields).length > 0 ? (
+                            <div className="flex gap-1 flex-wrap max-w-xs">
+                              {Object.entries(vm.customFields).slice(0, 2).map(([key, value]) => (
+                                <Badge key={key} variant="outline" className="text-xs">
+                                  {key}: {String(value)}
+                                </Badge>
+                              ))}
+                              {Object.keys(vm.customFields).length > 2 && (
+                                <Badge variant="outline" className="text-xs">
+                                  +{Object.keys(vm.customFields).length - 2} more
+                                </Badge>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
                         <TableCell>
@@ -600,6 +619,20 @@ export default function NetBoxInventories() {
                   data-testid="input-vm-tags"
                 />
               </div>
+              {editingVm.customFields && Object.keys(editingVm.customFields).length > 0 && (
+                <div>
+                  <label className="text-sm font-medium">Custom Fields (read-only)</label>
+                  <div className="mt-2 p-3 bg-muted rounded-md">
+                    <div className="flex gap-2 flex-wrap">
+                      {Object.entries(editingVm.customFields).map(([key, value]) => (
+                        <Badge key={key} variant="outline">
+                          {key}: {String(value)}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
               <Button
                 className="w-full"
                 onClick={async () => {

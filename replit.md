@@ -44,3 +44,9 @@ The UI follows a dark-first design principle using the Inter font family for UI 
 - **Shadcn UI:** UI component library.
 - **Vite:** Frontend build tool.
 - **Drizzle ORM:** Database ORM for TypeScript.
+- 2025-10-16: NetBox custom fields display
+  - Fixed trailing slash issue in NetBox API URLs (was causing 404 errors on import)
+  - Added Custom Fields column to VMs table displaying key-value pairs as badges
+  - Custom fields shown in edit dialog as read-only reference
+  - Displays up to 2 custom fields in table with "+N more" indicator for additional fields
+  - All NetBox custom fields are properly imported and stored as JSON in the database

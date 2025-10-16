@@ -1,0 +1,117 @@
+Answers & Plan for Bridge App (Replit build)
+
+1) Stack Preference
+
+Proceed with Fullstack JavaScript on Replit: React (frontend) + Express (backend) + PostgreSQL.
+
+Mirror the Rails design (same domain models/endpoints) so we can swap to Rails later for production if we want.
+
+2) NetBox Integration
+
+No special Replit integrations needed. Use direct REST calls to NetBox from the Express backend (axios/fetch).
+
+I’ll provide a dev NetBox URL + token (read-only) via environment variables.
+
+Database: use external Postgres (e.g., Neon/Supabase) and connect from Express.
+
+3) Authentication & Roles
+
+Include MVP auth with roles now (don’t defer):
+
+Username/password (bcrypt), sessions (JWT or cookie).
+
+Roles: admin / operator / viewer.
+
+Route guards + server-side authorization middleware.
+
+4) FakeRunner Implementation
+
+Implement a FakeRunner service that:
+
+Streams canned logs over WebSocket in real time (simulate 10–30s runs).
+
+Persists run logs and JSON results in Postgres (do not keep only in-memory).
+
+Expose /runs/:id/stream (WS) and /runs/:id (REST) for status/results.
+
+MVP Scope (what to build)
+
+Backend (Express)
+
+Models (via Prisma/Knex): Credential, Project, JobTemplate, JobRun, Setting, User.
+
+NetBox reader endpoints:
+
+GET /inventory/groups → list groups from NetBox
+
+GET /inventory/hosts?group=... → hosts + key vars (primary_ip4, tags, patch_wave, patch_subwave, ansible_user)
+
+POST /inventory/preflight → input limitExpr, output counts + warnings
+
+Projects (Git):
+
+POST /projects (git_url, ref), POST /projects/:id/sync, GET /projects/:id/playbooks
+
+Credentials (mock):
+
+CRUD with non-secret metadata + secretRef placeholder
+
+Templates: CRUD (projectId, playbook, credentialId, limitExpr, extraVars, check, diff)
+
+Runs:
+
+POST /templates/:id/launch → creates JobRun, starts FakeRunner
+
+POST /templates/:id/schedule → scheduledAt
+
+GET /runs, GET /runs/:id, GET /runs/:id/csv
+
+WS /runs/:id/stream for live logs
+
+Auth: signup/login/logout, role middleware.
+
+Frontend (React)
+
+Pages: Login, Dashboard, Inventory, Projects, Credentials, Templates, Run Detail (live logs), Runs list, Reports, Settings.
+
+Inventory page: group picker, hosts table, preflight panel.
+
+Templates: form (project/playbook/credential/limit/extraVars/check/diff) + preflight badge + Launch + Schedule (date picker).
+
+Runs: live console, status, summary, CSV export.
+
+Reports: Inventory Health (coverage %, missing primary_ip4/ansible_user) and Recent Runs summary.
+
+Environment variables (Replit Secrets)
+
+DATABASE_URL
+
+NETBOX_URL
+
+NETBOX_TOKEN (read-only)
+
+JWT_SECRET
+
+Non-goals (Replit)
+
+No real Ansible/SSH.
+
+No real provider collectors.
+
+No storage of real secrets (only placeholders).
+
+Acceptance (MVP)
+
+Auth with roles enforced.
+
+NetBox groups/hosts visible; preflight works.
+
+Project sync lists playbooks.
+
+Credentials saved as references (no secrets).
+
+Template → Launch creates run with live logs and persisted result.
+
+Schedule triggers later and completes.
+
+Reports show Inventory Health + recent run stats.

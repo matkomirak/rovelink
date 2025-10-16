@@ -1,0 +1,104 @@
+Bridge App — Replit Work Package (Web MVP)
+
+Goal: Tower-lite UI that reads NetBox inventory, manages projects/credentials/templates, runs jobs via FakeRunner (simulated ansible-playbook) with live logs + scheduling.
+Constraints: No real Ansible/SSH/provider collectors on Replit. Use GoodJob (Postgres). Read-only NetBox.
+
+Scope
+
+Web app (Rails) with: Settings, Inventory (from NetBox), Projects (Git), Credentials (mock), Job Templates, Runs (live logs), Scheduling, Reports.
+
+Out of scope: real provider sync, real Ansible, real secrets (handled later on VM).
+
+Milestones
+
+Platform & Auth
+
+Rails + Postgres; Tailwind + Hotwire.
+
+GoodJob as ActiveJob adapter; Devise + Pundit (roles: admin/operator/viewer).
+
+ENV: DATABASE_URL, NETBOX_URL, NETBOX_TOKEN, RUNNER_BACKEND=fake.
+
+DoD: app boots, roles enforced, GoodJob UI reachable.
+
+NetBox Reader (read-only)
+
+Settings for NetBox URL/token (prefill from ENV).
+
+Inventory view: groups, hosts, key vars (primary_ip, tags, patch_wave/subwave, ansible_user).
+
+Preflight for a limit expression (counts + warnings).
+
+DoD: lists groups/hosts; preflight shows actionable warnings.
+
+Projects (Git Playbooks)
+
+CRUD: name, git_url, git_ref; sync (clone/pull); list discovered playbooks.
+
+DoD: last_sync_at visible; playbooks selectable; errors surfaced.
+
+Credentials (mocked)
+
+CRUD: name, kind (ssh_key/winrm/sudo/vault), non-secret metadata; secret_ref placeholder.
+
+DoD: selectable in templates; no real secrets stored.
+
+Job Templates
+
+Fields: project, playbook, credential, limit_expr, extra_vars (JSON), flags (check/diff).
+
+Inline preflight summary for chosen limit.
+
+DoD: save template; “Save & Launch” creates a run.
+
+FakeRunner + Runs
+
+Runner interface (launch/stream/status). FakeRunner streams canned logs, returns JSON summary.
+
+Runs index/detail; live console (websocket); CSV export.
+
+DoD: logs stream; status transitions to ok/failed; CSV downloadable.
+
+Scheduling
+
+Date/time picker → JobRun with scheduled_at; enqueued at time.
+
+DoD: scheduled run fires at correct time and completes.
+
+Reports
+
+Inventory Health: coverage %, missing primary_ip/ansible_user.
+
+Runs Report: recent success rate, totals, top failures (from FakeRunner).
+
+DoD: widgets render from NetBox + run data.
+
+Quality
+
+RSpec tests (key flows), WebMock/VCR for NetBox calls, fixtures for FakeRunner output.
+
+RuboCop + Brakeman clean.
+
+DoD: tests pass; lint/security clean.
+
+Demo Script
+
+Settings ok → Inventory shows groups.
+
+Projects sync → playbook visible.
+
+Template create (limit: tag_customer_x:&tag_os_linux) → preflight ok → launch.
+
+Runs page → live logs → result summary → CSV export.
+
+Schedule next run via date picker.
+
+Acceptance (MVP)
+
+Works with NetBox only; no real secrets on Replit.
+
+FakeRunner provides believable logs + summaries.
+
+Usable UI with role-based access, clear errors, and basic reports.
+
+Nice-to-have (optional): limit autocomplete, JSON Schema validation for extra_vars, dark mode, CSV overlay for demo vars.

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Badge } from "@/components/ui/badge";
-import { Settings as SettingsIcon, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Settings as SettingsIcon, CheckCircle2, XCircle, Loader2, Wrench, RefreshCw, Database, Trash2, RotateCw } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
@@ -65,6 +65,34 @@ export default function Settings() {
     onError: (error: Error) => {
       setTestStatus("error");
       toast({ variant: "destructive", title: "Connection failed", description: error.message });
+    },
+  });
+
+  const rebuildCacheMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/housekeeping/rebuild-cache", {}),
+    onSuccess: () => {
+      toast({ title: "Cache Rebuilt", description: "Group cache has been refreshed from NetBox" });
+    },
+  });
+
+  const ensureSchemaMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/housekeeping/ensure-schema", {}),
+    onSuccess: () => {
+      toast({ title: "Schema Verified", description: "NetBox custom fields are up to date" });
+    },
+  });
+
+  const pruneStaleMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/housekeeping/prune-stale", {}),
+    onSuccess: (data: any) => {
+      toast({ title: "Stale Objects Pruned", description: `Removed ${data.count || 0} stale objects` });
+    },
+  });
+
+  const retryFailedMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/housekeeping/retry-failed", {}),
+    onSuccess: (data: any) => {
+      toast({ title: "Retrying Failed Syncs", description: `${data.count || 0} sync runs queued for retry` });
     },
   });
 
@@ -207,6 +235,91 @@ export default function Settings() {
           <p className="text-xs text-muted-foreground mt-4">
             Environment variables are managed through Replit Secrets and loaded automatically
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wrench className="h-5 w-5 text-primary" />
+            Provider Housekeeping
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Maintenance operations for provider inventory sync system
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Button
+                variant="outline"
+                onClick={() => rebuildCacheMutation.mutate()}
+                disabled={rebuildCacheMutation.isPending}
+                data-testid="button-rebuild-cache"
+                className="justify-start"
+              >
+                {rebuildCacheMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Rebuild Group Cache
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => ensureSchemaMutation.mutate()}
+                disabled={ensureSchemaMutation.isPending}
+                data-testid="button-ensure-schema"
+                className="justify-start"
+              >
+                {ensureSchemaMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Database className="mr-2 h-4 w-4" />
+                )}
+                Ensure NetBox Schema
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => pruneStaleMutation.mutate()}
+                disabled={pruneStaleMutation.isPending}
+                data-testid="button-prune-stale"
+                className="justify-start"
+              >
+                {pruneStaleMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-2 h-4 w-4" />
+                )}
+                Prune Stale Objects
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => retryFailedMutation.mutate()}
+                disabled={retryFailedMutation.isPending}
+                data-testid="button-retry-failed"
+                className="justify-start"
+              >
+                {retryFailedMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCw className="mr-2 h-4 w-4" />
+                )}
+                Retry Failed Syncs
+              </Button>
+            </div>
+
+            <div className="text-xs text-muted-foreground space-y-1 pt-2">
+              <p><strong>Rebuild Cache:</strong> Refresh autocomplete suggestions from NetBox</p>
+              <p><strong>Ensure Schema:</strong> Create/update custom fields in NetBox</p>
+              <p><strong>Prune Stale:</strong> Remove objects from disabled providers</p>
+              <p><strong>Retry Failed:</strong> Re-queue failed sync runs</p>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

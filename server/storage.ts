@@ -9,7 +9,7 @@ import {
   type Setting, type InsertSetting,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, gte, lte } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -37,7 +37,7 @@ export interface IStorage {
   deleteJobTemplate(id: string): Promise<void>;
 
   // Job Run operations
-  getJobRuns(): Promise<JobRun[]>;
+  getJobRuns(filters?: any, page?: number, pageSize?: number): Promise<JobRun[]>;
   getJobRun(id: string): Promise<JobRun | undefined>;
   createJobRun(run: InsertJobRun): Promise<JobRun>;
   updateJobRun(id: string, data: Partial<JobRun>): Promise<JobRun | undefined>;
@@ -144,8 +144,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Job Run operations
-  async getJobRuns(): Promise<JobRun[]> {
-    return await db.select().from(jobRuns).orderBy(desc(jobRuns.createdAt));
+  async getJobRuns(filters: any = {}, page: number = 1, pageSize: number = 50): Promise<JobRun[]> {
+    let query = db.select().from(jobRuns);
+    
+    if (filters.status) {
+      query = query.where(eq(jobRuns.status, filters.status)) as any;
+    }
+    if (filters.archived !== undefined) {
+      query = query.where(eq(jobRuns.archived, filters.archived)) as any;
+    }
+    if (filters.startDate) {
+      query = query.where(gte(jobRuns.createdAt, filters.startDate)) as any;
+    }
+    if (filters.endDate) {
+      query = query.where(lte(jobRuns.createdAt, filters.endDate)) as any;
+    }
+    
+    const offset = (page - 1) * pageSize;
+    return await query.orderBy(desc(jobRuns.createdAt)).limit(pageSize).offset(offset);
   }
 
   async getJobRun(id: string): Promise<JobRun | undefined> {

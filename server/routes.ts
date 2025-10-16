@@ -312,7 +312,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Runs routes
   app.get("/api/runs", authMiddleware, async (req, res) => {
     try {
-      const runs = await storage.getJobRuns();
+      const { status, archived, startDate, endDate, page = "1", pageSize = "50" } = req.query;
+      const filters: any = {};
+      
+      if (status) filters.status = status;
+      if (archived) filters.archived = archived === "true";
+      if (startDate) filters.startDate = new Date(startDate as string);
+      if (endDate) filters.endDate = new Date(endDate as string);
+      
+      const pageNum = parseInt(page as string);
+      const pageSizeNum = parseInt(pageSize as string);
+      
+      const runs = await storage.getJobRuns(filters, pageNum, pageSizeNum);
       res.json(runs);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch runs" });
@@ -328,6 +339,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(run);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch run" });
+    }
+  });
+
+  app.post("/api/runs/:id/archive", authMiddleware, async (req, res) => {
+    try {
+      const run = await storage.getJobRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ message: "Run not found" });
+      }
+
+      await storage.updateJobRun(req.params.id, { archived: true });
+      res.json({ message: "Run archived successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to archive run" });
+    }
+  });
+
+  app.post("/api/runs/:id/unarchive", authMiddleware, async (req, res) => {
+    try {
+      const run = await storage.getJobRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ message: "Run not found" });
+      }
+
+      await storage.updateJobRun(req.params.id, { archived: false });
+      res.json({ message: "Run unarchived successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to unarchive run" });
     }
   });
 

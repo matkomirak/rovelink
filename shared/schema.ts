@@ -80,6 +80,7 @@ export const jobRuns = pgTable("job_runs", {
   templateId: varchar("template_id").notNull().references(() => jobTemplates.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("queued"), // queued, running, ok, failed
+  archived: boolean("archived").default(false),
   scheduledAt: timestamp("scheduled_at"),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),

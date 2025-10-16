@@ -1,16 +1,49 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { PlayCircle, CheckCircle2, XCircle, Clock, ExternalLink, GitCompare } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PlayCircle, CheckCircle2, XCircle, Clock, ExternalLink, GitCompare, Archive, ArchiveRestore, Filter } from "lucide-react";
 import type { JobRun } from "@shared/schema";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Runs() {
   const [, setLocation] = useLocation();
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [archivedFilter, setArchivedFilter] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const { toast } = useToast();
+  
+  const queryParams = new URLSearchParams();
+  if (statusFilter) queryParams.append("status", statusFilter);
+  if (archivedFilter) queryParams.append("archived", archivedFilter);
+  if (startDate) queryParams.append("startDate", startDate);
+  if (endDate) queryParams.append("endDate", endDate);
+  
   const { data: runs, isLoading } = useQuery<JobRun[]>({
-    queryKey: ["/api/runs"],
+    queryKey: ["/api/runs", queryParams.toString()],
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/runs/${id}/archive`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/runs"] });
+      toast({ title: "Run archived successfully" });
+    },
+  });
+
+  const unarchiveMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/runs/${id}/unarchive`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/runs"] });
+      toast({ title: "Run unarchived successfully" });
+    },
   });
 
   const getStatusIcon = (status: string) => {
@@ -63,6 +96,65 @@ export default function Runs() {
         )}
       </div>
 
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Filter className="h-5 w-5" />
+            <CardTitle>Filters</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Status</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger data-testid="filter-status">
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">All statuses</SelectItem>
+                  <SelectItem value="queued">Queued</SelectItem>
+                  <SelectItem value="running">Running</SelectItem>
+                  <SelectItem value="ok">Success</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Archive Status</label>
+              <Select value={archivedFilter} onValueChange={setArchivedFilter}>
+                <SelectTrigger data-testid="filter-archived">
+                  <SelectValue placeholder="All runs" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">All runs</SelectItem>
+                  <SelectItem value="false">Active only</SelectItem>
+                  <SelectItem value="true">Archived only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Start Date</label>
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                data-testid="filter-start-date"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">End Date</label>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                data-testid="filter-end-date"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {isLoading ? (
         <Card>
           <CardContent className="p-6">
@@ -87,6 +179,7 @@ export default function Runs() {
                     <TableHead>Run ID</TableHead>
                     <TableHead>Started</TableHead>
                     <TableHead>Duration</TableHead>
+                    <TableHead>Archive</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -109,12 +202,39 @@ export default function Runs() {
                       </TableCell>
                       <TableCell className="text-sm font-mono">{formatDuration(run)}</TableCell>
                       <TableCell>
-                        <Link href={`/runs/${run.id}`}>
-                          <Button variant="ghost" size="sm" data-testid={`button-view-${run.id}`}>
-                            <ExternalLink className="h-4 w-4 mr-2" />
-                            View
-                          </Button>
-                        </Link>
+                        {run.archived ? (
+                          <Badge variant="secondary">Archived</Badge>
+                        ) : (
+                          <Badge variant="outline">Active</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Link href={`/runs/${run.id}`}>
+                            <Button variant="ghost" size="sm" data-testid={`button-view-${run.id}`}>
+                              <ExternalLink className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                          {run.archived ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => unarchiveMutation.mutate(run.id)}
+                              data-testid={`button-unarchive-${run.id}`}
+                            >
+                              <ArchiveRestore className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => archiveMutation.mutate(run.id)}
+                              data-testid={`button-archive-${run.id}`}
+                            >
+                              <Archive className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

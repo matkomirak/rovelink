@@ -76,6 +76,92 @@ export class NetBoxAdapter {
   }
 
   /**
+   * Get supported object types for NetBox
+   */
+  objectTypes(): string[] {
+    return [
+      "VirtualMachine",
+      "IPAddress",
+      "Interface",
+      "VMInterface",
+      "Tenant",
+      "Site",
+      "Cluster",
+      "Platform",
+      "Tag"
+    ];
+  }
+
+  /**
+   * Validate an object against NetBox schema
+   */
+  validate(targetType: string, obj: any): { errors: string[]; warnings: string[] } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    switch (targetType) {
+      case "VirtualMachine":
+        if (!obj.name || typeof obj.name !== 'string') {
+          errors.push("VirtualMachine requires a valid 'name' field");
+        }
+        if (obj.vcpus && typeof obj.vcpus !== 'number') {
+          errors.push("VirtualMachine 'vcpus' must be a number");
+        }
+        if (obj.memory && typeof obj.memory !== 'number') {
+          errors.push("VirtualMachine 'memory' must be a number");
+        }
+        if (!obj.status) {
+          warnings.push("VirtualMachine should have 'status' specified (active, offline, staged)");
+        }
+        if (!obj.custom_fields?.ext_id) {
+          warnings.push("VirtualMachine should have 'custom_fields.ext_id' for idempotent sync");
+        }
+        break;
+
+      case "IPAddress":
+        if (!obj.address) {
+          errors.push("IPAddress requires an 'address' field (CIDR notation)");
+        } else if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(obj.address)) {
+          errors.push("IPAddress 'address' must be in CIDR notation (e.g., 192.168.1.10/24)");
+        }
+        break;
+
+      case "VMInterface":
+      case "Interface":
+        if (!obj.name) {
+          errors.push("Interface requires a 'name' field");
+        }
+        if (!obj.mac_address) {
+          warnings.push("Interface should have 'mac_address' for proper identification");
+        }
+        break;
+
+      case "Tenant":
+      case "Site":
+      case "Cluster":
+      case "Platform":
+        if (!obj.name) {
+          errors.push(`${targetType} requires a 'name' field`);
+        }
+        break;
+
+      case "Tag":
+        if (!obj.name) {
+          errors.push("Tag requires a 'name' field");
+        }
+        if (!obj.slug) {
+          warnings.push("Tag should have 'slug' for proper identification");
+        }
+        break;
+
+      default:
+        warnings.push(`Unknown target type: ${targetType}`);
+    }
+
+    return { errors, warnings };
+  }
+
+  /**
    * Ensure NetBox custom fields exist
    */
   async ensureCustomFields(): Promise<void> {

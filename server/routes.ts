@@ -15,6 +15,11 @@ import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJo
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 
+// Import modular BDP routes
+import pipelineRoutes from "./routes/pipelines";
+import pipelineMappingRoutes from "./routes/pipeline-mappings";
+import providerDiscoveryRoutes from "./routes/provider-discovery";
+
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 
 // Auth middleware
@@ -51,6 +56,11 @@ function requireRole(...roles: string[]) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Mount BDP modular routes with auth middleware
+  app.use("/api/pipelines", authMiddleware, pipelineRoutes);
+  app.use("/api/pipelines", authMiddleware, pipelineMappingRoutes);
+  app.use("/api/providers", authMiddleware, providerDiscoveryRoutes);
+
   // Auth routes
   app.post("/api/auth/signup", async (req, res) => {
     try {

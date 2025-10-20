@@ -11,6 +11,7 @@ import {
   Bell,
   Cloud,
   Database,
+  Boxes,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -60,6 +61,11 @@ const menuItems = [
     title: "Providers",
     url: "/providers",
     icon: Cloud,
+  },
+  {
+    title: "CMDBs",
+    url: "/cmdbs",
+    icon: Boxes,
   },
   {
     title: "Templates",

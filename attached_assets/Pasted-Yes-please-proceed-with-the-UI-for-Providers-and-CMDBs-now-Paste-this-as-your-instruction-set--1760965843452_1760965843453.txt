@@ -1,0 +1,103 @@
+Yes—please proceed with the **UI for Providers and CMDBs** now.
+Paste this as your instruction set:
+
+---
+
+## ✅ Go-ahead: Build UI Pages (Tasks 9–12)
+
+### 1) Navigation
+
+* Add left-nav items: **Providers**, **CMDBs**, **Runs** (with `provider-sync` filter), keep **Settings → Housekeeping**.
+
+### 2) Providers UI
+
+**Page:** `/providers`
+
+* Table columns: **Name · Kind · Enabled · Last Sync · Next Run · Status · Actions**
+* Actions per row:
+
+  * **Test** → POST `/api/providers/:id/test` → toast result
+  * **Sync now** → POST `/api/providers/:id/sync` → open run modal (live log tail + counts)
+  * **Edit** → PATCH `/api/providers/:id`
+  * **Disable/Enable**
+  * **View runs** → link to Runs page filtered by provider
+* **Add Provider** dialog:
+
+  * `kind` (`proxmox` for now), `name`, `enabled`, **config** fields (show/hide by kind):
+
+    * Proxmox: `base_url`, `auth_method`, `username/password` or `token_id/token_secret`, `realm`, `verify_ssl`, optional include/exclude nodes.
+  * “Test connection” button inside the dialog (non-blocking).
+* **Schedule** inline editor (cron) with validation + “Next run: …”.
+
+**Status pills:**
+
+* `OK` (last run ok), `Warning` (partial errors), `Failed` (last run failed).
+* Hover → show last counts `{created, updated, unchanged, removed, errors}`.
+
+**Empty state CTA:** “Add your first Provider”.
+
+### 3) CMDBs UI
+
+**Page:** `/cmdbs`
+
+* Table: **Name · Kind · Enabled · Status · Actions**
+* Actions: **Test**, **Edit**, **Disable/Enable**
+* **Add CMDB** dialog:
+
+  * `kind` (`netbox` for now), `name`, `enabled`, `config.url`, `config.token`
+* “Test” calls POST `/api/cmdbs/:id/test`.
+
+**Note banner:** “Inventory reads & job limits use the active NetBox account. Configure in Settings if multiple are present.”
+
+### 4) Runs page updates
+
+**Page:** `/runs`
+
+* Filter: **Type** = `provider-sync | playbook-run` (keep existing filters)
+* Columns: **Type · Name/Provider · Started · Duration · Status · Counts**
+* Detail drawer/modal:
+
+  * Live log tail for running
+  * Final summary + counts + CSV export (if available)
+
+### 5) Housekeeping (link-outs)
+
+* Keep existing buttons:
+
+  * **Ensure NetBox Schema**
+  * **Rebuild Group Cache**
+* After click: disable button, show spinner, then a result toast + small result text.
+
+---
+
+## UX micro-spec
+
+* Use non-blocking toasts for **Test** results.
+* Confirm dialogs for “Disable” and schedule changes.
+* Validate **cron** client-side; show next fire time.
+* Graceful error banners for 401/403/500 with clear text.
+
+---
+
+## Acceptance (UI)
+
+* I can **add a Proxmox provider**, **Test**, **Sync now**, see **live run**, and **counts** after completion.
+* I can **edit** schedule (cron) and see **Next run** update.
+* I can **add a NetBox CMDB**, **Test** it.
+* **Runs** page shows `provider-sync` entries with status and counts.
+* **Housekeeping** buttons work and show results.
+* No secrets appear in browser devtools (tokens only stored server-side).
+
+---
+
+## Quick test script (use your implemented APIs)
+
+1. Add provider → Test (expect nodes/version).
+2. Sync now → watch run modal; verify counts.
+3. Add NetBox CMDB → Test OK.
+4. Housekeeping → Ensure schema, then Rebuild group cache (success toasts).
+5. Runs page → filter `provider-sync`, open last run, see counts/logs.
+
+---
+
+When this UI is done & reviewed, we’ll green-light **Phase 3 (BDP: mapping engine + editor)**.

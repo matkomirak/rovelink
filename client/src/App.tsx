@@ -21,6 +21,7 @@ import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
 import Providers from "@/pages/providers";
+import Cmdbs from "@/pages/cmdbs";
 import NetBoxInventory from "@/pages/netbox-inventory";
 import type { User } from "@shared/schema";
 
@@ -33,6 +34,7 @@ function AuthenticatedRouter() {
       <Route path="/projects" component={Projects} />
       <Route path="/credentials" component={Credentials} />
       <Route path="/providers" component={Providers} />
+      <Route path="/cmdbs" component={Cmdbs} />
       <Route path="/templates" component={Templates} />
       <Route path="/runs" component={Runs} />
       <Route path="/runs/:id" component={RunDetail} />

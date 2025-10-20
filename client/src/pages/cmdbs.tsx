@@ -49,7 +49,7 @@ export default function CmdbsPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: CmdbFormData) => apiRequest("/api/cmdbs", "POST", data),
+    mutationFn: (data: CmdbFormData) => apiRequest("POST", "/api/cmdbs", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cmdbs"] });
       setIsDialogOpen(false);
@@ -62,7 +62,7 @@ export default function CmdbsPage() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<CmdbFormData> }) =>
-      apiRequest(`/api/cmdbs/${id}`, "PATCH", data),
+      apiRequest("PATCH", `/api/cmdbs/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cmdbs"] });
       setIsDialogOpen(false);
@@ -75,7 +75,7 @@ export default function CmdbsPage() {
   });
 
   const testMutation = useMutation({
-    mutationFn: (id: string) => apiRequest(`/api/cmdbs/${id}/test`, "POST"),
+    mutationFn: (id: string) => apiRequest("POST", `/api/cmdbs/${id}/test`),
     onSuccess: (data: any) => {
       if (data.ok) {
         toast({

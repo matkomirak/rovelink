@@ -75,6 +75,7 @@ export interface IStorage {
   // Sync Run operations
   createSyncRun(run: InsertSyncRun): Promise<SyncRun>;
   getSyncRun(id: string): Promise<SyncRun | undefined>;
+  updateSyncRun(id: string, data: Partial<SyncRun>): Promise<SyncRun | undefined>;
   getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]>;
   getLastFailedSyncRuns(): Promise<SyncRun[]>;
 
@@ -366,6 +367,15 @@ export class DatabaseStorage implements IStorage {
   async getSyncRun(id: string): Promise<SyncRun | undefined> {
     const [run] = await db.select().from(syncRuns).where(eq(syncRuns.id, id));
     return run || undefined;
+  }
+
+  async updateSyncRun(id: string, data: Partial<SyncRun>): Promise<SyncRun | undefined> {
+    const [updated] = await db
+      .update(syncRuns)
+      .set(data)
+      .where(eq(syncRuns.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   async getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]> {

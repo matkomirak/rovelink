@@ -8,7 +8,10 @@ import { storage } from "./storage";
 import { netboxService } from "./services/netbox";
 import { fakeRunner } from "./services/fake-runner";
 import { notificationService } from "./services/notificationService";
-import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, netboxVms } from "@shared/schema";
+import { ProxmoxCollector } from "./services/proxmox-collector";
+import { NetBoxAdapter } from "./services/netbox-adapter";
+import { runProviderSync } from "./services/provider-sync";
+import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 
@@ -631,19 +634,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Provider not found" });
       }
 
-      // Create sync run
-      const syncRun = await storage.createSyncRun({
-        providerAccountId: provider.id,
-        type: "provider-sync",
-        status: "queued",
-      });
+      // Start provider sync
+      const runId = await runProviderSync(provider.id);
 
-      // Execute sync in background
-      const { SyncWorker } = await import("./services/syncWorker");
-      const worker = new SyncWorker();
-      worker.executeSyncRun(syncRun.id).catch(console.error);
-
-      res.json({ runId: syncRun.id });
+      res.json({ runId });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to start sync" });
     }
@@ -656,6 +650,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(runs);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get provider runs" });
+    }
+  });
+
+  // CMDB routes
+  app.get("/api/cmdbs", authMiddleware, async (req, res) => {
+    try {
+      const cmdbs = await storage.getCmdbAccounts();
+      res.json(cmdbs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get CMDBs" });
+    }
+  });
+
+  app.post("/api/cmdbs", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const data = insertCmdbAccountSchema.parse(req.body);
+      const cmdb = await storage.createCmdbAccount(data);
+      res.json(cmdb);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to create CMDB account" });
+    }
+  });
+
+  app.patch("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const cmdb = await storage.updateCmdbAccount(req.params.id, req.body);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      res.json(cmdb);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to update CMDB account" });
+    }
+  });
+
+  app.post("/api/cmdbs/:id/test", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+
+      // Test connection based on CMDB kind
+      if (cmdb.kind === "netbox") {
+        const adapter = new NetBoxAdapter(cmdb.config as any);
+        const result = await adapter.test();
+        res.json(result);
+      } else {
+        res.status(400).json({ error: "Unsupported CMDB kind" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to test connection" });
     }
   });
 
@@ -678,14 +724,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/housekeeping/ensure-netbox-schema", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
-      const { netboxService } = await import("./services/netbox");
-      const fields = ["ext_id", "ext_provider", "patch_wave", "patch_subwave", "ansible_user"];
-      const result = await netboxService.ensureCustomFields(fields);
+      const netboxUrl = process.env.NETBOX_URL || '';
+      const netboxToken = process.env.NETBOX_TOKEN || '';
+
+      if (!netboxUrl || !netboxToken) {
+        return res.status(400).json({ message: "NetBox URL or Token not configured" });
+      }
+
+      const adapter = new NetBoxAdapter({ url: netboxUrl, token: netboxToken });
+      await adapter.ensureCustomFields();
       
       res.json({
-        message: `Ensured ${fields.length} custom fields`,
-        created: result.created,
-        existing: result.existing,
+        message: "Ensured NetBox custom fields (ext_id, ext_provider, patch_wave, patch_subwave, ansible_user)",
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to ensure schema" });

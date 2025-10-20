@@ -36,6 +36,7 @@ import { ArrowLeft, Play, RefreshCw, Download, Clock, Save } from "lucide-react"
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import parser from "cron-parser";
+import { ErrorBanner } from "@/components/error-banner";
 
 interface Pipeline {
   id: string;
@@ -115,6 +116,7 @@ export default function PipelineDetail() {
   const [scheduleCron, setScheduleCron] = useState("");
   const [cronError, setCronError] = useState<string | null>(null);
   const [nextRun, setNextRun] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<{ message: string; traceId?: string } | null>(null);
 
   const { data: pipeline, isLoading } = useQuery<Pipeline>({
     queryKey: ["/api/pipelines", id],
@@ -135,11 +137,22 @@ export default function PipelineDetail() {
   const toggleEnabled = useMutation({
     mutationFn: async (enabled: boolean) => {
       const response = await apiRequest("PATCH", `/api/pipelines/${id}`, { enabled });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to update pipeline");
+      }
       return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/pipelines", id] });
       toast({ title: "Success", description: "Pipeline updated" });
+      setPageError(null);
+    },
+    onError: (error: any) => {
+      setPageError({
+        message: error.message || "Failed to update pipeline",
+        traceId: error.traceId || `err_${Date.now()}`,
+      });
     },
   });
 
@@ -297,6 +310,14 @@ export default function PipelineDetail() {
 
   return (
     <div className="space-y-6">
+      {pageError && (
+        <ErrorBanner
+          message={pageError.message}
+          traceId={pageError.traceId}
+          onRetry={() => setPageError(null)}
+        />
+      )}
+      
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/pipelines">

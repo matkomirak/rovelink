@@ -1,8 +1,8 @@
 # Bridge - Infrastructure Automation Platform
 
-**VERSION: "no-bridge-pipeline-code" (v1.0 - Pre-Pipeline Implementation)**
+**VERSION: "bridge-pipeline-code-phases-1-2" (v2.0 - Phases 1-2 Complete)**
 
-This version includes all core features EXCEPT Bridge pipeline orchestration code. This is the baseline version before pipeline functionality is added.
+This version includes the core Providers and CMDBs management UI with backend integration for Phase 1-2 of the Bridge Data Pipelines (BDP) system. Phase 3 (visual mapping editor, pipeline orchestration, dry-run/versioning) is pending.
 
 ## Overview
 Bridge is a full-stack infrastructure automation UI designed to streamline IT operations. It integrates with NetBox for inventory management, provides tools for defining and managing job templates, and orchestrates the execution of simulated Ansible playbooks. The platform offers real-time log streaming for job runs, comprehensive reporting, and a robust provider system for collecting and synchronizing VM inventory from various virtualization platforms into NetBox. Its core purpose is to provide a centralized, user-friendly interface for managing infrastructure automation workflows, enhancing operational efficiency, and improving visibility into IT assets.
@@ -30,6 +30,7 @@ The UI follows a dark-first design principle using the Inter font family for UI 
 - **Reports Dashboard:** Widgets for inventory health (coverage, IP/user counts) and run statistics (success rate, failures).
 - **Notifications:** Configurable email and webhook notifications with trigger conditions (on success/failure), variable interpolation, retry logic, and custom headers/body.
 - **Provider System:** Extensible factory pattern for integrating various virtualization providers (e.g., Proxmox). This system collects VM inventory, normalizes data, and upserts it into NetBox. It includes provider account management, sync workers, external object mapping, sync run history, and housekeeping operations (cache rebuild, schema ensure, prune stale, retry failed).
+- **CMDBs Management (NEW - Phase 1-2):** Full CRUD for CMDB target accounts (NetBox, i-doit, ServiceNow). Features include connection testing, enable/disable toggles, and configuration management (URL, API token). NetBox CMDBs receive data from provider sync operations. Alert notification informs users that active NetBox account (configured in Settings) is used for inventory reads and job limits.
 - **Settings:** Configuration management for NetBox URL/token, connection testing, and housekeeping dashboard.
 - **NetBox VM Import/Editing:** Admin-only full replacement sync of VMs from NetBox, storing detailed metadata. Local editing of imported VM data (name, IP, OS, tags) is supported.
 
@@ -69,3 +70,30 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - Added limitExpr field to job_runs schema to preserve limit expressions from templates through execution
   - Rebuild Group Cache functionality now generates keyed groups from NetBox VM custom fields
   - Templates support limit expressions like: `customer_Alpha & os_linux & wave_Wave2 - role_db`
+
+## Recent Changes
+
+### 2025-10-20: Bridge Data Pipelines (BDP) - Phases 1-2 Complete
+- **CMDBs Page:** Created full UI for managing CMDB target accounts at `/cmdbs`
+  - Add/Edit CMDB accounts with kind selection (NetBox, i-doit, ServiceNow)
+  - Connection testing with detailed error reporting
+  - Enable/disable toggle for each CMDB account
+  - Table view showing all configured CMDBs with status indicators
+  - Alert notification explaining active NetBox usage for inventory/limits
+  - Backend: `POST /api/cmdbs`, `PATCH /api/cmdbs/:id`, `POST /api/cmdbs/:id/test`
+  
+- **Providers Page:** Already existed with comprehensive provider management
+  - Add/Edit provider accounts (Proxmox, vCenter, Azure)
+  - Test connection, Sync, and Schedule sync operations
+  - Cron expression validation for scheduled syncs
+  - Backend integration with provider collectors and sync workers
+  
+- **Navigation Updates:**
+  - Added "CMDBs" link to sidebar navigation (between Providers and Templates)
+  - Both Providers and CMDBs pages accessible from main navigation
+  - Icon: Cloud for Providers, Boxes for CMDBs
+  
+- **Dependencies:**
+  - Installed `cron-parser` package for schedule validation
+  
+- **Version Transition:** v1.0 "no-bridge-pipeline-code" → v2.0 "bridge-pipeline-code-phases-1-2"

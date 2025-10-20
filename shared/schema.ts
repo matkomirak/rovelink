@@ -150,6 +150,7 @@ export const providerAccounts = pgTable("provider_accounts", {
 export const providerAccountsRelations = relations(providerAccounts, ({ many }) => ({
   syncRuns: many(syncRuns),
   externalObjects: many(externalObjects),
+  pipelines: many(pipelines),
 }));
 
 // Sync Runs (Provider sync execution history)
@@ -219,7 +220,98 @@ export const cmdbAccounts = pgTable("cmdb_accounts", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const cmdbAccountsRelations = relations(cmdbAccounts, () => ({}));
+export const cmdbAccountsRelations = relations(cmdbAccounts, ({ many }) => ({
+  pipelines: many(pipelines),
+}));
+
+// Pipelines (BDP mapping configurations)
+export const pipelines = pgTable("pipelines", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  providerAccountId: varchar("provider_account_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  cmdbAccountId: varchar("cmdb_account_id").notNull().references(() => cmdbAccounts.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(true),
+  version: integer("version").notNull().default(1),
+  scheduleCron: text("schedule_cron"), // Optional cron expression
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  idxPipelineProvider: {
+    columns: [table.providerAccountId],
+    name: "idx_pipeline_provider"
+  },
+  idxPipelineCmdb: {
+    columns: [table.cmdbAccountId],
+    name: "idx_pipeline_cmdb"
+  },
+}));
+
+export const pipelinesRelations = relations(pipelines, ({ one, many }) => ({
+  providerAccount: one(providerAccounts, {
+    fields: [pipelines.providerAccountId],
+    references: [providerAccounts.id],
+  }),
+  cmdbAccount: one(cmdbAccounts, {
+    fields: [pipelines.cmdbAccountId],
+    references: [cmdbAccounts.id],
+  }),
+  createdByUser: one(users, {
+    fields: [pipelines.createdBy],
+    references: [users.id],
+  }),
+  mappings: many(pipelineMappings),
+  runs: many(pipelineRuns),
+}));
+
+// Pipeline Mappings (field transformation rules)
+export const pipelineMappings = pgTable("pipeline_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  pipelineId: varchar("pipeline_id").notNull().references(() => pipelines.id, { onDelete: "cascade" }),
+  sourceType: text("source_type").notNull(), // e.g., "Vm", "Interface"
+  targetType: text("target_type").notNull(), // e.g., "VirtualMachine", "Interface"
+  rules: jsonb("rules").notNull().default({}), // Transformation rules
+  status: text("status").notNull().default("draft"), // draft, active, disabled
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  idxMappingPipeline: {
+    columns: [table.pipelineId],
+    name: "idx_mapping_pipeline"
+  },
+}));
+
+export const pipelineMappingsRelations = relations(pipelineMappings, ({ one }) => ({
+  pipeline: one(pipelines, {
+    fields: [pipelineMappings.pipelineId],
+    references: [pipelines.id],
+  }),
+}));
+
+// Pipeline Runs (BDP sync execution history)
+export const pipelineRuns = pgTable("pipeline_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  pipelineId: varchar("pipeline_id").notNull().references(() => pipelines.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("queued"), // queued, running, ok, failed
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  summary: jsonb("summary").default({}), // {created, updated, unchanged, removed, errors}
+  logPath: text("log_path"), // Path to detailed log file
+  logs: text("logs").default(""), // Full log output
+  dryRun: boolean("dry_run").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  idxPipelineRunsPipeline: {
+    columns: [table.pipelineId, table.startedAt],
+    name: "idx_pipeline_runs_pipeline_started"
+  },
+}));
+
+export const pipelineRunsRelations = relations(pipelineRuns, ({ one }) => ({
+  pipeline: one(pipelines, {
+    fields: [pipelineRuns.pipelineId],
+    references: [pipelines.id],
+  }),
+}));
 
 // NetBox Inventory Sources (multiple NetBox instances)
 export const netboxInventorySources = pgTable("netbox_inventory_sources", {
@@ -345,6 +437,27 @@ export const insertCmdbAccountSchema = createInsertSchema(cmdbAccounts).omit({
   updatedAt: true,
 });
 
+export const insertPipelineSchema = createInsertSchema(pipelines).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  version: true,
+});
+
+export const insertPipelineMappingSchema = createInsertSchema(pipelineMappings).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertPipelineRunSchema = createInsertSchema(pipelineRuns).omit({
+  id: true,
+  createdAt: true,
+  startedAt: true,
+  finishedAt: true,
+  logs: true,
+  logPath: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -387,3 +500,12 @@ export type NetboxInventorySource = typeof netboxInventorySources.$inferSelect;
 
 export type InsertCmdbAccount = z.infer<typeof insertCmdbAccountSchema>;
 export type CmdbAccount = typeof cmdbAccounts.$inferSelect;
+
+export type InsertPipeline = z.infer<typeof insertPipelineSchema>;
+export type Pipeline = typeof pipelines.$inferSelect;
+
+export type InsertPipelineMapping = z.infer<typeof insertPipelineMappingSchema>;
+export type PipelineMapping = typeof pipelineMappings.$inferSelect;
+
+export type InsertPipelineRun = z.infer<typeof insertPipelineRunSchema>;
+export type PipelineRun = typeof pipelineRuns.$inferSelect;

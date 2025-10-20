@@ -1,0 +1,160 @@
+Fantastic work — green light to start **Phase 3: Bridge Data Pipelines (BDP)**.
+Paste the brief below as your next task package.
+
+---
+
+# ✅ Proceed: Phase 3 — Bridge Data Pipelines (BDP)
+
+## Goal
+
+Introduce **pipelines** that map provider objects → CMDB objects with a **visual mapping editor**, **dry-run diffs**, **sync now**, and **versioning/rollback**.
+
+---
+
+## 1) DB Migrations (add if not already present)
+
+* `pipelines(id, name, provider_account_id, cmdb_account_id, enabled bool, version int, schedule_cron text, created_by, created_at, updated_at)`
+* `pipeline_mappings(id, pipeline_id, source_type, target_type, rules jsonb, status text, updated_at)`
+* `pipeline_runs(id, pipeline_id, status text, started_at, finished_at, summary jsonb, log_path text, dry_run bool)`
+
+> Indexes: `(pipeline_id, started_at)`, FKs on provider/cmdb.
+
+---
+
+## 2) Backend APIs
+
+### Discovery & Samples
+
+* `GET /api/providers/:id/object-types` → e.g., `["Vm","Interface","IP","Tenant","Site"]`
+* `GET /api/providers/:id/samples?type=Vm&limit=20` → normalized sample objects (from your collector/normalizer)
+
+### Pipelines
+
+* `POST /api/pipelines` `{name, providerAccountId, cmdbAccountId}`
+* `GET /api/pipelines/:id`
+* `PATCH /api/pipelines/:id` `{name?, enabled?, schedule_cron?}`
+* `POST /api/pipelines/:id/dry-run` → returns diff summary + detail (no writes)
+* `POST /api/pipelines/:id/sync` → enqueues **bdp-sync** run; returns run id
+* `GET /api/pipelines/:id/runs` → list runs
+
+### Mappings
+
+* `POST /api/pipelines/:id/mappings` `{sourceType, targetType}`
+* `GET /api/pipelines/:id/mappings/:mapId`
+* `PATCH /api/pipelines/:id/mappings/:mapId` `{rules}`
+* `POST /api/pipelines/:id/mappings/:mapId/test` `{sampleId}` → single-object preview (transformed target + validation messages)
+
+> Reuse the **NetBox adapter** for `validate()` + `upsert()`; add an **i-doit adapter** stub with `objectTypes()` + `validate()` to begin.
+
+---
+
+## 3) Rules Engine (MVP)
+
+* **Rules shape** (already agreed): `target`, `matchBy`, `fields[]`, `children[]`, `conflicts{}`, optional `lookup_tables`, and transforms.
+* Implement transforms: `lower`, `upper`, `title`, `to_slug`, `strip`, `concat`, `map{}`, `regex_extract`, `lookup_table`, `datetime_parse`, and helpers `pick_primary_ipv4`.
+* **Conflict policies**: `provider-wins | cmdb-wins | manual-only | merge`.
+* **Match/Upsert**: use `matchBy` (e.g., `custom_fields.ext_id`) for idempotent writes.
+
+---
+
+## 4) UI — BDP
+
+### List `/pipelines`
+
+* Columns: **Name · Provider · CMDB · Enabled · Last run · Next run · Actions**
+* Actions: **Dry-Run | Sync Now | Edit | Disable**
+
+### Create Wizard
+
+1. **Select endpoints**: Provider (enabled), CMDB (enabled) → creates pipeline
+2. **Type pairs**: pick source types → compatible target types → create `pipeline_mappings`
+3. **Mapping editor** (3-pane):
+
+   * **Source**: sample object tree (choose sample)
+   * **Mappings**: rows `source path → transforms → target field` (+ conditionals, conflict policy per field)
+   * **Target preview**: required/optional flags, type validation
+   * **Save rules** → enable **Dry-Run**
+
+### Dry-Run Modal
+
+* Counts `{created, updated, unchanged, removed, errors}`
+* Paged list with field-level changes (+ CSV export)
+
+### Sync Now Modal
+
+* Live log tail + final counts
+
+### Versioning
+
+* Increment `pipelines.version` on save.
+* **Rollback** to a prior version (keep audit: who/when).
+
+---
+
+## 5) Scheduling
+
+* Allow optional cron on pipeline; show **Next run**.
+* Scheduler enqueues **bdp-sync** jobs (reuse cron-parser).
+
+---
+
+## 6) Preload RTC Rules (as presets)
+
+Provide preset rule sets the user can load in the editor (paste these YAML blocks into your presets store):
+
+* **Proxmox.Vm → NetBox.VirtualMachine** (RTC #1)
+* **vCenter.VM → NetBox.VirtualMachine** (RTC #2)
+* **Azure.Compute.VirtualMachine → NetBox.VirtualMachine** (RTC #3)
+* **Proxmox.Vm → i-doit.Virtual Server** (RTC #4)
+* **vCenter.VM → i-doit.Virtual Server** (RTC #5)
+* **Azure.Compute.VirtualMachine → i-doit.Virtual Server** (RTC #6)
+
+> Use the exact RTC snippets I supplied earlier. Add UI action **“Load preset…”** in the mapping editor.
+
+---
+
+## 7) Validation & Safety
+
+* Target adapters expose `validate(targetType, obj)`; show inline errors in the editor.
+* **Dry-run by default**; require explicit confirmation for first real sync.
+* **Field locks** for human-owned fields (respect `cmdb-wins`).
+* **Canary mode**: first run limited to X objects, auto-widen on success ≥ threshold.
+
+---
+
+## 8) Runs & Filters
+
+* Update `/runs` list to include `bdp-sync` runs (in addition to `provider-sync` & `playbook-run`).
+* Detail view shows pipeline name, counts, and artifacts (CSV).
+
+---
+
+## 9) Acceptance Criteria (Phase 3)
+
+* I can **create a pipeline** (Provider=Proxmox, CMDB=NetBox), pick **Vm → VirtualMachine**, and open the **mapping editor**.
+* Using **preset RTC #1**, **Dry-run** shows a meaningful diff; **Sync now** writes VMs/IPs/CFs/tags into NetBox idempotently.
+* **Versioning** works (save new rules → version++ → rollback).
+* `/runs` shows **bdp-sync** entries with counts and logs.
+* i-doit adapter stub is selectable (even if validate is basic), so we can wire RTC #4–#6 next.
+
+---
+
+## 10) Deliverables
+
+* Migrations + updated schema/types.
+* Backend routes + controller/service code.
+* React pages: Pipelines list, Create wizard, Mapping editor, Dry-run & Sync modals.
+* Preset rule JSON/YAML and a small **sample object** bundle for Proxmox/Vm, vCenter/VM, Azure/VM to demo without live calls.
+* README updates: how to create a pipeline, load a preset, dry-run, and sync.
+
+---
+
+## Notes
+
+* Keep all tokens server-side; no secrets in the browser.
+* Reuse existing **NetBox adapter** for final writes; ensure **custom fields** exist (Housekeeping already covers).
+* Maintain **idempotency** via `ext_id` across Provider Sync and BDP Sync paths.
+
+---
+
+**Please proceed with Phase 3 per the above.** If any interface needs clarification while you build, surface it and I’ll tighten the contract.

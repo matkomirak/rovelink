@@ -1,0 +1,640 @@
+Here’s a single, **copy-paste brief** for your Replit dev that merges the **Providers/Housekeeping**, **NetBox inventory (keyed_groups)**, the **Bridge Data Pipelines (BDP) UI/engine**, and the **RTC mapping rules** for **Proxmox/vCenter/Azure → NetBox** and **→ i-doit**.
+
+---
+
+# Bridge App – Final Combined Brief (Providers, BDP, Inventory, RTC Rules)
+
+## Stack & Env
+
+* **Stack:** React (UI) + Express (API) + PostgreSQL.
+* **Secrets (Replit):** `DATABASE_URL`, `NETBOX_URL` (base URL, no /api), `NETBOX_TOKEN` (read-only), `JWT_SECRET`.
+* **Constraint:** No real Ansible on Replit (keep FakeRunner). All NetBox calls via backend.
+
+---
+
+## Navigation (Left Menu)
+
+* **Dashboard**
+* **Providers** (sources: Proxmox, vCenter, Azure, …)
+* **CMDBs** (targets: NetBox, i-doit, ServiceNow—implement NetBox + i-doit first)
+* **Bridge Data Pipelines (BDP)** (mapping & sync flows)
+* **Runs** (filters: `provider-sync | bdp-sync | playbook-run`)
+* **Settings → Housekeeping**
+
+---
+
+## Database (Postgres)
+
+Create/confirm:
+
+* `provider_accounts(id, kind, name, enabled bool, schedule_cron text, config jsonb, created_at, updated_at)`
+* `cmdb_accounts(id, kind, name, enabled bool, config jsonb, created_at, updated_at)`
+* `sync_runs(id, type text, provider_account_id, pipeline_id, status text, started_at, finished_at, counts jsonb, error text, log_path text)`
+  *`type` ∈ `provider-sync | bdp-sync`.*
+* `external_objects(provider_account_id, provider_kind, external_id, netbox_type text, netbox_id int, cmdb_ref jsonb, cached_payload jsonb, last_synced_at)`
+* `group_cache(id, kind text, name text, refreshed_at)`
+* `pipelines(id, name, provider_account_id, cmdb_account_id, enabled bool, version int, schedule_cron text, created_by, created_at, updated_at)`
+* `pipeline_mappings(id, pipeline_id, source_type, target_type, rules jsonb, status text, updated_at)`
+* `pipeline_runs(id, pipeline_id, status text, started_at, finished_at, summary jsonb, log_path text, dry_run bool)`
+
+Indexes on FKs and `(pipeline_id, started_at)`.
+
+---
+
+## Providers (UI + API)
+
+**UI**
+
+* Table: **Name · Kind · Enabled · Last Sync · Next Run · Status**
+* Row actions: **Sync Now**, **Test Connection**, **View Runs**, **Edit**, **Disable**
+* “Add Provider” modal (kind → per-kind fields)
+* Schedule editor (cron) with inline validator + “Next run …”
+
+**API**
+
+* `GET /api/providers`
+* `POST /api/providers` `{kind,name,config,enabled,schedule_cron}`
+* `PATCH /api/providers/:id`
+* `POST /api/providers/:id/test`
+* `POST /api/providers/:id/sync`
+* `GET /api/providers/:id/runs?limit=50`
+
+**Scheduler / Worker**
+
+* Cron scheduler reads `provider_accounts.schedule_cron` and enqueues **provider-sync** jobs.
+* Sync worker:
+
+  1. Instantiate collector by `kind`
+  2. `listVms()` → normalized array
+  3. Map → **upsert to NetBox** (idempotent): VM/IPs/CFs/tags
+  4. Update `external_objects` + record `sync_runs` counts `{created,updated,unchanged,removed,errors}`
+
+**Proxmox config fields**
+
+* `base_url`, `auth_method` (`password|api_token`), `username`, `password`, `token_id`, `token_secret`, `realm`, `verify_ssl`, optional include/exclude nodes.
+
+**Proxmox test**
+
+* Login (ticket or token) → `GET /api2/json/nodes` → return `{ok, nodes, version}`.
+
+**Proxmox collector**
+
+* Nodes: `GET /api2/json/nodes`; VMs per node: `/nodes/{node}/qemu`; optional agent IPs: `/qemu/{vmid}/agent/network-get-interfaces`.
+* Normalize: `externalId="${node}-${vmid}"`, `name`, `provider="proxmox"`, `primaryIp4?`, `tags`, `node`.
+
+---
+
+## CMDBs (UI + API)
+
+**UI**
+
+* Table: **Name · Kind · Enabled · Last Write · Status**
+* Row actions: **Test**, **Edit**, **Disable**
+* Add CMDB (NetBox, i-doit).
+
+**API**
+
+* `GET /api/cmdbs`
+* `POST /api/cmdbs` `{kind,name,config,enabled}`
+* `PATCH /api/cmdbs/:id`
+* `POST /api/cmdbs/:id/test`
+
+**Adapters**
+
+* **NetBox**: `objectTypes()`, `validate(targetType,obj)`, `upsert(targetType,obj,matchBy)`
+* **i-doit**: same concept; map to proper object type + category endpoints.
+
+---
+
+## Settings → Housekeeping
+
+Buttons (confirm + result toast):
+
+* **Rebuild Group Cache**: refresh groups for limit autocomplete.
+* **Ensure NetBox Schema**: create/verify CFs: `ext_id`, `ext_provider`, `patch_wave`, `patch_subwave`, `ansible_user`.
+* **Prune Stale External Objects**: mark removed if unseen N days.
+* **Retry Last Failed Sync per Provider**
+* **Rotate Tokens** (stub; record check timestamp)
+
+**API**
+
+* `POST /api/housekeeping/rebuild-groups-cache`
+* `POST /api/housekeeping/ensure-netbox-schema`
+* `POST /api/housekeeping/prune-stale`
+* `POST /api/housekeeping/retry-last-failed`
+* `POST /api/housekeeping/rotate-tokens`
+
+---
+
+## NetBox Inventory (for runner & limit autocomplete)
+
+**File:** `inventory/netbox.yml` (used by runner; backend-side)
+
+```yaml
+plugin: netbox.netbox.nb_inventory
+api_endpoint: "{{ lookup('env','NETBOX_URL') }}/api/"
+token: "{{ lookup('env','NETBOX_TOKEN') }}"
+validate_certs: true
+
+compose:
+  patch_wave: >-
+    {{ custom_fields.patch_wave
+       | default(custom_fields.Patching.Wave, true) }}
+  customer: "{{ tenant.name | default('') }}"
+  os: "{{ platform.slug | default('') }}"
+  role: "{{ device_role.slug | default('') }}"
+
+keyed_groups:
+  - key: patch_wave
+    prefix: wave
+    separator: "_"
+  - key: customer
+    prefix: customer
+    separator: "_"
+  - key: os
+    prefix: os
+    separator: "_"
+  - key: role
+    prefix: role
+    separator: "_"
+```
+
+**Examples for Limit Expression (UI placeholder):**
+
+```
+customer_Alpha & os_linux & wave_Wave2 - role_db
+```
+
+Housekeeping → **Rebuild Group Cache** should parse inventory graph and store group names into `group_cache` for autocomplete.
+
+---
+
+## Bridge Data Pipelines (BDP)
+
+**UI**
+
+* BDP List: **Name · Provider · CMDB · Status · Last run · Next run**; actions: **Dry-Run | Sync Now | Edit | Disable**
+
+* **Create BDP** wizard:
+
+  1. **Select endpoints**: dropdown Provider (enabled), CMDB (enabled) → creates `pipeline`.
+  2. **Choose object type pairs**: Source types (from provider) vs Target types (from CMDB adapter) → creates `pipeline_mappings`.
+  3. **Map attributes (visual editor)**:
+
+     * Left: sample source object (from `collected_objects` samples)
+     * Middle: mapping rows (source path → transforms → target field), with conditionals and conflict policy per field
+     * Right: target preview (required/optional, validation errors)
+     * Save rules; enable **Dry-run** button
+
+* Actions on a BDP:
+
+  * **Dry-Run** (no writes): show diff (created/updated/unchanged/removed) + field-level changes; CSV export
+  * **Sync Now**: run with current rules; show live log + final counts
+  * **Schedule** (cron) + “Next run …”
+  * **Versioning**: increment `pipelines.version` on save; **Rollback** available
+
+**API**
+
+* Discovery/Samples:
+
+  * `GET /api/providers/:id/object-types`
+  * `GET /api/providers/:id/samples?type=Vm&limit=20`
+  * `GET /api/cmdbs/:id/object-types`
+* Pipelines:
+
+  * `POST /api/pipelines` `{name,providerAccountId,cmdbAccountId}`
+  * `GET /api/pipelines/:id`
+  * `PATCH /api/pipelines/:id` `{name?,enabled?,schedule_cron?}`
+  * `POST /api/pipelines/:id/dry-run`
+  * `POST /api/pipelines/:id/sync`
+  * `GET /api/pipelines/:id/runs`
+* Mappings:
+
+  * `POST /api/pipelines/:id/mappings` `{sourceType,targetType}`
+  * `GET /api/pipelines/:id/mappings/:mapId`
+  * `PATCH /api/pipelines/:id/mappings/:mapId` `{rules}`
+  * `POST /api/pipelines/:id/mappings/:mapId/test` `{sampleId}`
+
+**Rules JSON shape (concept)**
+
+```json
+{
+  "target": "NetBox.VirtualMachine",
+  "matchBy": ["custom_fields.ext_id"],
+  "fields": [
+    { "target": "name", "source": "vm.name" },
+    { "target": "platform", "source": "vm.guest.os", "transforms": ["lower","to_slug"], "default": "linux" }
+  ],
+  "children": [
+    { "target": "IPAddress[]", "source": "vm.interfaces[].ips[]", "fields": [{ "target": "address", "source": "." }] }
+  ],
+  "conflicts": { "platform": "provider-wins" }
+}
+```
+
+---
+
+## RTC Mapping Rules (ready to paste into rules editor)
+
+### 1) **Proxmox.Vm → NetBox.VirtualMachine**
+
+```yaml
+target: NetBox.VirtualMachine
+matchBy: [custom_fields.ext_id]
+fields:
+  - target: name
+    source: vm.name
+  - target: status
+    source: vm.status
+    transforms: [lower]
+    default: active
+  - target: tenant
+    source: vm.tags.customer
+    transforms: [strip, title]
+    lookup_table: tenant_map
+  - target: site
+    source: vm.node
+    transforms: [strip, upper]
+    lookup_table: site_map
+  - target: platform
+    source: vm.guest.os
+    transforms: [lower, to_slug]
+    default: linux
+  - target: custom_fields.ext_id
+    expr: "concat('proxmox:', vm.node, '-', vm.vmid)"
+  - target: custom_fields.ext_provider
+    expr: "'proxmox'"
+  - target: tags[]
+    source: vm.tags[]
+    transforms: [lower]
+    merge: true
+  - target: tags[]
+    expr: "concat('provider/','proxmox')"
+    merge: true
+  - target: tags[]
+    expr: "concat('node/', vm.node)"
+    merge: true
+children:
+  - target: Interface[]
+    source: vm.interfaces[]
+    fields:
+      - target: name
+        source: name
+      - target: mac_address
+        source: mac
+      - target: enabled
+        expr: "true"
+    matchBy: [mac_address]
+  - target: IPAddress[]
+    source: vm.interfaces[].ips[]
+    fields:
+      - target: address
+        source: .
+      - target: status
+        expr: "active"
+    attach:
+      to: VirtualMachine
+      relationship: primary_ip4_if_first
+conflicts:
+  platform: provider-wins
+  tenant: cmdb-wins
+  site: cmdb-wins
+lookup_tables:
+  tenant_map: { alpha: "Alpha Ltd", beta: "Beta Corp" }
+  site_map: { PVE1: "PRG-DC1", PVE2: "PRG-DC2" }
+```
+
+### 2) **vCenter.VM → NetBox.VirtualMachine**
+
+```yaml
+target: NetBox.VirtualMachine
+matchBy: [custom_fields.ext_id]
+fields:
+  - target: name
+    source: vm.name
+  - target: status
+    source: vm.power_state
+    transforms:
+      - map:
+          poweredon: active
+          poweredoff: offline
+          suspended: planned
+  - target: site
+    source: vm.datacenter
+    lookup_table: site_map
+  - target: tenant
+    source: vm.custom_attributes.customer
+    lookup_table: tenant_map
+  - target: platform
+    source: vm.guest_full_name
+    transforms: [lower, regex_extract:"(windows|linux|rhel|centos|ubuntu|sles)", to_slug]
+    default: linux
+  - target: custom_fields.ext_id
+    expr: "concat('vc:', vm.instance_uuid)"
+  - target: custom_fields.ext_provider
+    expr: "'vmware'"
+  - target: tags[]
+    source: vm.tags[]
+    transforms: [lower]
+    merge: true
+  - target: tags[]
+    expr: "concat('provider/','vmware')"
+    merge: true
+  - target: tags[]
+    expr: "concat('cluster/', vm.cluster)"
+    merge: true
+children:
+  - target: Interface[]
+    source: vm.nics[]
+    fields:
+      - target: name
+        source: label
+      - target: mac_address
+        source: macAddress
+      - target: enabled
+        expr: "true"
+    matchBy: [mac_address]
+  - target: IPAddress[]
+    source: vm.guest_ip_addresses[]
+    fields:
+      - target: address
+        source: .
+      - target: status
+        expr: "active"
+    attach:
+      to: VirtualMachine
+      relationship: primary_ip4_if_first
+conflicts:
+  platform: provider-wins
+  tenant: cmdb-wins
+  site: provider-wins
+lookup_tables:
+  tenant_map: { alpha: "Alpha Ltd", gamma: "Gamma LLC" }
+  site_map: { "DC1": "PRG-DC1", "DC2": "PRG-DC2" }
+```
+
+### 3) **Azure.Compute.VirtualMachine → NetBox.VirtualMachine**
+
+```yaml
+target: NetBox.VirtualMachine
+matchBy: [custom_fields.ext_id]
+fields:
+  - target: name
+    source: vm.name
+  - target: status
+    source: vm.instanceView.powerState
+    transforms:
+      - regex_extract: "PowerState/(.*)"
+      - map:
+          running: active
+          deallocated: offline
+          deallocating: offline
+          stopped: offline
+          stopping: offline
+          starting: planned
+          unknown: planned
+    default: active
+  - target: site
+    source: vm.resourceGroup
+    lookup_table: site_map
+  - target: tenant
+    source: vm.tags.customer
+    lookup_table: tenant_map
+  - target: platform
+    source: vm.storageProfile.osDisk.osType
+    transforms: [lower, to_slug]
+    default: linux
+  - target: custom_fields.ext_id
+    expr: "concat('azure:', vm.id)"
+  - target: custom_fields.ext_provider
+    expr: "'azure'"
+  - target: tags[]
+    source: vm.tags[]
+    transforms: [lower]
+    merge: true
+  - target: tags[]
+    expr: "concat('provider/','azure')"
+    merge: true
+  - target: tags[]
+    expr: "concat('rg/', vm.resourceGroup)"
+    merge: true
+  - target: tags[]
+    expr: "concat('region/', vm.location | lower)"
+    merge: true
+children:
+  - target: Interface[]
+    source: vm.networkProfile.networkInterfaces[]
+    fields:
+      - target: name
+        source: name
+      - target: mac_address
+        source: macAddress
+      - target: enabled
+        expr: "true"
+    matchBy: [mac_address]
+  - target: IPAddress[]
+    source: vm.nicIpConfigs[].privateIpAddress
+    fields:
+      - target: address
+        source: .
+      - target: status
+        expr: "active"
+    attach:
+      to: VirtualMachine
+      relationship: primary_ip4_if_first
+conflicts:
+  platform: provider-wins
+  site: provider-wins
+  tenant: cmdb-wins
+lookup_tables:
+  tenant_map: { alpha: "Alpha Ltd", beta: "Beta Corp" }
+  site_map: { rg-prod: "PRG-DC1", rg-dev: "PRG-DC2" }
+```
+
+### 4) **Proxmox.Vm → i-doit (Virtual Server)**
+
+```yaml
+target: i-doit.Object.VirtualServer
+matchBy: [custom.cmdb.external_id]
+fields:
+  - target: title
+    source: vm.name
+  - target: cmdb_status
+    expr: "in operation"
+  - target: organization
+    source: vm.tags.customer
+    lookup_table: org_map
+  - target: location.site
+    source: vm.node
+    lookup_table: site_map
+  - target: platform
+    source: vm.guest.os
+    transforms: [title]
+    default: Linux
+  - target: keywords[]
+    source: vm.tags[]
+    transforms: [lower]
+    merge: true
+  - target: keywords[]
+    expr: "provider/proxmox"
+    merge: true
+  - target: custom.cmdb.external_id
+    expr: "concat('proxmox:', vm.node, '-', vm.vmid)"
+  - target: custom.cmdb.external_provider
+    expr: "'proxmox'"
+children:
+  - target: Category.Interface[]
+    source: vm.interfaces[]
+    fields:
+      - target: title
+        source: name
+      - target: mac_address
+        source: mac
+      - target: active
+        expr: true
+    matchBy: [mac_address]
+  - target: Category.IPv4Address[]
+    source: vm.interfaces[].ips[]
+    fields:
+      - target: address
+        source: .
+      - target: primary
+        expr: "first"
+```
+
+### 5) **vCenter.VM → i-doit (Virtual Server)**
+
+```yaml
+target: i-doit.Object.VirtualServer
+matchBy: [custom.cmdb.external_id]
+fields:
+  - target: title
+    source: vm.name
+  - target: cmdb_status
+    expr: "in operation"
+  - target: organization
+    source: vm.custom_attributes.customer
+    lookup_table: org_map
+  - target: location.site
+    source: vm.datacenter
+    lookup_table: site_map
+  - target: platform
+    source: vm.guest_full_name
+    transforms: [regex_extract:"(Windows|Linux|Ubuntu|RHEL|SLES)"]
+    default: Linux
+  - target: keywords[]
+    source: vm.tags[]
+    transforms: [lower]
+    merge: true
+  - target: keywords[]
+    expr: "provider/vmware"
+    merge: true
+  - target: keywords[]
+    expr: "cluster/{{ vm.cluster }}"
+    merge: true
+  - target: custom.cmdb.external_id
+    expr: "concat('vc:', vm.instance_uuid)"
+  - target: custom.cmdb.external_provider
+    expr: "'vmware'"
+children:
+  - target: Category.Interface[]
+    source: vm.nics[]
+    fields:
+      - target: title
+        source: label
+      - target: mac_address
+        source: macAddress
+      - target: active
+        expr: true
+    matchBy: [mac_address]
+  - target: Category.IPv4Address[]
+    source: vm.guest_ip_addresses[]
+    fields:
+      - target: address
+        source: .
+      - target: primary
+        expr: "first"
+```
+
+### 6) **Azure.Compute.VirtualMachine → i-doit (Virtual Server)**
+
+```yaml
+target: i-doit.Object.VirtualServer
+matchBy: [custom.cmdb.external_id]
+fields:
+  - target: title
+    source: vm.name
+  - target: cmdb_status
+    expr: "in operation"
+  - target: organization
+    source: vm.tags.customer
+    lookup_table: org_map
+  - target: location.site
+    source: vm.resourceGroup
+    lookup_table: site_map
+  - target: platform
+    source: vm.storageProfile.osDisk.osType
+    transforms: [title]
+    default: Linux
+  - target: keywords[]
+    source: vm.tags[]
+    transforms: [lower]
+    merge: true
+  - target: keywords[]
+    expr: "provider/azure"
+    merge: true
+  - target: keywords[]
+    expr: "rg/{{ vm.resourceGroup }}"
+    merge: true
+  - target: keywords[]
+    expr: "region/{{ vm.location | lower }}"
+    merge: true
+  - target: custom.cmdb.external_id
+    expr: "concat('azure:', vm.id)"
+  - target: custom.cmdb.external_provider
+    expr: "'azure'"
+children:
+  - target: Category.Interface[]
+    source: vm.networkProfile.networkInterfaces[]
+    fields:
+      - target: title
+        source: name
+      - target: mac_address
+        source: macAddress
+      - target: active
+        expr: true
+    matchBy: [mac_address]
+  - target: Category.IPv4Address[]
+    source: vm.nicIpConfigs[].privateIpAddress
+    fields:
+      - target: address
+        source: .
+      - target: primary
+        expr: "first"
+```
+
+---
+
+## Runs & Reporting
+
+* **Runs list**: filter by `type`, template/pipeline/provider; columns: started, duration, status, counts.
+* **Run detail**: live log (WS), summary counts, CSV export.
+* **Stats endpoints** (optional):
+
+  * `GET /api/stats/overview` → KPI tiles for dashboard
+  * `GET /api/stats/providers`
+
+---
+
+## Acceptance Criteria
+
+1. **Providers**: Add **Proxmox** → **Test** OK → **Sync Now** populates NetBox; run recorded with counts/errors.
+2. **Housekeeping**: Ensure schema creates CFs; Rebuild Group Cache feeds limit autocomplete.
+3. **Inventory**: `keyed_groups` produces groups like `customer_Alpha`, `os_linux`, `wave_Wave2`, `role_db`.
+4. **BDP**: Create pipeline (Provider+CMDB), pick object types, map fields with live validation; **Dry-Run** shows diffs; **Sync Now** writes and records run.
+5. **RTC rules** above can be pasted into the rules editor and succeed on dry-run (with sample objects).
+6. **Versioning** & **rollback** for pipeline rules; audit “who/when/version”.
+
+---
+
+If anything’s ambiguous, ask and I’ll tighten the contracts further.

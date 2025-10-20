@@ -1,8 +1,8 @@
 # Bridge - Infrastructure Automation Platform
 
-**VERSION: "bridge-pipeline-code-phases-1-2" (v2.0 - Phases 1-2 Complete)**
+**VERSION: "bridge-pipeline-code-phase-3-backend" (v2.1 - Phase 3 Backend Complete)**
 
-This version includes the core Providers and CMDBs management UI with backend integration for Phase 1-2 of the Bridge Data Pipelines (BDP) system. Phase 3 (visual mapping editor, pipeline orchestration, dry-run/versioning) is pending.
+This version includes full backend implementation for Phase 3 of the Bridge Data Pipelines (BDP) system. The backend now supports pipeline CRUD, mapping rules with transformations, dry-run capabilities, and preset RTC (Rules, Transforms, Conflicts) configurations. Frontend UI implementation for Phase 3 is pending.
 
 ## Overview
 Bridge is a full-stack infrastructure automation UI designed to streamline IT operations. It integrates with NetBox for inventory management, provides tools for defining and managing job templates, and orchestrates the execution of simulated Ansible playbooks. The platform offers real-time log streaming for job runs, comprehensive reporting, and a robust provider system for collecting and synchronizing VM inventory from various virtualization platforms into NetBox. Its core purpose is to provide a centralized, user-friendly interface for managing infrastructure automation workflows, enhancing operational efficiency, and improving visibility into IT assets.
@@ -72,6 +72,74 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - Templates support limit expressions like: `customer_Alpha & os_linux & wave_Wave2 - role_db`
 
 ## Recent Changes
+
+### 2025-10-20: Bridge Data Pipelines (BDP) - Phase 3 Backend Complete
+- **Database Schema:** Added pipeline tables (pipelines, pipeline_mappings, pipeline_runs)
+  - pipelines: Name, source provider, target CMDB, enabled flag, versioning
+  - pipeline_mappings: Source/target types, RTC rules (JSON), parent mapping references
+  - pipeline_runs: Status tracking (queued, running, ok, error), dry-run flag, execution summaries
+  - Proper indexes on foreign keys, status, timestamps for query performance
+  
+- **Rules Engine Service:** Comprehensive transformation and validation engine (`server/services/rules-engine.ts`)
+  - **Transforms:** lower, upper, title, strip, concat, map, regex_extract, lookup_table, datetime_parse, pick_primary_ipv4
+  - **Conflict Policies:** provider-wins, cmdb-wins, manual-only, merge
+  - **Validation:** Required field checking, default values, nested object support
+  - **Field Mapping:** Supports dot notation (e.g., `guest.os` → `platform`)
+  
+- **CMDB Adapters Enhanced:**
+  - **NetBox Adapter:** Added `objectTypes()` method (VirtualMachine, IPAddress, Interface, etc.)
+  - **NetBox Adapter:** Added `validate()` method with field-level schema checks
+  - **i-doit Adapter:** Created stub with `objectTypes()` and `validate()` methods
+  
+- **Sample Fixtures:** Created realistic test data (`server/services/sample-fixtures.ts`)
+  - Proxmox VM samples (3 VMs with tags, custom fields, interfaces)
+  - vCenter VM samples (2 VMs with guest OS, custom attributes)
+  - Azure VM samples (2 VMs with tags, resource groups, network interfaces)
+  - Helper functions: getSamples(), getSample(), getObjectTypes()
+  
+- **Preset RTC Rules:** 6 pre-configured mapping templates (`server/services/preset-rules.ts`)
+  - Proxmox.Vm → NetBox.VirtualMachine
+  - vCenter.VM → NetBox.VirtualMachine
+  - Azure.VM → NetBox.VirtualMachine
+  - Proxmox.Vm → i-doit.VirtualServer
+  - vCenter.VM → i-doit.VirtualServer
+  - Azure.VM → i-doit.VirtualServer
+  - Each preset includes comprehensive field mappings, transforms, and conflict policies
+  
+- **Modular Routes Architecture:** Organized Phase 3 endpoints into focused route files
+  - `server/routes/pipelines.ts`: Pipeline CRUD, dry-run, sync, runs, presets
+  - `server/routes/pipeline-mappings.ts`: Mapping CRUD, test transformations
+  - `server/routes/provider-discovery.ts`: Object types, sample objects
+  - All routes integrated into main `server/routes.ts` with auth middleware
+  
+- **Storage Interface:** Extended with full Phase 3 CRUD operations
+  - createPipeline, updatePipeline, deletePipeline, getPipelines, getPipeline
+  - createPipelineMapping, updatePipelineMapping, deletePipelineMapping, getPipelineMappings
+  - createPipelineRun, updatePipelineRun, getPipelineRuns
+  - incrementPipelineVersion for change tracking
+  
+- **API Endpoints:** Complete backend API for Phase 3 (ready for UI consumption)
+  - `GET/POST /api/pipelines` - List/create pipelines
+  - `GET/PATCH/DELETE /api/pipelines/:id` - Pipeline detail/update/delete
+  - `GET /api/pipelines/:id/runs` - Pipeline execution history
+  - `POST /api/pipelines/:id/dry-run` - Test pipeline without changes
+  - `POST /api/pipelines/:id/sync` - Enqueue sync worker
+  - `GET /api/pipelines/presets` - List preset RTC rules
+  - `GET /api/pipelines/presets/:id` - Get preset rules details
+  - `POST/GET /api/pipelines/:pipelineId/mappings` - Create/list mappings
+  - `GET/PATCH/DELETE /api/pipelines/:pipelineId/mappings/:mapId` - Mapping operations
+  - `POST /api/pipelines/:pipelineId/mappings/:mapId/test` - Test transformation with validation
+  - `GET /api/providers/:id/object-types` - Available provider object types
+  - `GET /api/providers/:id/samples` - Sample normalized objects for testing
+  
+- **RBAC Enforcement:** Role-based access control applied to all Phase 3 endpoints
+  - Admin: Full access to pipeline CRUD, mapping configuration, dry-run, sync
+  - Operator: Can execute dry-run and sync, view pipelines
+  - Viewer: Read-only access to pipelines and runs
+  
+- **Dependencies:** Installed `@types/lodash` for type safety in transforms
+  
+- **Version Transition:** v2.0 "phases-1-2" → v2.1 "phase-3-backend"
 
 ### 2025-10-20: Bridge Data Pipelines (BDP) - Phases 1-2 Complete
 - **CMDBs Page:** Created full UI for managing CMDB target accounts at `/cmdbs`

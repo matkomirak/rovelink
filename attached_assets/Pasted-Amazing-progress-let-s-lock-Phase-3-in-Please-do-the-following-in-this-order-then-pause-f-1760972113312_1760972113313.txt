@@ -1,0 +1,172 @@
+Amazing progress 🎉 — let’s lock Phase 3 in. Please do the following **in this order**, then pause for review.
+
+---
+
+## 0) Housekeeping (now)
+
+* **Branch:** `feat/v3-bdp-ui`
+* **PR:** “Phase 3 UI foundation: Pipelines list/wizard/detail (dry-run/sync stubs)”
+* Include screenshots/GIF of: list → wizard → detail → dry-run modal → sync modal → preset loader.
+
+---
+
+## 1) Quick sanity checks (now)
+
+Run this mini script against your env:
+
+1. **Providers**
+
+   * Add Proxmox → **Test** OK → **Sync now** → counts recorded.
+2. **CMDBs**
+
+   * Add NetBox → **Test** OK.
+3. **Pipelines**
+
+   * New Pipeline: Proxmox + NetBox → **Vm → VirtualMachine** pair.
+   * On detail: **Load preset** (Proxmox→NetBox VM).
+   * **Dry-Run** → counts present (not zero), notes render.
+   * **Sync now** → OK status, run appears in **Runs**.
+
+If any step fails, capture the toast/error JSON and keep going with the next tasks (below) — we’ll fix during review.
+
+---
+
+## 2) Implement the **Visual Mapping Editor** (core)
+
+**Goal:** 3-pane editor with transforms, conflict policies, and live validation on samples.
+
+**UI**
+
+* **Left: Source tree**
+
+  * Sample selector (dropdown of `items[]` from `/providers/:id/samples?type=Vm&limit=20`)
+  * JSON tree (expand/collapse, copy path)
+* **Middle: Rules table**
+
+  * Rows: `source path` → `transforms[]` (chips) → `target field`
+  * Optional **condition** (simple expression, e.g., `provider_kind == "proxmox"`)
+  * **Conflict policy** dropdown per field: `provider-wins | cmdb-wins | manual-only | merge`
+  * Add/Delete row, reorder rows
+  * **Save** → `PATCH /api/pipelines/:id/mappings/:mapId { rules }`
+  * **Load preset…** → picker (`/pipelines/presets` + `/pipelines/presets/:id`)
+* **Right: Target preview**
+
+  * Result of `POST /mappings/:mapId/test { sampleId }`
+  * Show **adapter validation** errors/warnings inline (required/optional badges)
+
+**Transforms (chips)**
+
+* `lower`, `upper`, `title`, `strip`, `to_slug`
+* `concat` (mini dialog for pieces)
+* `map` (key→value table)
+* `regex_extract` (pattern + group)
+* `lookup_table` (select from rules.lookup_tables; quick edit dialog)
+* `datetime_parse`, `pick_primary_ipv4`
+
+**Acceptance**
+
+* Create mapping with at least 5 fields and 1 child array (IPs or Interfaces).
+* Test on 2 different samples → preview updates instantly.
+* Save rules → pipeline version increments.
+
+---
+
+## 3) Dry-Run details & CSV export
+
+* **Backend:** return field-level diffs (you already return examples; expand to a paginated changes list).
+* **UI:** show table of changes:
+
+  * Columns: **Action** (create/update/remove), **Target Type**, **Name/Ext ID**, **Field**, **From → To**.
+  * Filter by Action/Type.
+* **CSV export:** button on Dry-Run modal. Either:
+
+  * Client-side build from response, or
+  * Add `GET /api/pipelines/:id/runs/:runId/changes.csv` (preferred).
+
+**Acceptance**
+
+* Dry-Run on a preset returns a non-empty change list.
+* CSV downloads and opens cleanly.
+
+---
+
+## 4) Live Sync logs
+
+* Use **polling** first (simple, reliable): `GET /api/pipelines/:id/runs/:runId` every 1-2s until `status ∈ {ok, failed, error}`.
+* Render a **scrolling log tail** (append-only; trim past N lines).
+* Final summary replaces spinner.
+
+*(WebSocket can be added later; polling is fine for MVP.)*
+
+---
+
+## 5) Scheduling + “Next run”
+
+* On pipeline detail, cron input with **cron-parser**:
+
+  * Validate on change; error inline if invalid.
+  * Show “Next run: <ISO local time>” (assume server TZ for now).
+* Save via `PATCH /api/pipelines/:id` with `schedule_cron`.
+
+**Acceptance**
+
+* Invalid cron shows clear error; valid shows “Next run …”.
+* Scheduler enqueues jobs accordingly (you already have the enqueuer).
+
+---
+
+## 6) RBAC in the UI
+
+* **Viewer:** no Save/Dry-Run/Sync/Schedule; hides actions.
+* **Operator:** Dry-Run & Sync; cannot edit rules/schedule.
+* **Admin:** full control.
+* Gate buttons in UI **and** rely on server RBAC.
+
+---
+
+## 7) Runs page update
+
+* Add **Type** filter: `provider-sync | bdp-sync | playbook-run`.
+* Show: **Type · Name/Provider/Pipeline · Started · Duration · Status · Counts**.
+* Row → opens drawer with summary, logs, and (for dry-run) change list + CSV.
+
+---
+
+## 8) Error handling UX (use your standard API format)
+
+* 400/422: show field list (`details[]`) under forms.
+* 500: show banner with `traceId` and a **Copy details** button.
+* Timeouts: suggest retry; do **not** lose user edits in editor.
+
+---
+
+## 9) Deliverables (Phase 3 UI PR)
+
+* **Branch:** `feat/v3-bdp-ui`
+* **PR title:** “Phase 3 UI: Pipelines, Mapping Editor, Dry-Run & Sync”
+* **Include:**
+
+  * Pipelines list/wizard/detail
+  * Mapping editor (3-pane)
+  * Dry-Run details + CSV export
+  * Sync modal with live log polling
+  * Cron editor + Next run
+  * Runs page filter for **bdp-sync**
+  * RBAC gating in UI
+  * Screens/GIF of full flow
+  * README: “How to create a pipeline, load a preset, dry-run, sync”
+
+---
+
+## 10) Quick test script (I’ll use this to review)
+
+1. Create pipeline (Proxmox→NetBox), add **Vm → VirtualMachine** mapping.
+2. **Load preset** (Proxmox→NetBox VM), test on two samples.
+3. **Dry-Run** → inspect diffs, export CSV.
+4. **Sync Now** → watch log → summary OK → verify in NetBox.
+5. Set cron `0 3 * * *` → “Next run …” updates.
+6. **/runs** filter on **bdp-sync** → open detail drawer → see summary/logs.
+
+---
+
+When this is done, open the PR and I’ll review. If you hit a blocker on any sub-piece, ship the rest and note the blocker in the PR—don’t stall on one item.

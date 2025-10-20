@@ -96,6 +96,29 @@ router.post("/", async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/pipelines/presets - List preset rules
+router.get("/presets", async (req: AuthRequest, res: Response) => {
+  try {
+    const presets = getPresets();
+    res.json({ items: presets });
+  } catch (error: any) {
+    res.status(500).json({ error: "internal", message: error.message });
+  }
+});
+
+// GET /api/pipelines/presets/:id - Get preset rules
+router.get("/presets/:id", async (req: AuthRequest, res: Response) => {
+  try {
+    const preset = getPreset(req.params.id);
+    if (!preset) {
+      return res.status(404).json({ error: "not_found" });
+    }
+    res.json(preset.rules);
+  } catch (error: any) {
+    res.status(500).json({ error: "internal", message: error.message });
+  }
+});
+
 // GET /api/pipelines/:id - Get pipeline details
 router.get("/:id", async (req: AuthRequest, res: Response) => {
   try {
@@ -247,29 +270,6 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
     // For now, just mark as queued
 
     res.status(202).json({ runId: run.id });
-  } catch (error: any) {
-    res.status(500).json({ error: "internal", message: error.message });
-  }
-});
-
-// GET /api/pipelines/presets - List preset rules
-router.get("/presets", async (req: AuthRequest, res: Response) => {
-  try {
-    const presets = getPresets();
-    res.json({ items: presets });
-  } catch (error: any) {
-    res.status(500).json({ error: "internal", message: error.message });
-  }
-});
-
-// GET /api/pipelines/presets/:id - Get preset rules
-router.get("/presets/:id", async (req: AuthRequest, res: Response) => {
-  try {
-    const preset = getPreset(req.params.id);
-    if (!preset) {
-      return res.status(404).json({ error: "not_found" });
-    }
-    res.json(preset.rules);
   } catch (error: any) {
     res.status(500).json({ error: "internal", message: error.message });
   }

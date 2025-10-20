@@ -77,7 +77,15 @@ interface DryRunResult {
     errors: number;
   };
   notes: string[];
-  examples: any[];
+  changes: Array<{
+    action: string;
+    targetType: string;
+    name: string;
+    extId: string;
+    field: string;
+    from: any;
+    to: any;
+  }>;
   runId: string;
 }
 
@@ -90,6 +98,10 @@ export default function PipelineDetail() {
   const [showPresetModal, setShowPresetModal] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<string>("");
+  const [changesFilter, setChangesFilter] = useState<string>("all");
+  const [activeSyncRunId, setActiveSyncRunId] = useState<string | null>(null);
+  const [syncLogs, setSyncLogs] = useState<string[]>([]);
+  const [syncStatus, setSyncStatus] = useState<string>("running");
   
   // Editing states
   const [editingSchedule, setEditingSchedule] = useState(false);
@@ -161,14 +173,40 @@ export default function PipelineDetail() {
       return await response.json();
     },
     onSuccess: (data) => {
+      setActiveSyncRunId(data.runId);
       setShowSyncModal(true);
+      setSyncLogs([]);
+      setSyncStatus("running");
+      startSyncPolling(data.runId);
       queryClient.invalidateQueries({ queryKey: ["/api/pipelines", id, "runs"] });
-      toast({ 
-        title: "Sync Started", 
-        description: `Run ID: ${data.runId}` 
-      });
     },
   });
+
+  const startSyncPolling = (runId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/pipelines/${id}/runs/${runId}`, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+          },
+        });
+        const data = await response.json();
+        
+        setSyncLogs(data.logs || []);
+        setSyncStatus(data.status);
+        
+        if (data.status === "ok" || data.status === "error" || data.status === "failed") {
+          clearInterval(pollInterval);
+          queryClient.invalidateQueries({ queryKey: ["/api/pipelines", id, "runs"] });
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+      }
+    }, 2000);
+
+    // Cleanup after 60 seconds max
+    setTimeout(() => clearInterval(pollInterval), 60000);
+  };
 
   const loadPreset = useMutation({
     mutationFn: async (presetId: string) => {
@@ -548,10 +586,73 @@ export default function PipelineDetail() {
                 </div>
               </div>
 
+              {dryRunResult.changes && dryRunResult.changes.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium">Changes</h4>
+                    <Select value={changesFilter} onValueChange={setChangesFilter}>
+                      <SelectTrigger className="w-32 h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="create">Create</SelectItem>
+                        <SelectItem value="update">Update</SelectItem>
+                        <SelectItem value="remove">Remove</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Action</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Field</TableHead>
+                          <TableHead>From → To</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {dryRunResult.changes
+                          .filter((c) => changesFilter === "all" || c.action === changesFilter)
+                          .slice(0, 20)
+                          .map((change, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    change.action === "create"
+                                      ? "default"
+                                      : change.action === "update"
+                                      ? "secondary"
+                                      : "destructive"
+                                  }
+                                >
+                                  {change.action}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-sm">{change.targetType}</TableCell>
+                              <TableCell className="text-sm font-mono">{change.name}</TableCell>
+                              <TableCell className="text-sm">{change.field}</TableCell>
+                              <TableCell className="text-xs font-mono">
+                                {change.from !== null && (
+                                  <span className="text-muted-foreground">{String(change.from)} → </span>
+                                )}
+                                <span className="text-foreground">{String(change.to)}</span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+
               {dryRunResult.notes.length > 0 && (
                 <div className="space-y-2">
-                  <h4 className="font-medium">Notes</h4>
-                  <ul className="text-sm space-y-1">
+                  <h4 className="font-medium text-sm">Notes</h4>
+                  <ul className="text-xs space-y-1">
                     {dryRunResult.notes.map((note, idx) => (
                       <li key={idx} className="text-muted-foreground">
                         • {note}
@@ -566,33 +667,72 @@ export default function PipelineDetail() {
             <Button variant="outline" onClick={() => setShowDryRunModal(false)}>
               Close
             </Button>
-            <Button variant="outline">
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
+            {dryRunResult && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  window.open(`/api/pipelines/${id}/runs/${dryRunResult.runId}/changes.csv`, '_blank');
+                }}
+                data-testid="button-export-csv"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Sync Modal */}
       <Dialog open={showSyncModal} onOpenChange={setShowSyncModal}>
-        <DialogContent>
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Sync in Progress</DialogTitle>
+            <DialogTitle>Pipeline Sync</DialogTitle>
             <DialogDescription>
-              Applying changes to target CMDB
+              {syncStatus === "running" ? "Sync in progress..." : "Sync complete"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+            {syncStatus === "running" && (
+              <div className="flex items-center gap-2 text-sm">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                <span className="text-muted-foreground">Processing...</span>
+              </div>
+            )}
+            {syncStatus === "ok" && (
+              <div className="flex items-center gap-2 text-sm text-green-600">
+                <span>✓ Sync completed successfully</span>
+              </div>
+            )}
+            {(syncStatus === "error" || syncStatus === "failed") && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <span>✗ Sync failed</span>
+              </div>
+            )}
+            
+            <div className="border rounded-lg bg-muted/50 h-96 overflow-y-auto p-4 font-mono text-xs">
+              {syncLogs.length === 0 ? (
+                <div className="text-muted-foreground">Waiting for logs...</div>
+              ) : (
+                <div className="space-y-1">
+                  {syncLogs.map((log, idx) => (
+                    <div key={idx} className="text-foreground">
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <p className="text-center text-sm text-muted-foreground">
-              Processing pipeline mappings...
-            </p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowSyncModal(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowSyncModal(false);
+                setActiveSyncRunId(null);
+                setSyncLogs([]);
+              }}
+            >
               Close
             </Button>
           </DialogFooter>

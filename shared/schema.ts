@@ -313,6 +313,35 @@ export const pipelineRunsRelations = relations(pipelineRuns, ({ one }) => ({
   }),
 }));
 
+// Automation Inventories - unified inventory sources for Ansible
+export const automationInventories = pgTable("automation_inventories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: text("type").notNull(), // "linked", "file", "script"
+  // For linked inventories
+  sourceRef: varchar("source_ref"), // CMDB account ID
+  sourceType: text("source_type"), // "netbox", "idoit", "servicenow"
+  // For file-based inventories
+  fileContent: text("file_content"),
+  fileFormat: text("file_format"), // "yaml", "json", "ini"
+  // Metadata
+  isDefault: boolean("is_default").default(false),
+  groupsCount: integer("groups_count").default(0),
+  hostsCount: integer("hosts_count").default(0),
+  lastRefreshedAt: timestamp("last_refreshed_at"),
+  previewData: jsonb("preview_data").default({}), // Sample groups/hosts for preview
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const automationInventoriesRelations = relations(automationInventories, ({ one }) => ({
+  creator: one(users, {
+    fields: [automationInventories.createdBy],
+    references: [users.id],
+  }),
+}));
+
 // NetBox Inventory Sources (multiple NetBox instances)
 export const netboxInventorySources = pgTable("netbox_inventory_sources", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -458,6 +487,13 @@ export const insertPipelineRunSchema = createInsertSchema(pipelineRuns).omit({
   logPath: true,
 });
 
+export const insertAutomationInventorySchema = createInsertSchema(automationInventories).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastRefreshedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -509,3 +545,6 @@ export type PipelineMapping = typeof pipelineMappings.$inferSelect;
 
 export type InsertPipelineRun = z.infer<typeof insertPipelineRunSchema>;
 export type PipelineRun = typeof pipelineRuns.$inferSelect;
+
+export type InsertAutomationInventory = z.infer<typeof insertAutomationInventorySchema>;
+export type AutomationInventory = typeof automationInventories.$inferSelect;

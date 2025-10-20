@@ -1,0 +1,70 @@
+You’re right—the current labels collide. Here’s a clean IA that keeps things obvious:
+
+## Rename & regroup (final proposal)
+
+* **CMDBs** → stays as-is (accounts/integrations for NetBox, i-doit, ServiceNow).
+* **Pipelines** → stays (mapping & sync).
+* **Inventories** → **rename to “Automation Inventories”** and make it the **single place** users pick what Ansible will target.
+* **Remove the old “Inventory” item** and **remove “NetBox Inventories.”**
+
+## What “Automation Inventories” contains
+
+A unified list of inventories the runner can use:
+
+1. **Linked (CMDB-backed)**
+
+   * Source: NetBox / i-doit / ServiceNow (via their CMDB account + optional Pipeline)
+   * Readonly definition; shows last refresh, group counts, preview
+   * Created via: “New → From CMDB…”
+   * Example name: `Prod NetBox (linked)`
+
+2. **File-based**
+
+   * Formats: YAML / JSON / INI
+   * Stored in Bridge; editable with a small editor & schema hints
+   * Created via: “New → Upload/Author file…”
+   * Example name: `BlueTeam-static.yml`
+
+3. **Dynamic script** (later)
+
+   * A custom script that outputs Ansible inventory JSON
+   * Created via: “New → Dynamic script…”
+
+Each inventory has:
+
+* **Name**, **Type** (Linked / File / Script), **Source** (for Linked), **Groups/Hosts** count, **Last refreshed**, **Owner**
+* Actions: **Preview**, **Refresh** (Linked), **Edit** (File/Script), **Clone**, **Delete**
+* Badge: **Default** (the one templates use unless overridden)
+
+## Why this fixes the confusion
+
+* **CMDBs** = where you connect systems.
+* **Pipelines** = how data is transformed/synced.
+* **Automation Inventories** = what Ansible uses at run time (regardless of origin).
+
+## Small UX touches
+
+* In **CMDBs**, add a button “Create Inventory from this CMDB” that jumps to Automation Inventories with the source preselected.
+* In **Pipelines**, after a successful sync, show a toast: “Create a Linked Inventory from this CMDB?” with a one-click CTA.
+* In **Templates**, the **Inventory** dropdown lists entries from **Automation Inventories** only.
+
+## Minimal API you’ll need
+
+* `GET /api/inventories` → list
+* `POST /api/inventories` → create (body: type, name, sourceRef?, fileContent?)
+* `GET /api/inventories/:id/preview` → summary {groups, hosts, sample}
+* `POST /api/inventories/:id/refresh` (Linked)
+* `PATCH /api/inventories/:id` (rename, default flag, update file)
+* `DELETE /api/inventories/:id`
+
+## Acceptance checklist
+
+* Sidebar shows **Automation Inventories** (only one inventory section).
+* I can:
+
+  * Create **Linked** inventory from a NetBox CMDB account (and see groups like `customer_*`, `os_*`, `wave_*`).
+  * Create a **File-based** inventory (YAML/JSON/INI), validate, and preview it.
+  * Pick any created inventory in **Templates**.
+* No duplicate “Inventory”/“NetBox Inventories” labels anywhere.
+
+If you like the wording better, **“Automation Inventories”** can also be shortened to **“Inventories”** with a subtitle in the page header “Sources: CMDB / File / Script”—but the key is: only **one** inventories section.

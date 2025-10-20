@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FileText, Plus, Play, Calendar, Loader2, AlertTriangle, Check, X, Pencil, Trash2, Search } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { insertJobTemplateSchema, type JobTemplate, type InsertJobTemplate, type Project, type Credential, type NetboxInventorySource } from "@shared/schema";
+import { insertJobTemplateSchema, type JobTemplate, type InsertJobTemplate, type Project, type Credential, type AutomationInventory } from "@shared/schema";
 
 const COMMON_VAR_TEMPLATES = [
   { name: "Basic Variables", value: '{\n  "env": "production",\n  "version": "1.0.0"\n}' },
@@ -46,8 +46,8 @@ export default function Templates() {
     queryKey: ["/api/credentials"],
   });
 
-  const { data: inventories } = useQuery<NetboxInventorySource[]>({
-    queryKey: ["/api/netbox-sources"],
+  const { data: inventories } = useQuery<AutomationInventory[]>({
+    queryKey: ["/api/inventories"],
   });
 
   // Filter templates by search query

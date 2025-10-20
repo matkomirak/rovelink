@@ -1,0 +1,276 @@
+Awesome progress. **Please proceed with all Phase-3 backend APIs now, then pause for review before building the UI.** Use the spec below (request/response shapes, semantics, and tests).
+
+---
+
+# Phase 3 — Backend API Spec (BDP)
+
+## 0) Principles
+
+* **Auth/RBAC:** admin → full; operator → dry-run & sync; viewer → read-only.
+* **Idempotent writes:** use `matchBy` (e.g., `custom_fields.ext_id`) in adapters.
+* **Dry-run by default:** never write on test endpoints.
+* **Errors:** standardized JSON (see “Errors” section).
+* **Modularity:** split routes into files (`routes/pipelines.ts`, `routes/pipeline-mappings.ts`, `routes/pipeline-runs.ts`) to avoid a huge `routes.ts`.
+
+---
+
+## 1) Discovery & Samples
+
+### GET `/api/providers/:id/object-types`
+
+**Resp 200**
+
+```json
+{ "providerId":"...", "types":["Vm","Interface","IP","Tenant","Site"] }
+```
+
+### GET `/api/providers/:id/samples?type=Vm&limit=20`
+
+**Resp 200**
+
+```json
+{
+  "providerId":"...",
+  "type":"Vm",
+  "items":[
+    {"sampleId":"prov-abc:Vm:1","normalized":{"vm":{ /* normalized fields */ }}}
+  ]
+}
+```
+
+---
+
+## 2) Pipelines (CRUD + runs)
+
+### POST `/api/pipelines`
+
+**Body**
+
+```json
+{ "name":"Proxmox→NetBox", "providerAccountId":"...", "cmdbAccountId":"..." }
+```
+
+**Resp 201**
+
+```json
+{ "id":"...", "name":"Proxmox→NetBox", "enabled":false, "version":1, "providerAccountId":"...", "cmdbAccountId":"..." }
+```
+
+### GET `/api/pipelines/:id`
+
+**Resp 200**
+
+```json
+{
+  "id":"...", "name":"...", "enabled":true, "version":3, "schedule_cron":"0 2 * * *",
+  "providerAccountId":"...", "cmdbAccountId":"...",
+  "lastRun":{"id":"...","status":"ok","started_at":"...","finished_at":"...","summary":{"created":2,"updated":7}}
+}
+```
+
+### PATCH `/api/pipelines/:id`
+
+**Body** (any subset)
+
+```json
+{ "name":"...", "enabled":true, "schedule_cron":"*/15 * * * *" }
+```
+
+**Resp 200** current pipeline object
+
+### GET `/api/pipelines/:id/runs?limit=50`
+
+**Resp 200**
+
+```json
+{ "items":[{"id":"...","status":"ok","dry_run":false,"started_at":"...","finished_at":"...","summary":{"created":2,"updated":7,"errors":0}}] }
+```
+
+---
+
+## 3) Pipeline Mappings
+
+### POST `/api/pipelines/:id/mappings`
+
+**Body**
+
+```json
+{ "sourceType":"Vm", "targetType":"NetBox.VirtualMachine" }
+```
+
+**Resp 201**
+
+```json
+{ "id":"...", "pipeline_id":"...", "sourceType":"Vm", "targetType":"NetBox.VirtualMachine", "rules":null, "status":"draft" }
+```
+
+### GET `/api/pipelines/:id/mappings/:mapId`
+
+**Resp 200**
+
+```json
+{ "id":"...","pipeline_id":"...","sourceType":"Vm","targetType":"NetBox.VirtualMachine","rules":{ /* current rules */ } }
+```
+
+### PATCH `/api/pipelines/:id/mappings/:mapId`
+
+* Save **entire** `rules` object; bump `pipelines.version += 1`.
+  **Body**
+
+```json
+{ "rules": { "target":"NetBox.VirtualMachine", "matchBy":["custom_fields.ext_id"], "fields":[...], "children":[...], "conflicts":{...}, "lookup_tables":{...} } }
+```
+
+**Resp 200** returns mapping with saved `rules` and updated pipeline version info.
+
+### POST `/api/pipelines/:id/mappings/:mapId/test`
+
+**Body**
+
+```json
+{ "sampleId":"prov-abc:Vm:1" }
+```
+
+**Resp 200**
+
+```json
+{
+  "ok": true,
+  "targetType":"NetBox.VirtualMachine",
+  "transformed": { /* adapter-ready object */ },
+  "validation": { "errors":[], "warnings":[] }
+}
+```
+
+---
+
+## 4) Dry-Run & Sync
+
+### POST `/api/pipelines/:id/dry-run`
+
+* Execute rules **without writing** to target.
+  **Resp 200**
+
+```json
+{
+  "status":"ok",
+  "counts":{"created":12,"updated":37,"unchanged":402,"removed":5,"errors":3},
+  "notes":["16 VMs missing primary_ip","5 invalid tenant mapping"],
+  "examples":[
+    {"action":"update","target":"VirtualMachine","name":"vm01","changes":{"platform":{"from":"windows","to":"linux"}}}
+  ],
+  "runId":"..."  // store as pipeline_runs with dry_run=true
+}
+```
+
+### POST `/api/pipelines/:id/sync`
+
+* Enqueue **bdp-sync** worker.
+  **Resp 202**
+
+```json
+{ "runId":"..." }
+```
+
+---
+
+## 5) Rules Engine—transform & policy support (confirm done)
+
+Support these transforms & helpers (already built per your update):
+
+* `lower`, `upper`, `title`, `strip`, `to_slug`, `concat`, `map{}`, `regex_extract`, `lookup_table`, `datetime_parse`, `pick_primary_ipv4`
+* **Field conflicts:** `provider-wins | cmdb-wins | manual-only | merge`
+* **Children arrays** with `matchBy` for upsert of sub-objects (Interfaces, IPs).
+
+---
+
+## 6) Adapters
+
+### NetBox Adapter (already built—confirm these methods)
+
+* `objectTypes()` → at least: `["VirtualMachine","IPAddress","Interface","Tenant","Site"]`
+* `validate(targetType, obj)` → type/required checks; return `{errors,warnings}`
+* `upsert(targetType, obj, matchBy)` → idempotent writes, set `primary_ip4` per relationship policy
+
+### i-doit Adapter (stub for Phase 3)
+
+* `objectTypes()` → `["VirtualServer","Interface","IPv4Address","Tenant","Site"]`
+* `validate()` → basic required field check
+* `upsert()` → **not required** for Phase 3; just support validation so editor & dry-run work
+
+---
+
+## 7) Preset Rules (RTC) loader
+
+Add a small preset registry (JSON/YAML files) so the UI can “Load preset”. Store these 6 presets server-side and expose:
+
+### GET `/api/pipelines/presets`
+
+**Resp 200**
+
+```json
+{
+  "items":[
+    {"id":"proxmox→netbox.vm","label":"Proxmox.Vm → NetBox.VirtualMachine"},
+    {"id":"vc→netbox.vm","label":"vCenter.VM → NetBox.VirtualMachine"},
+    {"id":"azure→netbox.vm","label":"Azure.VM → NetBox.VirtualMachine"},
+    {"id":"proxmox→idoit.vserver","label":"Proxmox.Vm → i-doit.Virtual Server"},
+    {"id":"vc→idoit.vserver","label":"vCenter.VM → i-doit.Virtual Server"},
+    {"id":"azure→idoit.vserver","label":"Azure.VM → i-doit.Virtual Server"}
+  ]
+}
+```
+
+### GET `/api/pipelines/presets/:id`
+
+**Resp 200** → returns the preset `rules` block (use the exact RTC snippets I gave).
+
+---
+
+## 8) Errors (standard format)
+
+* **HTTP 400** validation: `{ "error":"validation_error", "details":[{"path":"schedule_cron","msg":"invalid cron"}] }`
+* **HTTP 401/403** authz: `{ "error":"unauthorized" }` / `{ "error":"forbidden" }`
+* **HTTP 404**: `{ "error":"not_found" }`
+* **HTTP 422** adapter/transform error: `{ "error":"transform_error", "msg":"regex_extract failed on field platform" }`
+* **HTTP 500**: `{ "error":"internal", "traceId":"..." }`
+
+Log `traceId` and include in `pipeline_runs.log_path`/logs.
+
+---
+
+## 9) Worker semantics
+
+* **Dry-run worker**: build transformed targets, call `validate()` only; compute diffs vs current CMDB state (by `matchBy`), **do not write**; summarize counts.
+* **Sync worker**: same, then **write** via adapter `upsert()`; respect field conflicts; summary + first N errors in `summary.errors`.
+
+---
+
+## 10) Tests & Artifacts
+
+* **Unit tests**: rules engine (transforms, conflicts), NetBox adapter `validate`, Proxmox sample → NetBox transform.
+* **Integration tests**:
+
+  * create pipeline, mapping, load preset, test a sample, dry-run (assert counts), sync (if NetBox dev available).
+* **Postman/Insomnia** collection for all endpoints (nice to have).
+* **README**: add Phase-3 API section.
+
+---
+
+## 11) Deliverable & Pause
+
+* Branch: `feat/v3-bdp-backend`
+* Open PR titled: **“Phase 3 Backend: BDP pipelines, mappings, dry-run & sync APIs”**
+* Include:
+
+  * Migrations/types
+  * `routes/pipelines*.ts`
+  * Rules engine service
+  * Presets registry + 6 RTC presets
+  * Tests + sample normalized objects (Proxmox/vCenter/Azure VM)
+  * Updated README (API & workflow)
+* **Pause after backend PR** for my review before you build the BDP UI.
+
+---
+
+If anything above conflicts with what you’ve already wired, prefer this spec and call it out in the PR notes.

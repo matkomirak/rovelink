@@ -2,7 +2,7 @@
 import { 
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
   providerAccounts, syncRuns, externalObjects, groupCache, netboxVms, netboxInventorySources,
-  cmdbAccounts,
+  cmdbAccounts, pipelines, pipelineMappings, pipelineRuns,
   type User, type InsertUser,
   type Project, type InsertProject,
   type Credential, type InsertCredential,
@@ -17,6 +17,9 @@ import {
   type NetboxVm, type InsertNetboxVm,
   type NetboxInventorySource, type InsertNetboxInventorySource,
   type CmdbAccount, type InsertCmdbAccount,
+  type Pipeline, type InsertPipeline,
+  type PipelineMapping, type InsertPipelineMapping,
+  type PipelineRun, type InsertPipelineRun,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql } from "drizzle-orm";
@@ -105,6 +108,27 @@ export interface IStorage {
   createCmdbAccount(account: InsertCmdbAccount): Promise<CmdbAccount>;
   updateCmdbAccount(id: string, data: Partial<CmdbAccount>): Promise<CmdbAccount | undefined>;
   deleteCmdbAccount(id: string): Promise<void>;
+
+  // Pipeline operations
+  getPipelines(): Promise<Pipeline[]>;
+  getPipeline(id: string): Promise<Pipeline | undefined>;
+  createPipeline(pipeline: InsertPipeline): Promise<Pipeline>;
+  updatePipeline(id: string, data: Partial<Pipeline>): Promise<Pipeline | undefined>;
+  deletePipeline(id: string): Promise<void>;
+  incrementPipelineVersion(id: string): Promise<void>;
+
+  // Pipeline Mapping operations
+  getPipelineMappings(pipelineId: string): Promise<PipelineMapping[]>;
+  getPipelineMapping(id: string): Promise<PipelineMapping | undefined>;
+  createPipelineMapping(mapping: InsertPipelineMapping): Promise<PipelineMapping>;
+  updatePipelineMapping(id: string, data: Partial<PipelineMapping>): Promise<PipelineMapping | undefined>;
+  deletePipelineMapping(id: string): Promise<void>;
+
+  // Pipeline Run operations
+  getPipelineRuns(pipelineId: string, limit?: number): Promise<PipelineRun[]>;
+  getPipelineRun(id: string): Promise<PipelineRun | undefined>;
+  createPipelineRun(run: InsertPipelineRun): Promise<PipelineRun>;
+  updatePipelineRun(id: string, data: Partial<PipelineRun>): Promise<PipelineRun | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -590,6 +614,126 @@ export class DatabaseStorage implements IStorage {
 
   async deleteCmdbAccount(id: string): Promise<void> {
     await db.delete(cmdbAccounts).where(eq(cmdbAccounts.id, id));
+  }
+
+  // Pipeline operations
+  async getPipelines(): Promise<Pipeline[]> {
+    return await db.select().from(pipelines).orderBy(desc(pipelines.createdAt));
+  }
+
+  async getPipeline(id: string): Promise<Pipeline | undefined> {
+    const [pipeline] = await db.select().from(pipelines).where(eq(pipelines.id, id));
+    return pipeline || undefined;
+  }
+
+  async createPipeline(insertPipeline: InsertPipeline): Promise<Pipeline> {
+    const [pipeline] = await db
+      .insert(pipelines)
+      .values({
+        ...insertPipeline,
+        updatedAt: new Date(),
+      })
+      .returning();
+    return pipeline;
+  }
+
+  async updatePipeline(id: string, data: Partial<Pipeline>): Promise<Pipeline | undefined> {
+    const [updated] = await db
+      .update(pipelines)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(pipelines.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deletePipeline(id: string): Promise<void> {
+    await db.delete(pipelines).where(eq(pipelines.id, id));
+  }
+
+  async incrementPipelineVersion(id: string): Promise<void> {
+    await db
+      .update(pipelines)
+      .set({
+        version: sql`${pipelines.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(pipelines.id, id));
+  }
+
+  // Pipeline Mapping operations
+  async getPipelineMappings(pipelineId: string): Promise<PipelineMapping[]> {
+    return await db
+      .select()
+      .from(pipelineMappings)
+      .where(eq(pipelineMappings.pipelineId, pipelineId))
+      .orderBy(desc(pipelineMappings.updatedAt));
+  }
+
+  async getPipelineMapping(id: string): Promise<PipelineMapping | undefined> {
+    const [mapping] = await db.select().from(pipelineMappings).where(eq(pipelineMappings.id, id));
+    return mapping || undefined;
+  }
+
+  async createPipelineMapping(insertMapping: InsertPipelineMapping): Promise<PipelineMapping> {
+    const [mapping] = await db
+      .insert(pipelineMappings)
+      .values({
+        ...insertMapping,
+        updatedAt: new Date(),
+      })
+      .returning();
+    return mapping;
+  }
+
+  async updatePipelineMapping(id: string, data: Partial<PipelineMapping>): Promise<PipelineMapping | undefined> {
+    const [updated] = await db
+      .update(pipelineMappings)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(pipelineMappings.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deletePipelineMapping(id: string): Promise<void> {
+    await db.delete(pipelineMappings).where(eq(pipelineMappings.id, id));
+  }
+
+  // Pipeline Run operations
+  async getPipelineRuns(pipelineId: string, limit: number = 50): Promise<PipelineRun[]> {
+    return await db
+      .select()
+      .from(pipelineRuns)
+      .where(eq(pipelineRuns.pipelineId, pipelineId))
+      .orderBy(desc(pipelineRuns.createdAt))
+      .limit(limit);
+  }
+
+  async getPipelineRun(id: string): Promise<PipelineRun | undefined> {
+    const [run] = await db.select().from(pipelineRuns).where(eq(pipelineRuns.id, id));
+    return run || undefined;
+  }
+
+  async createPipelineRun(insertRun: InsertPipelineRun): Promise<PipelineRun> {
+    const [run] = await db
+      .insert(pipelineRuns)
+      .values(insertRun)
+      .returning();
+    return run;
+  }
+
+  async updatePipelineRun(id: string, data: Partial<PipelineRun>): Promise<PipelineRun | undefined> {
+    const [updated] = await db
+      .update(pipelineRuns)
+      .set(data)
+      .where(eq(pipelineRuns.id, id))
+      .returning();
+    return updated || undefined;
   }
 }
 

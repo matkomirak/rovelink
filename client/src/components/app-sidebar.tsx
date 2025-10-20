@@ -39,14 +39,9 @@ const menuItems = [
     icon: LayoutDashboard,
   },
   {
-    title: "Inventory",
-    url: "/inventory",
+    title: "Automation Inventories",
+    url: "/automation-inventories",
     icon: Server,
-  },
-  {
-    title: "NetBox Inventories",
-    url: "/netbox-inventory",
-    icon: Database,
   },
   {
     title: "Projects",

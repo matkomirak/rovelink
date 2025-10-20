@@ -27,6 +27,7 @@ import PipelineNew from "@/pages/pipeline-new";
 import PipelineDetail from "@/pages/pipeline-detail";
 import MappingEditor from "@/pages/mapping-editor";
 import NetBoxInventory from "@/pages/netbox-inventory";
+import AutomationInventories from "@/pages/automation-inventories";
 import type { User } from "@shared/schema";
 
 function AuthenticatedRouter() {
@@ -35,6 +36,7 @@ function AuthenticatedRouter() {
       <Route path="/" component={Dashboard} />
       <Route path="/inventory" component={Inventory} />
       <Route path="/netbox-inventory" component={NetBoxInventory} />
+      <Route path="/automation-inventories" component={AutomationInventories} />
       <Route path="/projects" component={Projects} />
       <Route path="/credentials" component={Credentials} />
       <Route path="/providers" component={Providers} />

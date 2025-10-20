@@ -35,6 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Play, RefreshCw, Download, Clock, Save } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import parser from "cron-parser";
 
 interface Pipeline {
   id: string;
@@ -92,6 +93,12 @@ interface DryRunResult {
 export default function PipelineDetail() {
   const { id } = useParams();
   const { toast } = useToast();
+  
+  // Get user role for RBAC
+  const { data: user } = useQuery<{ role: string }>({
+    queryKey: ["/api/auth/me"],
+  });
+  const userRole = user?.role || "viewer";
   const [activeTab, setActiveTab] = useState("mappings");
   const [showDryRunModal, setShowDryRunModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -106,6 +113,8 @@ export default function PipelineDetail() {
   // Editing states
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [scheduleCron, setScheduleCron] = useState("");
+  const [cronError, setCronError] = useState<string | null>(null);
+  const [nextRun, setNextRun] = useState<string | null>(null);
 
   const { data: pipeline, isLoading } = useQuery<Pipeline>({
     queryKey: ["/api/pipelines", id],
@@ -136,6 +145,15 @@ export default function PipelineDetail() {
 
   const updateSchedule = useMutation({
     mutationFn: async (cron: string) => {
+      // Validate cron before saving
+      if (cron) {
+        try {
+          parser.parseExpression(cron);
+        } catch (error: any) {
+          throw new Error(`Invalid cron expression: ${error.message}`);
+        }
+      }
+      
       const response = await apiRequest("PATCH", `/api/pipelines/${id}`, { 
         scheduleCron: cron || null 
       });
@@ -144,9 +162,38 @@ export default function PipelineDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/pipelines", id] });
       setEditingSchedule(false);
+      setCronError(null);
       toast({ title: "Success", description: "Schedule updated" });
     },
+    onError: (error: any) => {
+      setCronError(error.message);
+      toast({ 
+        title: "Validation Error", 
+        description: error.message,
+        variant: "destructive"
+      });
+    },
   });
+
+  const validateAndSetCron = (value: string) => {
+    setScheduleCron(value);
+    
+    if (!value) {
+      setCronError(null);
+      setNextRun(null);
+      return;
+    }
+    
+    try {
+      const interval = parser.parseExpression(value);
+      const next = interval.next().toDate();
+      setNextRun(next.toLocaleString());
+      setCronError(null);
+    } catch (error: any) {
+      setCronError(error.message);
+      setNextRun(null);
+    }
+  };
 
   const runDryRun = useMutation({
     mutationFn: async () => {
@@ -261,25 +308,27 @@ export default function PipelineDetail() {
           <h1 className="text-3xl font-bold">{pipeline.name}</h1>
           <p className="text-muted-foreground">Version {pipeline.version}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => runDryRun.mutate()}
-            disabled={runDryRun.isPending}
-            data-testid="button-dry-run"
-          >
-            <Play className="h-4 w-4 mr-2" />
-            Dry-Run
-          </Button>
-          <Button
-            onClick={() => runSync.mutate()}
-            disabled={runSync.isPending}
-            data-testid="button-sync-now"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Sync Now
-          </Button>
-        </div>
+        {userRole !== "viewer" && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => runDryRun.mutate()}
+              disabled={runDryRun.isPending}
+              data-testid="button-dry-run"
+            >
+              <Play className="h-4 w-4 mr-2" />
+              Dry-Run
+            </Button>
+            <Button
+              onClick={() => runSync.mutate()}
+              disabled={runSync.isPending}
+              data-testid="button-sync-now"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Sync Now
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Pipeline Settings Card */}
@@ -298,6 +347,7 @@ export default function PipelineDetail() {
             <Switch
               checked={pipeline.enabled}
               onCheckedChange={(checked) => toggleEnabled.mutate(checked)}
+              disabled={userRole === "viewer" || userRole === "operator"}
               data-testid="switch-enabled"
             />
           </div>
@@ -305,7 +355,7 @@ export default function PipelineDetail() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Schedule (Cron)</Label>
-              {!editingSchedule ? (
+              {!editingSchedule && userRole === "admin" ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -318,7 +368,7 @@ export default function PipelineDetail() {
                   <Clock className="h-4 w-4 mr-2" />
                   Edit
                 </Button>
-              ) : (
+              ) : editingSchedule ? (
                 <div className="flex gap-2">
                   <Button
                     variant="ghost"
@@ -340,12 +390,23 @@ export default function PipelineDetail() {
               )}
             </div>
             {editingSchedule ? (
-              <Input
-                value={scheduleCron}
-                onChange={(e) => setScheduleCron(e.target.value)}
-                placeholder="0 2 * * * (daily at 2am)"
-                data-testid="input-schedule"
-              />
+              <div className="space-y-2">
+                <Input
+                  value={scheduleCron}
+                  onChange={(e) => validateAndSetCron(e.target.value)}
+                  placeholder="0 2 * * * (daily at 2am)"
+                  data-testid="input-schedule"
+                  className={cronError ? "border-destructive" : ""}
+                />
+                {cronError && (
+                  <div className="text-xs text-destructive">{cronError}</div>
+                )}
+                {nextRun && !cronError && (
+                  <div className="text-xs text-green-600">
+                    Next run: {nextRun}
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="text-sm">
                 {pipeline.scheduleCron || (
@@ -353,11 +414,19 @@ export default function PipelineDetail() {
                 )}
               </div>
             )}
-            {pipeline.scheduleCron && !editingSchedule && (
-              <div className="text-xs text-muted-foreground">
-                Next run: In 2h 15m
-              </div>
-            )}
+            {pipeline.scheduleCron && !editingSchedule && (() => {
+              try {
+                const interval = parser.parseExpression(pipeline.scheduleCron);
+                const next = interval.next().toDate();
+                return (
+                  <div className="text-xs text-muted-foreground">
+                    Next run: {next.toLocaleString()}
+                  </div>
+                );
+              } catch {
+                return null;
+              }
+            })()}
           </div>
         </CardContent>
       </Card>

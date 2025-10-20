@@ -2,6 +2,7 @@
 import { 
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
   providerAccounts, syncRuns, externalObjects, groupCache, netboxVms, netboxInventorySources,
+  cmdbAccounts,
   type User, type InsertUser,
   type Project, type InsertProject,
   type Credential, type InsertCredential,
@@ -15,6 +16,7 @@ import {
   type GroupCache, type InsertGroupCache,
   type NetboxVm, type InsertNetboxVm,
   type NetboxInventorySource, type InsertNetboxInventorySource,
+  type CmdbAccount, type InsertCmdbAccount,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql } from "drizzle-orm";
@@ -95,6 +97,13 @@ export interface IStorage {
   createNetboxInventorySource(source: InsertNetboxInventorySource): Promise<NetboxInventorySource>;
   updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>): Promise<NetboxInventorySource | undefined>;
   deleteNetboxInventorySource(id: string): Promise<void>;
+
+  // CMDB operations
+  getCmdbAccounts(): Promise<CmdbAccount[]>;
+  getCmdbAccount(id: string): Promise<CmdbAccount | undefined>;
+  createCmdbAccount(account: InsertCmdbAccount): Promise<CmdbAccount>;
+  updateCmdbAccount(id: string, data: Partial<CmdbAccount>): Promise<CmdbAccount | undefined>;
+  deleteCmdbAccount(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -534,6 +543,43 @@ export class DatabaseStorage implements IStorage {
 
   async deleteNetboxInventorySource(id: string): Promise<void> {
     await db.delete(netboxInventorySources).where(eq(netboxInventorySources.id, id));
+  }
+
+  // CMDB operations
+  async getCmdbAccounts(): Promise<CmdbAccount[]> {
+    return await db.select().from(cmdbAccounts).orderBy(desc(cmdbAccounts.createdAt));
+  }
+
+  async getCmdbAccount(id: string): Promise<CmdbAccount | undefined> {
+    const [account] = await db.select().from(cmdbAccounts).where(eq(cmdbAccounts.id, id));
+    return account || undefined;
+  }
+
+  async createCmdbAccount(insertAccount: InsertCmdbAccount): Promise<CmdbAccount> {
+    const [account] = await db
+      .insert(cmdbAccounts)
+      .values({
+        ...insertAccount,
+        updatedAt: new Date(),
+      })
+      .returning();
+    return account;
+  }
+
+  async updateCmdbAccount(id: string, data: Partial<CmdbAccount>): Promise<CmdbAccount | undefined> {
+    const [updated] = await db
+      .update(cmdbAccounts)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(cmdbAccounts.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteCmdbAccount(id: string): Promise<void> {
+    await db.delete(cmdbAccounts).where(eq(cmdbAccounts.id, id));
   }
 }
 

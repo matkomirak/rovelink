@@ -181,6 +181,7 @@ export const externalObjects = pgTable("external_objects", {
   externalId: text("external_id").notNull(), // Provider's unique ID
   netboxType: text("netbox_type"), // e.g., virtualization.virtual_machines
   netboxId: integer("netbox_id"),
+  cmdbRef: jsonb("cmdb_ref").default({}), // Reference to CMDB object(s)
   cachedPayload: jsonb("cached_payload").default({}),
   lastSyncedAt: timestamp("last_synced_at").notNull().defaultNow(),
 }, (table) => ({
@@ -206,6 +207,19 @@ export const groupCache = pgTable("group_cache", {
 });
 
 export const groupCacheRelations = relations(groupCache, () => ({}));
+
+// CMDB Accounts (NetBox, i-doit, ServiceNow targets)
+export const cmdbAccounts = pgTable("cmdb_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kind: text("kind").notNull(), // netbox, idoit, servicenow
+  name: text("name").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  config: jsonb("config").notNull().default({}), // CMDB-specific configuration (url, token, etc.)
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const cmdbAccountsRelations = relations(cmdbAccounts, () => ({}));
 
 // NetBox Inventory Sources (multiple NetBox instances)
 export const netboxInventorySources = pgTable("netbox_inventory_sources", {
@@ -325,6 +339,12 @@ export const insertNetboxInventorySourceSchema = createInsertSchema(netboxInvent
   lastImportAt: true,
 });
 
+export const insertCmdbAccountSchema = createInsertSchema(cmdbAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -364,3 +384,6 @@ export type NetboxVm = typeof netboxVms.$inferSelect;
 
 export type InsertNetboxInventorySource = z.infer<typeof insertNetboxInventorySourceSchema>;
 export type NetboxInventorySource = typeof netboxInventorySources.$inferSelect;
+
+export type InsertCmdbAccount = z.infer<typeof insertCmdbAccountSchema>;
+export type CmdbAccount = typeof cmdbAccounts.$inferSelect;

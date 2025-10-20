@@ -1,0 +1,120 @@
+Go iterative. Please proceed with **Phases 1–2 now**, then pause for review before starting BDP (Phase 3).
+
+---
+
+# ✅ Direction
+
+Implement these **two phases**:
+
+## Phase 1 — Providers (Proxmox) + Basic Sync + Runs
+
+**Goal:** I can add a Proxmox account, test it, “Sync now,” and see VMs show up in **NetBox** with `ext_id`, `ext_provider`, tags, and (where available) `primary_ip4`.
+
+**Scope**
+
+* **DB migrations**
+
+  * `provider_accounts(id, kind, name, enabled, schedule_cron, config jsonb, timestamps)`
+  * `sync_runs(id, type='provider-sync', provider_account_id, status, started_at, finished_at, counts jsonb, error text, log_path text)`
+  * `external_objects(provider_account_id, provider_kind, external_id, netbox_type, netbox_id, cmdb_ref jsonb, cached_payload jsonb, last_synced_at)`
+* **Providers UI**
+
+  * Table + actions: **Add/Edit**, **Test connection**, **Sync now**, **Schedule**, **View runs**
+* **API**
+
+  * `GET/POST/PATCH /api/providers`
+  * `POST /api/providers/:id/test`
+  * `POST /api/providers/:id/sync`
+  * `GET /api/providers/:id/runs`
+* **Scheduler + Worker**
+
+  * Cron-based enqueuer for `schedule_cron`
+  * Sync worker: Proxmox collector (ticket/token), normalized VMs, upsert to **NetBox** (idempotent)
+* **Housekeeping (subset)**
+
+  * `POST /api/housekeeping/ensure-netbox-schema` → create/verify CFs: `ext_id`, `ext_provider`, `patch_wave`, `patch_subwave`, `ansible_user`
+  * `POST /api/housekeeping/rebuild-groups-cache`
+* **NetBox inventory file** (`inventory/netbox.yml`) with **keyed_groups** (wave/customer/os/role) as already specified
+* **Runs view**
+
+  * Filter by `type=provider-sync`
+  * Run detail: counts `{created,updated,unchanged,removed,errors}`, log tail
+
+**DoD**
+
+* Add Proxmox → **Test** OK (lists nodes/version)
+* **Sync now** populates NetBox; run recorded with counts
+* **Ensure schema** creates CFs; **Rebuild group cache** updates limit autocomplete
+* Groups like `customer_*`, `os_*`, `wave_*`, `role_*` are suggested in the limit builder
+
+---
+
+## Phase 2 — CMDB Accounts (NetBox target) + Job Templates (Tower-lite already built)
+
+**Goal:** Wire CMDB accounts so the app knows **NetBox** as a target and keep the current job templating/UI working with the NetBox inventory.
+
+**Scope**
+
+* **DB migrations**
+
+  * `cmdb_accounts(id, kind, name, enabled, config jsonb, timestamps)`
+* **CMDB UI & API**
+
+  * `GET/POST/PATCH /api/cmdbs`
+  * `POST /api/cmdbs/:id/test` (NetBox: read `/api/status/`)
+* **Use CMDB in Settings**
+
+  * Select the active NetBox account to power inventory (uses `NETBOX_URL/TOKEN` if not set)
+* **Job Templates (existing)**
+
+  * Ensure templates launch with `-i inventory/netbox.yml`
+  * Preflight uses group cache; notifications remain as-is
+
+**DoD**
+
+* Add NetBox CMDB account → **Test** OK
+* Templates can be launched (FakeRunner on Replit), with limits based on keyed groups
+* Recent runs & CSV export continue to work
+
+---
+
+# ⏭️ Next (after review): Phase 3 — BDP (mapping engine + editor)
+
+*(Don’t start until I confirm Phase 1–2)*
+
+* BDP tables (`pipelines`, `pipeline_mappings`, `pipeline_runs`)
+* Create BDP wizard (Provider+CMDB → type pairs → mapping editor)
+* Rules engine (fields/children/transforms/conflicts)
+* **Dry-run** (diffs) + **Sync now**
+* Versioning/rollback
+* Load **RTC rules** I provided for:
+
+  * Proxmox→NetBox VM
+  * vCenter→NetBox VM
+  * Azure→NetBox VM
+  * Proxmox/vCenter/Azure → **i-doit** Virtual Server
+
+---
+
+# Branching & Delivery
+
+* Work on branch: `feat/v2-phase-1-2`
+* Open PR to `main` titled **“v2 Phases 1–2: Providers (Proxmox) + CMDB (NetBox) + Inventory groups”**
+* Include:
+
+  * Migrations, seed (sample provider), `.env.example`
+  * API docs (README section) for endpoints above
+  * Screenshots/GIF: Providers page, Test, Sync, Runs, Housekeeping actions, Template with limit autocomplete
+  * Smoke test notes (how you verified NetBox updates using demo or dev env)
+
+---
+
+# Notes / Constraints
+
+* **All NetBox calls backend-only** (no tokens in browser)
+* **Idempotent upserts** keyed by `custom_fields.ext_id`
+* Respect `verify_ssl` for Proxmox; handle ticket expiration with one retry
+* Record “no IP found” as a warning in run summary
+* Keep FakeRunner; no real Ansible on Replit
+
+If you need anything clarified while implementing Phases 1–2, ask—but please proceed with this plan now.

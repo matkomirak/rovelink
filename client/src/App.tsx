@@ -22,6 +22,9 @@ import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
 import Providers from "@/pages/providers";
 import Cmdbs from "@/pages/cmdbs";
+import Pipelines from "@/pages/pipelines";
+import PipelineNew from "@/pages/pipeline-new";
+import PipelineDetail from "@/pages/pipeline-detail";
 import NetBoxInventory from "@/pages/netbox-inventory";
 import type { User } from "@shared/schema";
 
@@ -35,6 +38,9 @@ function AuthenticatedRouter() {
       <Route path="/credentials" component={Credentials} />
       <Route path="/providers" component={Providers} />
       <Route path="/cmdbs" component={Cmdbs} />
+      <Route path="/pipelines" component={Pipelines} />
+      <Route path="/pipelines/new" component={PipelineNew} />
+      <Route path="/pipelines/:id" component={PipelineDetail} />
       <Route path="/templates" component={Templates} />
       <Route path="/runs" component={Runs} />
       <Route path="/runs/:id" component={RunDetail} />

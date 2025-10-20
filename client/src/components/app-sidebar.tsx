@@ -12,6 +12,7 @@ import {
   Cloud,
   Database,
   Boxes,
+  GitBranch,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -66,6 +67,11 @@ const menuItems = [
     title: "CMDBs",
     url: "/cmdbs",
     icon: Boxes,
+  },
+  {
+    title: "Pipelines",
+    url: "/pipelines",
+    icon: GitBranch,
   },
   {
     title: "Templates",

@@ -1,0 +1,101 @@
+Awesome—go ahead and build the **Phase 3 UI** now. Paste this to your Replit agent:
+
+---
+
+## ✅ Proceed with Phase 3 UI (BDP)
+
+### 1) Navigation
+
+Add **Pipelines** to the sidebar (between CMDBs and Runs).
+
+### 2) Pages & Routes
+
+**/pipelines** (list)
+
+* Columns: **Name · Provider · CMDB · Enabled · Last run · Next run · Actions**
+* Actions per row: **Dry-Run | Sync Now | Edit | Disable**
+* “New Pipeline” button
+
+**/pipelines/new** (wizard)
+
+1. **Select endpoints** (Provider, CMDB) → POST `/api/pipelines`
+2. **Type pairs** (source types from `/api/providers/:id/object-types` vs target types from CMDB adapter `objectTypes()`) → POST `/api/pipelines/:id/mappings`
+3. **Mapping editor** (see below) → PATCH rules
+
+**/pipelines/:id** (detail)
+
+* Header: name, version, enabled toggle, schedule cron (inline edit + next run)
+* Tabs: **Mappings**, **Runs**, **Settings**
+* Buttons: **Dry-Run**, **Sync Now**, **Load Preset…**, **Rollback…**
+
+### 3) Mapping Editor (core UX)
+
+**Three panes:**
+
+* **Source (left):** sample object picker (GET `/api/providers/:provId/samples?type=Vm&limit=20`) + JSON tree
+* **Mapping (middle):** rows `source path → transforms → target field` + condition (optional) + conflict policy dropdown
+* **Target Preview (right):** adapter-validated shape with required/optional badges and inline errors
+
+**Controls**
+
+* Add row (+) with source path picker from tree
+* Transform chips: `lower`, `upper`, `title`, `strip`, `concat`, `map`, `regex_extract`, `lookup_table`, `datetime_parse`, `pick_primary_ipv4`
+* Conflict policy: `provider-wins | cmdb-wins | manual-only | merge`
+* Save → `PATCH /api/pipelines/:id/mappings/:mapId` (entire rules)
+* **Load preset…** → GET `/api/pipelines/presets` + `/api/pipelines/presets/:id` → replace rules editor
+* **Test on sample** → `POST /api/pipelines/:id/mappings/:mapId/test {sampleId}` → show transformed + validation messages in Target Preview
+
+### 4) Dry-Run & Sync modals
+
+* **Dry-Run**: `POST /api/pipelines/:id/dry-run`
+
+  * Show counts `{created, updated, unchanged, removed, errors}`, notes, and a paginated change table (field-level diff)
+  * CSV export of changes
+* **Sync Now**: `POST /api/pipelines/:id/sync`
+
+  * Live log tail (WS or polling), final summary counts
+
+### 5) Scheduling
+
+* Inline cron editor on pipeline detail; validate client-side (cron-parser); show “Next run …”
+* PATCH `/api/pipelines/:id` with `schedule_cron`
+
+### 6) Runs integration
+
+* **/runs**: add filter **Type = bdp-sync**; show pipeline name; open run detail drawer with summary/logs/CSV
+
+### 7) RBAC & Safety
+
+* Viewers: read-only (no Save/Dry-Run/Sync)
+* Operators: Dry-Run & Sync; cannot edit rules/schedule
+* Admin: full control
+* Confirm dialog before first **real** Sync if no successful dry-run exists
+* Don’t render secrets in UI; all tokens stay server-side
+
+### 8) Error handling (use standardized JSON)
+
+* Show banner/toast with `details[]` for validation errors (400/422)
+* Include `traceId` for 500s; display a small “Copy details” button
+
+### 9) Quick demo script (what I’ll test)
+
+1. Pipelines → **New** → pick *Proxmox* + *NetBox* → create
+2. Type pairs: **Vm → NetBox.VirtualMachine** → create mapping
+3. **Load preset**: *Proxmox.Vm → NetBox.VirtualMachine*
+4. Pick a sample → **Test** → see valid Target Preview (no blocking errors)
+5. **Dry-Run** → see counts & diffs; CSV export works
+6. **Sync Now** → live log → OK → changes visible in NetBox
+7. Set schedule `0 2 * * *` → shows **Next run**
+8. **/runs** filter **bdp-sync** shows the new run with counts
+
+### 10) Deliverables (PR checklist)
+
+* New pages/components wired to the endpoints
+* Preset loader UI
+* Mapping editor with transforms & conflict policy
+* Dry-run + Sync modals with summaries & CSV
+* Runs page filter for **bdp-sync**
+* Screenshots/GIF in PR (wizard, editor, dry-run, sync, runs)
+* README update (Phase 3 UI usage)
+
+**Branch:** `feat/v3-bdp-ui` → open PR to `main` titled **“Phase 3 UI: Pipelines, Mapping Editor, Dry-Run & Sync”**.

@@ -1,4 +1,5 @@
-import { get, set } from 'lodash';
+import lodash from 'lodash';
+const { get, set } = lodash;
 
 export type ConflictPolicy = 'provider-wins' | 'cmdb-wins' | 'manual-only' | 'merge';
 

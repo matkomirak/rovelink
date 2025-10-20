@@ -16,6 +16,7 @@ export default function Runs() {
   const [, setLocation] = useLocation();
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [archivedFilter, setArchivedFilter] = useState<string>("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const { toast } = useToast();
@@ -23,6 +24,7 @@ export default function Runs() {
   const queryParams = new URLSearchParams();
   if (statusFilter) queryParams.append("status", statusFilter);
   if (archivedFilter) queryParams.append("archived", archivedFilter);
+  if (typeFilter) queryParams.append("type", typeFilter);
   if (startDate) queryParams.append("startDate", startDate);
   if (endDate) queryParams.append("endDate", endDate);
   
@@ -104,7 +106,21 @@ export default function Runs() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Type</label>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger data-testid="filter-type">
+                  <SelectValue placeholder="All types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">All types</SelectItem>
+                  <SelectItem value="playbook-run">Playbook Runs</SelectItem>
+                  <SelectItem value="bdp-sync">Pipeline Syncs</SelectItem>
+                  <SelectItem value="provider-sync">Provider Syncs</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <label className="text-sm font-medium mb-2 block">Status</label>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -175,6 +191,7 @@ export default function Runs() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Type</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Run ID</TableHead>
                     <TableHead>Started</TableHead>
@@ -186,6 +203,11 @@ export default function Runs() {
                 <TableBody>
                   {runs.map((run) => (
                     <TableRow key={run.id} data-testid={`row-run-${run.id}`}>
+                      <TableCell>
+                        <Badge variant="outline" className="capitalize">
+                          {(run as any).runType || 'playbook-run'}
+                        </Badge>
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {getStatusIcon(run.status)}

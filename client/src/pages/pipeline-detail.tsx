@@ -355,7 +355,7 @@ export default function PipelineDetail() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Schedule (Cron)</Label>
-              {!editingSchedule && userRole === "admin" ? (
+              {!editingSchedule && userRole === "admin" && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -368,7 +368,8 @@ export default function PipelineDetail() {
                   <Clock className="h-4 w-4 mr-2" />
                   Edit
                 </Button>
-              ) : editingSchedule ? (
+              )}
+              {editingSchedule && (
                 <div className="flex gap-2">
                   <Button
                     variant="ghost"

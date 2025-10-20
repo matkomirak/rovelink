@@ -1,5 +1,9 @@
 # Bridge - Infrastructure Automation Platform
 
+**VERSION: "no-bridge-pipeline-code" (v1.0 - Pre-Pipeline Implementation)**
+
+This version includes all core features EXCEPT Bridge pipeline orchestration code. This is the baseline version before pipeline functionality is added.
+
 ## Overview
 Bridge is a full-stack infrastructure automation UI designed to streamline IT operations. It integrates with NetBox for inventory management, provides tools for defining and managing job templates, and orchestrates the execution of simulated Ansible playbooks. The platform offers real-time log streaming for job runs, comprehensive reporting, and a robust provider system for collecting and synchronizing VM inventory from various virtualization platforms into NetBox. Its core purpose is to provide a centralized, user-friendly interface for managing infrastructure automation workflows, enhancing operational efficiency, and improving visibility into IT assets.
 

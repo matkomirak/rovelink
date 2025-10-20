@@ -376,9 +376,11 @@ export default function PipelineDetail() {
                             {mapping.rules?.fields?.length || 0} field rules configured
                           </p>
                         </div>
-                        <Button variant="outline" size="sm">
-                          Edit Mapping
-                        </Button>
+                        <Link href={`/pipelines/${id}/mappings/${mapping.id}/edit`}>
+                          <Button variant="outline" size="sm">
+                            Edit Mapping
+                          </Button>
+                        </Link>
                       </div>
                       {mapping.rules?.fields && mapping.rules.fields.length > 0 && (
                         <div className="text-xs space-y-1">

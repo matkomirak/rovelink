@@ -33,9 +33,14 @@ export default function AutomationInventoryDetail() {
     queryKey: ["/api/inventories", id],
   });
 
-  const { data: structure, isLoading: structureLoading } = useQuery<InventoryStructure>({
+  const { data: structure, isLoading: structureLoading, error: structureError } = useQuery<InventoryStructure>({
     queryKey: ["/api/inventories", id, "structure"],
   });
+
+  // Debug logging
+  console.log("Structure data:", structure);
+  console.log("Structure loading:", structureLoading);
+  console.log("Structure error:", structureError);
 
   if (inventoryLoading || structureLoading) {
     return (
@@ -53,6 +58,21 @@ export default function AutomationInventoryDetail() {
           <CardHeader>
             <CardTitle>Inventory Not Found</CardTitle>
             <CardDescription>The requested inventory does not exist.</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  if (structureError) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Error Loading Inventory Structure</CardTitle>
+            <CardDescription className="text-destructive">
+              {structureError instanceof Error ? structureError.message : "Unknown error occurred"}
+            </CardDescription>
           </CardHeader>
         </Card>
       </div>
@@ -133,15 +153,27 @@ export default function AutomationInventoryDetail() {
         </Card>
       </div>
 
+      {/* Debug Panel */}
+      <Card className="bg-muted">
+        <CardHeader>
+          <CardTitle className="text-sm">Debug Info</CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs font-mono">
+          <div>Groups Count: {structure?.groups?.length || 0}</div>
+          <div>Hosts Count: {structure?.hosts?.length || 0}</div>
+          <div>Structure: {JSON.stringify(structure, null, 2).slice(0, 500)}</div>
+        </CardContent>
+      </Card>
+
       <Tabs defaultValue="groups" className="w-full">
         <TabsList>
           <TabsTrigger value="groups" data-testid="tab-groups">
             <Users className="h-4 w-4 mr-2" />
-            Groups
+            Groups ({structure?.groups?.length || 0})
           </TabsTrigger>
           <TabsTrigger value="hosts" data-testid="tab-hosts">
             <Server className="h-4 w-4 mr-2" />
-            Hosts
+            Hosts ({structure?.hosts?.length || 0})
           </TabsTrigger>
         </TabsList>
 

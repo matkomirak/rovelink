@@ -26,11 +26,30 @@ const providerFormSchema = insertProviderAccountSchema.extend({
   token_secret: z.string().optional(),
   realm: z.string().optional(),
   verify_ssl: z.boolean().optional(),
+  // Fake provider fields
+  variant: z.enum(["proxmox", "vsphere", "azure", "aws"]).optional(),
+  seed: z.number().optional(),
+  vms: z.number().optional(),
+  tenants: z.string().optional(),
+  sites: z.string().optional(),
+  clusters: z.string().optional(),
+  nodes: z.string().optional(),
+  linux_pct: z.number().optional(),
+  tags_customer: z.string().optional(),
+  tags_wave: z.string().optional(),
+  tags_role: z.string().optional(),
+  nics_min: z.number().optional(),
+  nics_max: z.number().optional(),
+  ips_min: z.number().optional(),
+  ips_max: z.number().optional(),
+  ipv4_cidrs: z.string().optional(),
+  missing_ip_pct: z.number().optional(),
 });
 
 export default function Providers() {
   const [open, setOpen] = useState(false);
   const [selectedKind, setSelectedKind] = useState<string>("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const { toast } = useToast();
 
   const { data: providers, isLoading } = useQuery<ProviderAccount[]>({
@@ -55,6 +74,15 @@ export default function Providers() {
       password: "",
       realm: "pam",
       verify_ssl: true,
+      variant: "proxmox",
+      seed: 42,
+      vms: 100,
+      linux_pct: 70,
+      missing_ip_pct: 10,
+      nics_min: 1,
+      nics_max: 1,
+      ips_min: 1,
+      ips_max: 1,
     },
   });
 
@@ -62,22 +90,55 @@ export default function Providers() {
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { base_url, auth_method, username, password, token_id, token_secret, realm, verify_ssl, ...providerData } = data;
+      const { base_url, auth_method, username, password, token_id, token_secret, realm, verify_ssl, variant, seed, vms, tenants, sites, clusters, nodes, linux_pct, tags_customer, tags_wave, tags_role, nics_min, nics_max, ips_min, ips_max, ipv4_cidrs, missing_ip_pct, ...providerData } = data;
       
-      const config: any = {
-        base_url,
-        auth_method,
-        realm,
-        verify_ssl,
-      };
+      let config: any = {};
       
-      if (auth_method === "password") {
-        config.username = username;
-        config.password = password;
+      if (data.kind === "fake") {
+        config = {
+          variant,
+          seed: seed || 42,
+          vms: vms || 100,
+          linux_pct: linux_pct || 70,
+          missing_ip_pct: missing_ip_pct || 10,
+        };
+        
+        if (tenants) config.tenants = tenants.split(",").map((s: string) => s.trim());
+        if (sites) config.sites = sites.split(",").map((s: string) => s.trim());
+        if (clusters) config.clusters = clusters.split(",").map((s: string) => s.trim());
+        if (nodes) config.nodes = nodes.split(",").map((s: string) => s.trim());
+        if (ipv4_cidrs) config.ipv4_cidrs = ipv4_cidrs.split(",").map((s: string) => s.trim());
+        
+        if (tags_customer || tags_wave || tags_role) {
+          config.tags = {};
+          if (tags_customer) config.tags.customer = tags_customer.split(",").map((s: string) => s.trim());
+          if (tags_wave) config.tags.wave = tags_wave.split(",").map((s: string) => s.trim());
+          if (tags_role) config.tags.role = tags_role.split(",").map((s: string) => s.trim());
+        }
+        
+        if (nics_min !== undefined || nics_max !== undefined) {
+          config.nics_per_vm = { min: nics_min || 1, max: nics_max || 1 };
+        }
+        
+        if (ips_min !== undefined || ips_max !== undefined) {
+          config.ips_per_nic = { min: ips_min || 1, max: ips_max || 1 };
+        }
       } else {
-        config.username = username;
-        config.token_id = token_id;
-        config.token_secret = token_secret;
+        config = {
+          base_url,
+          auth_method,
+          realm,
+          verify_ssl,
+        };
+        
+        if (auth_method === "password") {
+          config.username = username;
+          config.password = password;
+        } else {
+          config.username = username;
+          config.token_id = token_id;
+          config.token_secret = token_secret;
+        }
       }
       
       return apiRequest("POST", "/api/providers", {
@@ -89,6 +150,7 @@ export default function Providers() {
       queryClient.invalidateQueries({ queryKey: ["/api/providers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/providers"] });
       setOpen(false);
+      setShowAdvanced(false);
       form.reset();
       toast({
         title: "Success",
@@ -202,20 +264,46 @@ export default function Providers() {
   const handleEdit = (provider: ProviderAccount) => {
     setEditingProvider(provider);
     const config = provider.config as any;
-    form.reset({
-      name: provider.name,
-      kind: provider.kind,
-      enabled: provider.enabled,
-      config: provider.config,
-      base_url: config?.base_url || "",
-      auth_method: config?.auth_method || "password",
-      username: config?.username || "",
-      password: config?.password || "",
-      token_id: config?.token_id || "",
-      token_secret: config?.token_secret || "",
-      realm: config?.realm || "pam",
-      verify_ssl: config?.verify_ssl !== false,
-    });
+    
+    if (provider.kind === "fake") {
+      form.reset({
+        name: provider.name,
+        kind: provider.kind,
+        enabled: provider.enabled,
+        variant: config?.variant || "proxmox",
+        seed: config?.seed || 42,
+        vms: config?.vms || 100,
+        linux_pct: config?.linux_pct || 70,
+        missing_ip_pct: config?.missing_ip_pct || 10,
+        tenants: config?.tenants?.join(",") || "",
+        sites: config?.sites?.join(",") || "",
+        clusters: config?.clusters?.join(",") || "",
+        nodes: config?.nodes?.join(",") || "",
+        tags_customer: config?.tags?.customer?.join(",") || "",
+        tags_wave: config?.tags?.wave?.join(",") || "",
+        tags_role: config?.tags?.role?.join(",") || "",
+        nics_min: config?.nics_per_vm?.min || 1,
+        nics_max: config?.nics_per_vm?.max || 1,
+        ips_min: config?.ips_per_nic?.min || 1,
+        ips_max: config?.ips_per_nic?.max || 1,
+        ipv4_cidrs: config?.ipv4_cidrs?.join(",") || "",
+      });
+    } else {
+      form.reset({
+        name: provider.name,
+        kind: provider.kind,
+        enabled: provider.enabled,
+        base_url: config?.base_url || "",
+        auth_method: config?.auth_method || "password",
+        username: config?.username || "",
+        password: config?.password || "",
+        token_id: config?.token_id || "",
+        token_secret: config?.token_secret || "",
+        realm: config?.realm || "pam",
+        verify_ssl: config?.verify_ssl !== false,
+      });
+    }
+    
     setSelectedKind(provider.kind);
     setOpen(true);
   };
@@ -237,6 +325,7 @@ export default function Providers() {
           setOpen(isOpen);
           if (!isOpen) {
             setEditingProvider(null);
+            setShowAdvanced(false);
             form.reset();
           }
         }}>
@@ -286,6 +375,7 @@ export default function Providers() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="proxmox">Proxmox</SelectItem>
+                          <SelectItem value="fake">Fake (Generator)</SelectItem>
                           <SelectItem value="vmware" disabled>VMware (Coming Soon)</SelectItem>
                           <SelectItem value="azure" disabled>Azure (Coming Soon)</SelectItem>
                         </SelectContent>
@@ -294,6 +384,279 @@ export default function Providers() {
                     </FormItem>
                   )}
                 />
+
+                {(selectedKind === "fake" || form.watch("kind") === "fake") && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="variant"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Variant</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-variant">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="proxmox">Proxmox</SelectItem>
+                              <SelectItem value="vsphere">vSphere</SelectItem>
+                              <SelectItem value="azure">Azure</SelectItem>
+                              <SelectItem value="aws">AWS</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>Provider shape to emulate</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="seed"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Seed</FormLabel>
+                            <FormControl>
+                              <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-seed" />
+                            </FormControl>
+                            <FormDescription>For deterministic output</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <FormField
+                        control={form.control}
+                        name="vms"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>VM Count</FormLabel>
+                            <FormControl>
+                              <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-vms" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="linux_pct"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Linux %</FormLabel>
+                            <FormControl>
+                              <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-linux-pct" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setShowAdvanced(!showAdvanced)} data-testid="button-toggle-advanced">
+                        {showAdvanced ? "Hide" : "Show"} Advanced Options
+                      </Button>
+                    </div>
+
+                    {showAdvanced && (
+                      <div className="space-y-4 p-4 border rounded-md">
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="tenants"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Tenants (comma-separated)</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Alpha,Beta" {...field} data-testid="input-tenants" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="sites"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Sites (comma-separated)</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="PRG-DC1,PRG-DC2" {...field} data-testid="input-sites" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="clusters"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Clusters</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="C0,C1" {...field} data-testid="input-clusters" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="nodes"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Nodes</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="pve1,pve2" {...field} data-testid="input-nodes" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="tags_customer"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Tags: Customer</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Alpha,Beta,Gamma" {...field} data-testid="input-tags-customer" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="tags_wave"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Tags: Wave</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Wave1,Wave2,Wave3" {...field} data-testid="input-tags-wave" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="tags_role"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Tags: Role</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="web,app,db" {...field} data-testid="input-tags-role" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="ipv4_cidrs"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>IPv4 CIDRs</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="10.50.0.0/16,10.60.0.0/16" {...field} data-testid="input-ipv4-cidrs" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="missing_ip_pct"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Missing IP %</FormLabel>
+                                <FormControl>
+                                  <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-missing-ip-pct" />
+                                </FormControl>
+                                <FormDescription>% of VMs with no guest IPs</FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-2 gap-2">
+                            <FormField
+                              control={form.control}
+                              name="nics_min"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>NICs Min</FormLabel>
+                                  <FormControl>
+                                    <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-nics-min" />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                            <FormField
+                              control={form.control}
+                              name="nics_max"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>NICs Max</FormLabel>
+                                  <FormControl>
+                                    <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-nics-max" />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <FormField
+                              control={form.control}
+                              name="ips_min"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>IPs Min</FormLabel>
+                                  <FormControl>
+                                    <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-ips-min" />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                            <FormField
+                              control={form.control}
+                              name="ips_max"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>IPs Max</FormLabel>
+                                  <FormControl>
+                                    <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value))} data-testid="input-ips-max" />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
 
                 {(selectedKind === "proxmox" || form.watch("kind") === "proxmox") && (
                   <>

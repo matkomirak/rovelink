@@ -9,6 +9,9 @@ I prefer that the agent focuses on high-level feature implementation and archite
 ## System Architecture
 Bridge is built with a modern web stack: React 18 + TypeScript + Tailwind CSS + Shadcn UI for the frontend, Express.js + TypeScript for the backend, and PostgreSQL (via Neon serverless) with Drizzle ORM for data persistence. Real-time communication for log streaming is handled via WebSockets. Authentication is JWT-based, and external integration includes the NetBox REST API for inventory data.
 
+### Fake Provider System
+Bridge includes a **Fake Provider** feature for testing and development without requiring real infrastructure. The fake provider generates deterministic, provider-shaped VM data using a seeded PRNG (mulberry32), supporting four variants (Proxmox, vSphere, Azure, AWS). This enables full pipeline testing including discovery, mapping, dry-run, and sync operations with NetBox/i-doit targets.
+
 **UI/UX Decisions:**
 The UI follows a dark-first design principle using the Inter font family for UI elements and JetBrains Mono for code/logs. It features a professional aesthetic with a primary blue color palette, semantic colors for status, dark slate backgrounds, and elevated card elements. Typography is clearly defined, and reusable UI components include sidebar navigation, cards, sticky-header tables, a dark monospace log console, status badges, and skeleton loading states.
 
@@ -22,7 +25,8 @@ The UI follows a dark-first design principle using the Inter font family for UI 
 - **Scheduling:** Deferred execution via `scheduledAt` timestamps, with simplified background triggering.
 - **Reports Dashboard:** Widgets for inventory health (coverage, IP/user counts) and run statistics (success rate, failures).
 - **Notifications:** Configurable email and webhook notifications with trigger conditions, variable interpolation, retry logic, and custom headers/body.
-- **Provider System:** Extensible factory pattern for integrating various virtualization providers (e.g., Proxmox) to collect, normalize, and upsert VM inventory into NetBox. Includes provider account management, sync workers, external object mapping, sync run history, and housekeeping.
+- **Provider System:** Extensible factory pattern for integrating various virtualization providers (e.g., Proxmox, Fake) to collect, normalize, and upsert VM inventory into NetBox. Includes provider account management, sync workers, external object mapping, sync run history, and housekeeping.
+  - **Fake Provider:** Deterministic VM generator with configurable variants (Proxmox, vSphere, Azure, AWS), seeded PRNG for reproducible output, and full pipeline integration. Supports basic config (variant, seed, VM count, Linux %) and advanced options (tenants, sites, tags, network config). Generates provider-shaped objects compatible with existing RTC presets.
 - **CMDBs Management:** Full CRUD for CMDB target accounts (NetBox, i-doit, ServiceNow) with connection testing, enable/disable toggles, configuration, and admin-only delete functionality with confirmation dialogs.
 - **Settings:** Configuration management for NetBox URL/token, connection testing, and housekeeping dashboard.
 - **NetBox VM Import/Editing:** Admin-only full replacement sync of VMs from NetBox, storing detailed metadata. Local editing of imported VM data is supported.

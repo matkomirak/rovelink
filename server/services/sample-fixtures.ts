@@ -263,11 +263,54 @@ export const azureVmSamples: NormalizedSample[] = [
   }
 ];
 
+// Fake provider samples (small deterministic set for preview)
+export const fakeVmSamples: NormalizedSample[] = [
+  {
+    sampleId: "fake-sample:Vm:001",
+    providerKind: "fake",
+    objectType: "Vm",
+    normalized: {
+      externalId: "pve1-100",
+      name: "alpha-web-001",
+      provider: "fake-proxmox",
+      node: "pve1",
+      vmid: 100,
+      status: "running",
+      primaryIp4: "10.50.12.10",
+      tags: ["provider/proxmox", "node/pve1", "customer/Alpha", "wave/Wave1", "role/web"],
+      guest: { os: "linux" },
+      interfaces: [
+        { name: "net0", mac: "52:54:00:12:34:56", ips: ["10.50.12.10/24"] }
+      ]
+    }
+  },
+  {
+    sampleId: "fake-sample:Vm:002",
+    providerKind: "fake",
+    objectType: "Vm",
+    normalized: {
+      externalId: "pve1-101",
+      name: "beta-db-002",
+      provider: "fake-proxmox",
+      node: "pve1",
+      vmid: 101,
+      status: "running",
+      primaryIp4: "10.50.24.11",
+      tags: ["provider/proxmox", "node/pve1", "customer/Beta", "wave/Wave2", "role/db"],
+      guest: { os: "linux" },
+      interfaces: [
+        { name: "net0", mac: "52:54:00:ab:cd:ef", ips: ["10.50.24.11/24"] }
+      ]
+    }
+  }
+];
+
 // Combined registry for easy lookup
 export const sampleRegistry: Record<string, NormalizedSample[]> = {
   "proxmox:Vm": proxmoxVmSamples,
   "vmware:VM": vcenterVmSamples,
   "azure:Compute.VirtualMachine": azureVmSamples,
+  "fake:Vm": fakeVmSamples,
 };
 
 /**

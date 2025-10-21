@@ -191,8 +191,8 @@ router.get("/:id/structure", async (req, res) => {
 
     // For linked inventories, fetch real data from CMDB
     if (inventory.type === "linked" && inventory.sourceType && inventory.sourceRef) {
-      const { NetBoxAdapter } = await import("../services/netbox-adapter");
-      const cmdbAccounts = (await import("../db/schema")).cmdbAccounts;
+      const { NetBoxAdapter } = await import("../../services/netbox-adapter");
+      const { cmdbAccounts } = await import("../../db/schema");
       
       // Get the linked CMDB account
       const [cmdb] = await db
@@ -328,8 +328,8 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     }
 
     // Fetch real data from CMDB
-    const { NetBoxAdapter } = await import("../services/netbox-adapter");
-    const cmdbAccounts = (await import("../db/schema")).cmdbAccounts;
+    const { NetBoxAdapter } = await import("../../services/netbox-adapter");
+    const { cmdbAccounts } = await import("../../db/schema");
     
     const [cmdb] = await db
       .select()

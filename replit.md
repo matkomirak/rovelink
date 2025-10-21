@@ -23,7 +23,7 @@ The UI follows a dark-first design principle using the Inter font family for UI 
 - **Reports Dashboard:** Widgets for inventory health (coverage, IP/user counts) and run statistics (success rate, failures).
 - **Notifications:** Configurable email and webhook notifications with trigger conditions, variable interpolation, retry logic, and custom headers/body.
 - **Provider System:** Extensible factory pattern for integrating various virtualization providers (e.g., Proxmox) to collect, normalize, and upsert VM inventory into NetBox. Includes provider account management, sync workers, external object mapping, sync run history, and housekeeping.
-- **CMDBs Management:** Full CRUD for CMDB target accounts (NetBox, i-doit, ServiceNow) with connection testing, enable/disable toggles, and configuration.
+- **CMDBs Management:** Full CRUD for CMDB target accounts (NetBox, i-doit, ServiceNow) with connection testing, enable/disable toggles, configuration, and admin-only delete functionality with confirmation dialogs.
 - **Settings:** Configuration management for NetBox URL/token, connection testing, and housekeeping dashboard.
 - **NetBox VM Import/Editing:** Admin-only full replacement sync of VMs from NetBox, storing detailed metadata. Local editing of imported VM data is supported.
 - **Bridge Data Pipelines (BDP):** UI and backend for creating and managing data pipelines.
@@ -36,6 +36,14 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - **Preset RTC Rules:** 6 pre-configured mapping templates for common provider-to-CMDB integrations.
   - **Modular Routes Architecture:** Organized API endpoints for pipelines, mappings, and provider discovery.
   - **RBAC Enforcement:** Role-based access control applied to all pipeline endpoints.
+- **Automation Inventories:** Unified inventory management system consolidating all inventory sources.
+  - **Three Inventory Types:** Linked (CMDB-backed with real NetBox data), File-based (YAML/JSON/INI), and Script-based (dynamic).
+  - **Real NetBox Integration:** Linked inventories fetch actual VM data from connected NetBox CMDBs via `NetBoxAdapter.listAllVms()` method.
+  - **Automatic Group Generation:** Groups created from VM tags, tenant, site, cluster, and platform metadata.
+  - **Drill-Down Navigation:** Browse groups → hosts → host details with group memberships and variables.
+  - **File Inventory Editor:** Real-time validation and editing of YAML/JSON/INI inventory files.
+  - **Refresh Functionality:** Updates group/host counts from live NetBox data.
+  - **Preview Data:** Sample hosts and groups displayed in list view for quick inspection.
 
 **System Design Choices:**
 - **Database Schema:** Designed to support users, projects, credentials, job templates, job runs, notifications, settings, provider accounts, sync runs, external objects, NetBox VM imports, CMDBs, and pipeline-related entities (pipelines, pipeline_mappings, pipeline_runs). Roles include admin, operator, and viewer.

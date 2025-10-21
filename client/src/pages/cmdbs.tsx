@@ -14,7 +14,17 @@ import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, TestTube, Settings, Loader2, InfoIcon } from "lucide-react";
+import { Plus, TestTube, Settings, Loader2, InfoIcon, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface CmdbAccount {
   id: string;
@@ -43,6 +53,7 @@ export default function CmdbsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCmdb, setEditingCmdb] = useState<CmdbAccount | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: cmdbs = [], isLoading } = useQuery<CmdbAccount[]>({
     queryKey: ["/api/cmdbs"],
@@ -90,6 +101,19 @@ export default function CmdbsPage() {
     onError: (error: any) => {
       toast({ title: "Test failed", description: error.message, variant: "destructive" });
       setTestingId(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/cmdbs/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cmdbs"] });
+      toast({ title: "CMDB account deleted successfully" });
+      setDeleteId(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to delete CMDB account", description: error.message, variant: "destructive" });
+      setDeleteId(null);
     },
   });
 
@@ -249,6 +273,14 @@ export default function CmdbsPage() {
                           >
                             <Settings className="w-4 h-4" />
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setDeleteId(cmdb.id)}
+                            data-testid={`button-delete-${cmdb.id}`}
+                          >
+                            <Trash2 className="w-4 h-4 text-destructive" />
+                          </Button>
                           <Switch
                             checked={cmdb.enabled}
                             onCheckedChange={() => handleToggleEnabled(cmdb)}
@@ -376,6 +408,27 @@ export default function CmdbsPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete CMDB Account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this CMDB account. Any automation inventories linked to this CMDB will need to be reconfigured. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

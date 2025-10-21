@@ -697,6 +697,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const deleted = await storage.deleteCmdbAccount(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      res.json({ message: "CMDB account deleted successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to delete CMDB account" });
+    }
+  });
+
   app.post("/api/cmdbs/:id/test", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
     try {
       const cmdb = await storage.getCmdbAccount(req.params.id);

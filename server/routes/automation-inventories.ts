@@ -189,29 +189,111 @@ router.get("/:id/structure", async (req, res) => {
       });
     }
 
-    // For linked inventories, return mock data
-    if (inventory.type === "linked") {
-      const mockGroups = [
-        { name: "customer_acme", hostsCount: 45, hosts: ["web-01.acme.com", "web-02.acme.com", "db-01.acme.com"] },
-        { name: "customer_contoso", hostsCount: 32, hosts: ["app-01.contoso.com", "db-01.contoso.com"] },
-        { name: "os_ubuntu", hostsCount: 67, hosts: ["web-01.acme.com", "web-02.acme.com", "app-01.contoso.com"] },
-        { name: "os_centos", hostsCount: 10, hosts: ["db-01.acme.com", "db-01.contoso.com"] },
-        { name: "wave_1", hostsCount: 23, hosts: ["web-01.acme.com", "db-01.acme.com"] },
-        { name: "wave_2", hostsCount: 54, hosts: ["web-02.acme.com", "app-01.contoso.com", "db-01.contoso.com"] },
-      ];
+    // For linked inventories, fetch real data from CMDB
+    if (inventory.type === "linked" && inventory.sourceType && inventory.sourceId) {
+      const { NetBoxAdapter } = await import("../../services/netbox-adapter");
+      const { cmdbAccounts } = await import("@db/schema");
+      
+      // Get the linked CMDB account
+      const [cmdb] = await db
+        .select()
+        .from(cmdbAccounts)
+        .where(eq(cmdbAccounts.id, inventory.sourceId));
 
-      const mockHosts = [
-        { name: "web-01.acme.com", ansible_host: "10.0.1.10", groups: ["customer_acme", "os_ubuntu", "wave_1"], vars: { role: "webserver", env: "prod" } },
-        { name: "web-02.acme.com", ansible_host: "10.0.1.11", groups: ["customer_acme", "os_ubuntu", "wave_2"], vars: { role: "webserver", env: "prod" } },
-        { name: "db-01.acme.com", ansible_host: "10.0.2.10", groups: ["customer_acme", "os_centos", "wave_1"], vars: { role: "database", env: "prod" } },
-        { name: "app-01.contoso.com", ansible_host: "10.1.1.10", groups: ["customer_contoso", "os_ubuntu", "wave_2"], vars: { role: "app", env: "staging" } },
-        { name: "db-01.contoso.com", ansible_host: "10.1.2.10", groups: ["customer_contoso", "os_centos", "wave_2"], vars: { role: "database", env: "staging" } },
-      ];
+      if (!cmdb) {
+        return res.status(404).json({ message: "Linked CMDB not found" });
+      }
 
-      return res.json({
-        groups: mockGroups,
-        hosts: mockHosts,
-      });
+      // Fetch VMs from NetBox
+      const adapter = new NetBoxAdapter(cmdb.config as any);
+      const vms = await adapter.listAllVms();
+
+      // Build groups and hosts structure
+      const groupsMap = new Map<string, Set<string>>();
+      const hostsMap = new Map<string, any>();
+
+      for (const vm of vms) {
+        const hostName = vm.name;
+        const ip = vm.primary_ip4?.address?.split('/')[0] || '';
+        const groups: string[] = [];
+        
+        // Create groups from tags
+        if (vm.tags && Array.isArray(vm.tags)) {
+          for (const tag of vm.tags) {
+            const tagName = typeof tag === 'string' ? tag : tag.name;
+            if (tagName) {
+              groups.push(tagName);
+              if (!groupsMap.has(tagName)) {
+                groupsMap.set(tagName, new Set());
+              }
+              groupsMap.get(tagName)!.add(hostName);
+            }
+          }
+        }
+
+        // Create groups from tenant, site, cluster, platform
+        if (vm.tenant?.name) {
+          const groupName = `tenant_${vm.tenant.name}`;
+          groups.push(groupName);
+          if (!groupsMap.has(groupName)) {
+            groupsMap.set(groupName, new Set());
+          }
+          groupsMap.get(groupName)!.add(hostName);
+        }
+
+        if (vm.site?.name) {
+          const groupName = `site_${vm.site.name}`;
+          groups.push(groupName);
+          if (!groupsMap.has(groupName)) {
+            groupsMap.set(groupName, new Set());
+          }
+          groupsMap.get(groupName)!.add(hostName);
+        }
+
+        if (vm.cluster?.name) {
+          const groupName = `cluster_${vm.cluster.name}`;
+          groups.push(groupName);
+          if (!groupsMap.has(groupName)) {
+            groupsMap.set(groupName, new Set());
+          }
+          groupsMap.get(groupName)!.add(hostName);
+        }
+
+        if (vm.platform?.name) {
+          const groupName = `platform_${vm.platform.name}`;
+          groups.push(groupName);
+          if (!groupsMap.has(groupName)) {
+            groupsMap.set(groupName, new Set());
+          }
+          groupsMap.get(groupName)!.add(hostName);
+        }
+
+        // Create host entry
+        hostsMap.set(hostName, {
+          name: hostName,
+          ansible_host: ip,
+          groups,
+          vars: {
+            status: vm.status?.value || vm.status || '',
+            vcpus: vm.vcpus || 0,
+            memory: vm.memory || 0,
+            tenant: vm.tenant?.name || '',
+            site: vm.site?.name || '',
+            cluster: vm.cluster?.name || '',
+          }
+        });
+      }
+
+      // Convert maps to arrays
+      const groups = Array.from(groupsMap.entries()).map(([name, hosts]) => ({
+        name,
+        hostsCount: hosts.size,
+        hosts: Array.from(hosts),
+      }));
+
+      const hosts = Array.from(hostsMap.values());
+
+      return res.json({ groups, hosts });
     }
 
     res.json({ groups: [], hosts: [] });
@@ -241,21 +323,94 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: "Only linked inventories can be refreshed" });
     }
 
-    // Simulate refresh from CMDB
-    // In a real implementation, this would fetch from the actual CMDB
+    if (!inventory.sourceId) {
+      return res.status(400).json({ message: "Inventory has no linked CMDB source" });
+    }
+
+    // Fetch real data from CMDB
+    const { NetBoxAdapter } = await import("../../services/netbox-adapter");
+    const { cmdbAccounts } = await import("@db/schema");
+    
+    const [cmdb] = await db
+      .select()
+      .from(cmdbAccounts)
+      .where(eq(cmdbAccounts.id, inventory.sourceId));
+
+    if (!cmdb) {
+      return res.status(404).json({ message: "Linked CMDB not found" });
+    }
+
+    // Fetch VMs from NetBox
+    const adapter = new NetBoxAdapter(cmdb.config as any);
+    const vms = await adapter.listAllVms();
+
+    // Calculate groups and hosts counts
+    const groupsMap = new Map<string, Set<string>>();
+    
+    for (const vm of vms) {
+      const hostName = vm.name;
+      
+      // Count groups from tags
+      if (vm.tags && Array.isArray(vm.tags)) {
+        for (const tag of vm.tags) {
+          const tagName = typeof tag === 'string' ? tag : tag.name;
+          if (tagName) {
+            if (!groupsMap.has(tagName)) {
+              groupsMap.set(tagName, new Set());
+            }
+            groupsMap.get(tagName)!.add(hostName);
+          }
+        }
+      }
+
+      // Count groups from metadata
+      if (vm.tenant?.name) {
+        const groupName = `tenant_${vm.tenant.name}`;
+        if (!groupsMap.has(groupName)) {
+          groupsMap.set(groupName, new Set());
+        }
+        groupsMap.get(groupName)!.add(hostName);
+      }
+
+      if (vm.site?.name) {
+        const groupName = `site_${vm.site.name}`;
+        if (!groupsMap.has(groupName)) {
+          groupsMap.set(groupName, new Set());
+        }
+        groupsMap.get(groupName)!.add(hostName);
+      }
+
+      if (vm.cluster?.name) {
+        const groupName = `cluster_${vm.cluster.name}`;
+        if (!groupsMap.has(groupName)) {
+          groupsMap.set(groupName, new Set());
+        }
+        groupsMap.get(groupName)!.add(hostName);
+      }
+
+      if (vm.platform?.name) {
+        const groupName = `platform_${vm.platform.name}`;
+        if (!groupsMap.has(groupName)) {
+          groupsMap.set(groupName, new Set());
+        }
+        groupsMap.get(groupName)!.add(hostName);
+      }
+    }
+
+    // Update inventory with real counts
     await db
       .update(automationInventories)
       .set({
-        groupsCount: 12 + Math.floor(Math.random() * 5),
-        hostsCount: 145 + Math.floor(Math.random() * 20),
+        groupsCount: groupsMap.size,
+        hostsCount: vms.length,
         lastRefreshedAt: new Date(),
         previewData: {
-          groups: ["customer_acme", "customer_contoso", "os_ubuntu", "os_centos", "wave_1", "wave_2"],
-          sampleHosts: [
-            { name: "web-01.acme.com", ip: "10.0.1.10", groups: ["customer_acme", "os_ubuntu"] },
-            { name: "web-02.acme.com", ip: "10.0.1.11", groups: ["customer_acme", "os_ubuntu"] },
-            { name: "db-01.contoso.com", ip: "10.0.2.10", groups: ["customer_contoso", "os_centos"] },
-          ],
+          groups: Array.from(groupsMap.keys()).slice(0, 10),
+          sampleHosts: vms.slice(0, 5).map(vm => ({
+            name: vm.name,
+            ip: vm.primary_ip4?.address?.split('/')[0] || '',
+            status: vm.status?.value || vm.status || '',
+          })),
         },
         updatedAt: new Date(),
       })

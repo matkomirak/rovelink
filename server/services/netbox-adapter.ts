@@ -327,4 +327,38 @@ export class NetBoxAdapter {
       'ipam.prefixes',
     ];
   }
+
+  /**
+   * List all virtual machines from NetBox
+   */
+  async listAllVms(): Promise<any[]> {
+    try {
+      const vms: any[] = [];
+      let offset = 0;
+      const limit = 100;
+      
+      while (true) {
+        const response = await this.client.get('/virtualization/virtual-machines/', {
+          params: { offset, limit }
+        });
+        
+        if (!response.data.results || response.data.results.length === 0) {
+          break;
+        }
+        
+        vms.push(...response.data.results);
+        
+        if (!response.data.next) {
+          break;
+        }
+        
+        offset += limit;
+      }
+      
+      return vms;
+    } catch (error: any) {
+      console.error('Failed to list VMs from NetBox:', error.message);
+      throw new Error(`Failed to list VMs: ${error.message}`);
+    }
+  }
 }

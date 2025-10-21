@@ -1,0 +1,305 @@
+Perfect—here’s a tight, copy-paste brief for your Replit dev to add a **Fake Provider** and let you drive the full **Pipelines → Mapping → NetBox / i-doit** flow with zero real infra.
+
+---
+
+# Bridge: Fake Provider (generator) — Dev Brief
+
+## 1) New provider kind
+
+* **kind:** `"fake"`
+* **variant (subkind):** `"proxmox" | "vsphere" | "azure" | "aws"`
+* Purpose: generate deterministic, provider-shaped VM data for **discovery, samples, dry-run & sync**.
+
+### Config JSON schema (server-side validate)
+
+```jsonc
+{
+  "variant": "proxmox",            // enum: proxmox | vsphere | azure | aws
+  "seed": 42,                      // integer -> deterministic output
+  "vms": 200,                      // total VM count
+  "tenants": ["Alpha","Beta"],     // used for tags/tenant mapping
+  "sites": ["PRG-DC1","PRG-DC2"],  // or ["DC1","DC2"] for vSphere presets
+  "clusters": ["C0","C1"],         // for vsphere; nodes for proxmox
+  "nodes": ["pve1","pve2"],        // for proxmox
+  "linux_pct": 70,                 // % linux vs windows
+  "tags": {
+    "customer": ["Alpha","Beta","Gamma"],
+    "wave": ["Wave1","Wave2","Wave3"],
+    "role": ["web","app","db"]
+  },
+  "nics_per_vm": { "min": 1, "max": 2 },
+  "ips_per_nic": { "min": 1, "max": 2 },
+  "ipv4_cidrs": ["10.50.0.0/16","10.60.0.0/16"], // pool for address gen
+  "missing_ip_pct": 10            // % of VMs with no guest IPs (to test preflight)
+}
+```
+
+> UI: show **variant** dropdown and a **“Basic / Advanced”** toggle. In Basic, only `variant`, `seed`, `vms`. In Advanced, expose the rest.
+
+---
+
+## 2) Normalized VM output (must match your RTC rules)
+
+Emit **provider-shaped** objects so your presets work out of the box:
+
+### A) `variant = "proxmox"`
+
+```jsonc
+{
+  "vm": {
+    "name": "alpha-web-001",
+    "status": "running",                 // running / stopped
+    "guest": { "os": "linux" },         // linux / windows
+    "tags": { "customer": "Alpha", "wave": "Wave2", "role": "web" },
+    "node": "pve1",
+    "vmid": 101,                         // unique per node
+    "interfaces": [
+      {"name": "net0", "mac": "52:54:00:12:34:56", "ips": ["10.50.12.10/24"]}
+    ]
+  }
+}
+```
+
+* Ext ID for mapping preset: `concat('proxmox:', vm.node, '-', vm.vmid)`
+
+### B) `variant = "vsphere"` (vCenter-like)
+
+```jsonc
+{
+  "vm": {
+    "name": "alpha-app-023",
+    "power_state": "poweredOn",          // poweredOn/off/suspended
+    "guest_full_name": "Ubuntu Linux (64-bit)",
+    "tags": ["customer:Alpha","wave:Wave1","role:web"],  // array okay
+    "datacenter": "DC1",
+    "cluster": "C0",
+    "instance_uuid": "500c345a-5b9b-4c2f-9e1b-0000000023",
+    "nics": [
+      { "label": "Network adapter 1", "macAddress": "00:50:56:aa:bb:cc" }
+    ],
+    "guest_ip_addresses": ["10.60.3.23/24"]
+  },
+  "custom_attributes": { "customer": "Alpha" }
+}
+```
+
+* Ext ID: `concat('vc:', vm.instance_uuid)`
+
+### C) `variant = "azure"` (Compute VM shape)
+
+```jsonc
+{
+  "vm": {
+    "id": "/subscriptions/000.../resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/alpha-db-05",
+    "name": "alpha-db-05",
+    "location": "westeurope",
+    "resourceGroup": "rg-prod",
+    "instanceView": { "powerState": "PowerState/running" },
+    "storageProfile": { "osDisk": { "osType": "Linux" } },
+    "tags": { "customer": "Alpha", "wave": "Wave3", "role": "db" },
+    "networkProfile": { "networkInterfaces": [{ "name": "nic-alpha-db-05", "macAddress": "00:22:48:11:22:33" }] },
+    "nicIpConfigs": [{ "privateIpAddress": "10.50.40.5/24" }]
+  }
+}
+```
+
+* Ext ID: `concat('azure:', vm.id)`
+
+> For `variant = "aws"`, you can mirror EC2-ish fields (optional now).
+
+---
+
+## 3) Service implementation
+
+Create `server/services/fake-collector.ts` with the same interface as other collectors:
+
+```ts
+export class FakeCollector {
+  constructor(private cfg: FakeConfig) {}
+
+  async test() {
+    // compute a small sample and return counts
+    return { ok: true, variant: this.cfg.variant, sample: 10 };
+  }
+
+  async listVms(): Promise<Array<any>> {
+    // use seeded PRNG to generate `this.cfg.vms` items
+    // branch on variant to emit the shapes above
+  }
+
+  // helper: generate deterministic MACs, names, IPs from seed + index
+}
+```
+
+* Hook into the provider factory: when `provider.kind === "fake"`, instantiate `FakeCollector`.
+* **Discovery endpoints**:
+
+  * `GET /api/providers/:id/object-types` → `["Vm"]`
+  * `GET /api/providers/:id/samples?type=Vm&limit=20` → 20 generated items
+* **Provider Sync**: It may write directly to NetBox via your NetBox adapter (useful), but the main goal is **BDP** pipelines.
+
+---
+
+## 4) UI additions
+
+* Providers → **Add Provider**:
+
+  * **Kind:** `Fake`
+  * **Variant:** dropdown (Proxmox, vSphere, Azure)
+  * **Seed:** number
+  * **Basic/Advanced** accordion for the rest
+  * **Test Connection** → shows `{ ok, variant, sample }`
+* Runs, schedules, etc. same as other providers.
+
+---
+
+## 5) Presets & Pipelines (how you’ll use it)
+
+You already have RTC rules. With Fake Providers, do:
+
+### NetBox target
+
+* Create Pipeline:
+
+  * **Provider:** *Fake (Proxmox)* → **CMDB:** *NetBox*
+  * Pair type: **Vm → NetBox.VirtualMachine**
+  * **Load preset:** *Proxmox.Vm → NetBox.VirtualMachine*
+  * **Dry-Run** → shows created/updated counts & diffs
+  * **Sync Now** → writes VMs/IPs/tags/CFs into NetBox
+
+### i-doit target
+
+* Create Pipeline:
+
+  * **Provider:** *Fake (vSphere or Azure)* → **CMDB:** *i-doit*
+  * Pair: **Vm → i-doit.Virtual Server**
+  * **Load preset:** *vCenter.VM → i-doit.Virtual Server* (or Azure variant)
+  * **Dry-Run** → **Sync Now**
+
+Then build an **Automation Inventory** from your NetBox CMDB (Linked), refresh, and use it in templates (limits like `customer_Alpha & os_linux & wave_Wave2 - role_db`).
+
+---
+
+## 6) Generator details (deterministic)
+
+* Use a small seeded PRNG (e.g., mulberry32 or xorshift; no deps required).
+* **Name pattern:** `<customer>-<role>-NNN`
+* **OS distribution:** `linux_pct` split; Linux names: Ubuntu, Debian, RHEL; Windows: 2019/2022
+* **MACs:** derive from seed+index → fixed OUI per variant (`52:54:00` for KVM-ish, `00:50:56` for vSphere feel)
+* **IPs:** pick `ipv4_cidrs` → allocate subnets → per VM pick `/24` address; honor `missing_ip_pct`
+* **IDs:**
+
+  * proxmox: `vmid = base + i`, `node = nodes[i % nodes.length]`
+  * vsphere: deterministic UUID (format with hex of index/seed)
+  * azure: deterministic ARM IDs; include resourceGroup, location
+
+Put common helpers in `server/services/fake-helpers.ts`.
+
+---
+
+## 7) Fixtures mode (optional but handy)
+
+Allow `"source": "fixture"` in config to load from a local JSON file instead of generating. Keep `"source": "generated"` as default.
+
+```json
+{
+  "variant": "proxmox",
+  "source": "fixture",
+  "fixturePath": "fixtures/proxmox_small.json"
+}
+```
+
+---
+
+## 8) Endpoints to touch (summary)
+
+* **Existing**:
+
+  * `POST /api/providers` → accept `kind: "fake"` and `config` above
+  * `POST /api/providers/:id/test` → use `FakeCollector.test()`
+  * `POST /api/providers/:id/sync` → optional direct NetBox write for quick bootstrapping
+  * `GET /api/providers/:id/object-types`
+  * `GET /api/providers/:id/samples?type=Vm&limit=20`
+* **Pipelines** (already built):
+
+  * Create pipeline, mappings, save rules, dry-run, sync
+* **Presets**: reuse the 6 RTC presets already in `preset-rules.ts`
+
+---
+
+## 9) Acceptance criteria
+
+1. **Add Fake Provider (Proxmox)** with `{variant: "proxmox", seed: 1, vms: 100}` → **Test** returns `{ok:true}`.
+2. **Discovery**: `/samples?type=Vm&limit=20` returns 20 proxmox-shaped items with deterministic names/IPs.
+3. **Pipeline (Proxmox → NetBox)**: load preset **Proxmox.Vm → NetBox.VirtualMachine**, **Dry-Run** shows non-zero created; **Sync** writes into NetBox; re-run is idempotent.
+4. **Pipeline (vSphere → i-doit)**: **Dry-Run** and **Sync** work with the i-doit preset (validate at least).
+5. **Automation Inventory (Linked to NetBox)**: **Refresh** shows group counts and hosts; limits work in a template.
+6. Changing `seed` or `vms` alters generated set; `missing_ip_pct` produces expected “missing IP” notes in dry-run.
+
+---
+
+## 10) Example configs you can try immediately
+
+**Fake Proxmox (small)**
+
+```json
+{
+  "variant": "proxmox",
+  "seed": 7,
+  "vms": 80,
+  "tenants": ["Alpha","Beta"],
+  "sites": ["PRG-DC1","PRG-DC2"],
+  "nodes": ["pve1","pve2"],
+  "linux_pct": 75,
+  "tags": { "customer": ["Alpha","Beta"], "wave": ["Wave1","Wave2"], "role": ["web","app","db"] },
+  "nics_per_vm": { "min": 1, "max": 1 },
+  "ips_per_nic": { "min": 1, "max": 1 },
+  "ipv4_cidrs": ["10.50.0.0/16"],
+  "missing_ip_pct": 10
+}
+```
+
+**Fake vSphere (medium)**
+
+```json
+{
+  "variant": "vsphere",
+  "seed": 12,
+  "vms": 150,
+  "tenants": ["Alpha","Gamma"],
+  "sites": ["DC1","DC2"],
+  "clusters": ["C0","C1","C2"],
+  "linux_pct": 60,
+  "tags": { "customer": ["Alpha","Gamma"], "wave": ["Wave1","Wave3"], "role": ["web","db"] },
+  "nics_per_vm": { "min": 1, "max": 2 },
+  "ips_per_nic": { "min": 1, "max": 2 },
+  "ipv4_cidrs": ["10.60.0.0/16"],
+  "missing_ip_pct": 5
+}
+```
+
+**Fake Azure (small)**
+
+```json
+{
+  "variant": "azure",
+  "seed": 21,
+  "vms": 60,
+  "tenants": ["Alpha","Beta"],
+  "sites": ["PRG-DC1","PRG-DC2"],
+  "linux_pct": 70,
+  "tags": { "customer": ["Alpha","Beta"], "wave": ["Wave1","Wave2"], "role": ["web","db"] },
+  "nics_per_vm": { "min": 1, "max": 1 },
+  "ips_per_nic": { "min": 1, "max": 1 },
+  "ipv4_cidrs": ["10.70.0.0/16"],
+  "missing_ip_pct": 8
+}
+```
+
+---
+
+## 11) Notes
+
+* Keep all generation on the **server** (no secrets in browser).
+* Record generated objects into `collected_objects` for sample selection in the mapping editor (optional but nice).
+* Respect your **conflict policies** in adapters during Sync; make dry-run diffs field-level.

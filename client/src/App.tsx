@@ -29,6 +29,8 @@ import MappingEditor from "@/pages/mapping-editor";
 import NetBoxInventory from "@/pages/netbox-inventory";
 import AutomationInventories from "@/pages/automation-inventories";
 import AutomationInventoryNew from "@/pages/automation-inventory-new";
+import AutomationInventoryDetail from "@/pages/automation-inventory-detail";
+import AutomationInventoryEdit from "@/pages/automation-inventory-edit";
 import type { User } from "@shared/schema";
 
 function AuthenticatedRouter() {
@@ -39,6 +41,8 @@ function AuthenticatedRouter() {
       <Route path="/netbox-inventory" component={NetBoxInventory} />
       <Route path="/automation-inventories" component={AutomationInventories} />
       <Route path="/inventories/new" component={AutomationInventoryNew} />
+      <Route path="/inventories/:id/edit" component={AutomationInventoryEdit} />
+      <Route path="/inventories/:id" component={AutomationInventoryDetail} />
       <Route path="/projects" component={Projects} />
       <Route path="/credentials" component={Credentials} />
       <Route path="/providers" component={Providers} />

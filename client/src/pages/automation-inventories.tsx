@@ -184,13 +184,15 @@ export default function AutomationInventories() {
                   {inventories.map((inventory) => (
                     <TableRow key={inventory.id} data-testid={`row-inventory-${inventory.id}`}>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          {getTypeIcon(inventory.type)}
-                          <span className="font-medium">{inventory.name}</span>
-                          {inventory.isDefault && (
-                            <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
-                          )}
-                        </div>
+                        <Link href={`/inventories/${inventory.id}`}>
+                          <div className="flex items-center gap-2 hover-elevate cursor-pointer p-1 rounded">
+                            {getTypeIcon(inventory.type)}
+                            <span className="font-medium" data-testid={`link-inventory-name-${inventory.id}`}>{inventory.name}</span>
+                            {inventory.isDefault && (
+                              <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+                            )}
+                          </div>
+                        </Link>
                       </TableCell>
                       <TableCell>
                         {getTypeBadge(inventory.type)}
@@ -216,16 +218,6 @@ export default function AutomationInventories() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Link href={`/inventories/${inventory.id}/preview`}>
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              data-testid={`button-preview-${inventory.id}`}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          
                           {inventory.type === "linked" && userRole !== "viewer" && (
                             <Button 
                               variant="ghost" 

@@ -168,6 +168,58 @@ router.get("/:id/preview", async (req, res) => {
   }
 });
 
+// Get full inventory structure
+router.get("/:id/structure", async (req, res) => {
+  try {
+    const [inventory] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    // For file-based inventories, re-parse to get full structure
+    if (inventory.type === "file" && inventory.fileContent) {
+      const parsed = parseInventoryFile(inventory.fileContent, inventory.fileFormat || "yaml");
+      return res.json({
+        groups: parsed.fullData.groups,
+        hosts: parsed.fullData.hosts,
+      });
+    }
+
+    // For linked inventories, return mock data
+    if (inventory.type === "linked") {
+      const mockGroups = [
+        { name: "customer_acme", hostsCount: 45, hosts: ["web-01.acme.com", "web-02.acme.com", "db-01.acme.com"] },
+        { name: "customer_contoso", hostsCount: 32, hosts: ["app-01.contoso.com", "db-01.contoso.com"] },
+        { name: "os_ubuntu", hostsCount: 67, hosts: ["web-01.acme.com", "web-02.acme.com", "app-01.contoso.com"] },
+        { name: "os_centos", hostsCount: 10, hosts: ["db-01.acme.com", "db-01.contoso.com"] },
+        { name: "wave_1", hostsCount: 23, hosts: ["web-01.acme.com", "db-01.acme.com"] },
+        { name: "wave_2", hostsCount: 54, hosts: ["web-02.acme.com", "app-01.contoso.com", "db-01.contoso.com"] },
+      ];
+
+      const mockHosts = [
+        { name: "web-01.acme.com", ansible_host: "10.0.1.10", groups: ["customer_acme", "os_ubuntu", "wave_1"], vars: { role: "webserver", env: "prod" } },
+        { name: "web-02.acme.com", ansible_host: "10.0.1.11", groups: ["customer_acme", "os_ubuntu", "wave_2"], vars: { role: "webserver", env: "prod" } },
+        { name: "db-01.acme.com", ansible_host: "10.0.2.10", groups: ["customer_acme", "os_centos", "wave_1"], vars: { role: "database", env: "prod" } },
+        { name: "app-01.contoso.com", ansible_host: "10.1.1.10", groups: ["customer_contoso", "os_ubuntu", "wave_2"], vars: { role: "app", env: "staging" } },
+        { name: "db-01.contoso.com", ansible_host: "10.1.2.10", groups: ["customer_contoso", "os_centos", "wave_2"], vars: { role: "database", env: "staging" } },
+      ];
+
+      return res.json({
+        groups: mockGroups,
+        hosts: mockHosts,
+      });
+    }
+
+    res.json({ groups: [], hosts: [] });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Refresh linked inventory
 router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
   try {
@@ -307,29 +359,43 @@ router.delete("/:id", async (req: AuthRequest, res: Response) => {
 
 // Helper function to parse inventory files
 function parseInventoryFile(content: string, format: string) {
-  // Simplified parser - in production, use proper YAML/JSON/INI parsers
   const lines = content.split("\n").filter(l => l.trim() && !l.trim().startsWith("#"));
   
-  const groups = new Set<string>();
-  const hosts = new Set<string>();
-  const sampleHosts: any[] = [];
+  const groupsMap = new Map<string, { hosts: string[] }>();
+  const hostsMap = new Map<string, { ansible_host?: string; groups: string[]; vars: Record<string, string> }>();
 
   if (format === "ini") {
     let currentGroup = "";
     for (const line of lines) {
       if (line.startsWith("[") && line.includes("]")) {
         currentGroup = line.replace(/[\[\]]/g, "").trim();
-        groups.add(currentGroup);
-      } else if (line.includes("ansible_host=") || /\S+\s+/.test(line)) {
-        const hostName = line.split(/\s+/)[0];
-        hosts.add(hostName);
-        if (sampleHosts.length < 5) {
-          const ipMatch = line.match(/ansible_host=([^\s]+)/);
-          sampleHosts.push({
-            name: hostName,
-            ip: ipMatch ? ipMatch[1] : "N/A",
-            groups: currentGroup ? [currentGroup] : [],
-          });
+        if (!groupsMap.has(currentGroup)) {
+          groupsMap.set(currentGroup, { hosts: [] });
+        }
+      } else if (line.trim()) {
+        const parts = line.split(/\s+/);
+        const hostName = parts[0];
+        
+        if (!hostsMap.has(hostName)) {
+          hostsMap.set(hostName, { groups: [], vars: {} });
+        }
+        
+        const hostData = hostsMap.get(hostName)!;
+        if (currentGroup && !hostData.groups.includes(currentGroup)) {
+          hostData.groups.push(currentGroup);
+          groupsMap.get(currentGroup)!.hosts.push(hostName);
+        }
+        
+        // Parse variables
+        for (let i = 1; i < parts.length; i++) {
+          const [key, value] = parts[i].split("=");
+          if (key && value) {
+            if (key === "ansible_host") {
+              hostData.ansible_host = value;
+            } else {
+              hostData.vars[key] = value;
+            }
+          }
         }
       }
     }
@@ -338,23 +404,90 @@ function parseInventoryFile(content: string, format: string) {
       const parsed = JSON.parse(content);
       Object.keys(parsed).forEach(key => {
         if (key !== "_meta") {
-          groups.add(key);
-          if (parsed[key].hosts) {
-            parsed[key].hosts.forEach((h: string) => hosts.add(h));
-          }
+          groupsMap.set(key, { hosts: parsed[key].hosts || [] });
+          (parsed[key].hosts || []).forEach((hostName: string) => {
+            if (!hostsMap.has(hostName)) {
+              hostsMap.set(hostName, { groups: [], vars: {} });
+            }
+            hostsMap.get(hostName)!.groups.push(key);
+          });
         }
       });
+      
+      // Parse host vars from _meta
+      if (parsed._meta?.hostvars) {
+        Object.keys(parsed._meta.hostvars).forEach(hostName => {
+          if (!hostsMap.has(hostName)) {
+            hostsMap.set(hostName, { groups: [], vars: {} });
+          }
+          const hostVars = parsed._meta.hostvars[hostName];
+          if (hostVars.ansible_host) {
+            hostsMap.get(hostName)!.ansible_host = hostVars.ansible_host;
+          }
+          hostsMap.get(hostName)!.vars = { ...hostsMap.get(hostName)!.vars, ...hostVars };
+        });
+      }
     } catch (e) {
       throw new Error("Invalid JSON format");
     }
+  } else if (format === "yaml") {
+    // Basic YAML parsing for simple inventories
+    const yamlLines = content.split("\n");
+    let currentGroup = "";
+    let inHosts = false;
+    
+    for (const line of yamlLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      
+      if (trimmed.endsWith(":") && !line.startsWith(" ")) {
+        currentGroup = trimmed.slice(0, -1);
+        if (!groupsMap.has(currentGroup)) {
+          groupsMap.set(currentGroup, { hosts: [] });
+        }
+        inHosts = false;
+      } else if (trimmed === "hosts:") {
+        inHosts = true;
+      } else if (inHosts && line.startsWith("    ") && trimmed.includes(":")) {
+        const hostName = trimmed.split(":")[0];
+        if (!hostsMap.has(hostName)) {
+          hostsMap.set(hostName, { groups: [], vars: {} });
+        }
+        if (currentGroup && !hostsMap.get(hostName)!.groups.includes(currentGroup)) {
+          hostsMap.get(hostName)!.groups.push(currentGroup);
+          groupsMap.get(currentGroup)!.hosts.push(hostName);
+        }
+      }
+    }
   }
 
+  const groupsList = Array.from(groupsMap.entries()).map(([name, data]) => ({
+    name,
+    hostsCount: data.hosts.length,
+    hosts: data.hosts,
+  }));
+
+  const hostsList = Array.from(hostsMap.entries()).map(([name, data]) => ({
+    name,
+    ansible_host: data.ansible_host,
+    groups: data.groups,
+    vars: data.vars,
+  }));
+
   return {
-    groupsCount: groups.size,
-    hostsCount: hosts.size,
+    groupsCount: groupsMap.size,
+    hostsCount: hostsMap.size,
     preview: {
-      groups: Array.from(groups).slice(0, 10),
-      sampleHosts: sampleHosts.slice(0, 5),
+      groups: groupsList.slice(0, 10).map(g => g.name),
+      sampleHosts: hostsList.slice(0, 5).map(h => ({
+        name: h.name,
+        ip: h.ansible_host || "N/A",
+        groups: h.groups,
+      })),
+    },
+    fullData: {
+      groups: groupsList,
+      hosts: hostsList,
     },
   };
 }

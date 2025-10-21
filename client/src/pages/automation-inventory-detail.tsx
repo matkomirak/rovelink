@@ -37,11 +37,6 @@ export default function AutomationInventoryDetail() {
     queryKey: ["/api/inventories", id, "structure"],
   });
 
-  // Debug logging
-  console.log("Structure data:", structure);
-  console.log("Structure loading:", structureLoading);
-  console.log("Structure error:", structureError);
-
   if (inventoryLoading || structureLoading) {
     return (
       <div className="p-6 space-y-6">
@@ -153,27 +148,15 @@ export default function AutomationInventoryDetail() {
         </Card>
       </div>
 
-      {/* Debug Panel */}
-      <Card className="bg-muted">
-        <CardHeader>
-          <CardTitle className="text-sm">Debug Info</CardTitle>
-        </CardHeader>
-        <CardContent className="text-xs font-mono">
-          <div>Groups Count: {structure?.groups?.length || 0}</div>
-          <div>Hosts Count: {structure?.hosts?.length || 0}</div>
-          <div>Structure: {JSON.stringify(structure, null, 2).slice(0, 500)}</div>
-        </CardContent>
-      </Card>
-
       <Tabs defaultValue="groups" className="w-full">
         <TabsList>
           <TabsTrigger value="groups" data-testid="tab-groups">
             <Users className="h-4 w-4 mr-2" />
-            Groups ({structure?.groups?.length || 0})
+            Groups
           </TabsTrigger>
           <TabsTrigger value="hosts" data-testid="tab-hosts">
             <Server className="h-4 w-4 mr-2" />
-            Hosts ({structure?.hosts?.length || 0})
+            Hosts
           </TabsTrigger>
         </TabsList>
 

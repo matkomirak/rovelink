@@ -190,15 +190,15 @@ router.get("/:id/structure", async (req, res) => {
     }
 
     // For linked inventories, fetch real data from CMDB
-    if (inventory.type === "linked" && inventory.sourceType && inventory.sourceId) {
-      const { NetBoxAdapter } = await import("../../services/netbox-adapter");
-      const { cmdbAccounts } = await import("@db/schema");
+    if (inventory.type === "linked" && inventory.sourceType && inventory.sourceRef) {
+      const { NetBoxAdapter } = await import("../services/netbox-adapter");
+      const { cmdbAccounts } = await import("../db/schema");
       
       // Get the linked CMDB account
       const [cmdb] = await db
         .select()
         .from(cmdbAccounts)
-        .where(eq(cmdbAccounts.id, inventory.sourceId));
+        .where(eq(cmdbAccounts.id, inventory.sourceRef));
 
       if (!cmdb) {
         return res.status(404).json({ message: "Linked CMDB not found" });
@@ -323,18 +323,18 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: "Only linked inventories can be refreshed" });
     }
 
-    if (!inventory.sourceId) {
+    if (!inventory.sourceRef) {
       return res.status(400).json({ message: "Inventory has no linked CMDB source" });
     }
 
     // Fetch real data from CMDB
-    const { NetBoxAdapter } = await import("../../services/netbox-adapter");
-    const { cmdbAccounts } = await import("@db/schema");
+    const { NetBoxAdapter } = await import("../services/netbox-adapter");
+    const { cmdbAccounts } = await import("../db/schema");
     
     const [cmdb] = await db
       .select()
       .from(cmdbAccounts)
-      .where(eq(cmdbAccounts.id, inventory.sourceId));
+      .where(eq(cmdbAccounts.id, inventory.sourceRef));
 
     if (!cmdb) {
       return res.status(404).json({ message: "Linked CMDB not found" });
@@ -406,7 +406,7 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
         lastRefreshedAt: new Date(),
         previewData: {
           groups: Array.from(groupsMap.keys()).slice(0, 10),
-          sampleHosts: vms.slice(0, 5).map(vm => ({
+          sampleHosts: vms.slice(0, 5).map((vm: any) => ({
             name: vm.name,
             ip: vm.primary_ip4?.address?.split('/')[0] || '',
             status: vm.status?.value || vm.status || '',

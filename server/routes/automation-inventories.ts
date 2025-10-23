@@ -204,7 +204,23 @@ router.get("/:id/structure", async (req, res) => {
 
       // Fetch VMs from NetBox
       const adapter = new NetBoxAdapter(cmdb.config as any);
-      const vms = await adapter.listAllVms();
+      let vms;
+      try {
+        vms = await adapter.listAllVms();
+      } catch (error: any) {
+        console.error("Failed to fetch VMs from CMDB:", error.message);
+        
+        if (error.message.includes("403")) {
+          return res.status(403).json({ 
+            message: `NetBox API access denied. The configured API token does not have permission to read virtualization resources.`,
+            hint: "To fix this: Update the CMDB account with a token that has 'virtualization.view_virtualmachine' permission in NetBox, or delete this inventory and create a new one using File or Script type.",
+            cmdb_name: cmdb.name,
+            cmdb_url: (cmdb.config as any).url
+          });
+        }
+        
+        throw error;
+      }
 
       // Build groups and hosts structure
       const groupsMap = new Map<string, Set<string>>();

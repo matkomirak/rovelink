@@ -60,15 +60,39 @@ export default function AutomationInventoryDetail() {
   }
 
   if (structureError) {
+    const errorMessage = structureError instanceof Error ? structureError.message : "Unknown error occurred";
+    let parsedError: any = null;
+    
+    try {
+      const match = errorMessage.match(/\{.*\}/);
+      if (match) {
+        parsedError = JSON.parse(match[0]);
+      }
+    } catch {}
+    
     return (
       <div className="p-6">
         <Card>
           <CardHeader>
-            <CardTitle>Error Loading Inventory Structure</CardTitle>
-            <CardDescription className="text-destructive">
-              {structureError instanceof Error ? structureError.message : "Unknown error occurred"}
+            <CardTitle className="text-destructive">Error Loading Inventory Structure</CardTitle>
+            <CardDescription>
+              {parsedError?.message || errorMessage}
             </CardDescription>
           </CardHeader>
+          {parsedError?.hint && (
+            <CardContent>
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-md p-4">
+                <p className="text-sm font-medium text-blue-400 mb-2">💡 How to Fix</p>
+                <p className="text-sm text-muted-foreground">{parsedError.hint}</p>
+                {parsedError.cmdb_name && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    CMDB: <span className="font-mono">{parsedError.cmdb_name}</span>
+                    {parsedError.cmdb_url && ` (${parsedError.cmdb_url})`}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          )}
         </Card>
       </div>
     );

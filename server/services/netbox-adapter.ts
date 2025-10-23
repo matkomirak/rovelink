@@ -358,6 +358,17 @@ export class NetBoxAdapter {
       return vms;
     } catch (error: any) {
       console.error('Failed to list VMs from NetBox:', error.message);
+      console.error('NetBox URL:', this.config.url);
+      console.error('Error details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data
+      });
+      
+      if (error.response?.status === 403) {
+        throw new Error(`NetBox API returned 403 Forbidden. The API token may not have permission to access virtualization resources. Please verify the token has the required permissions in NetBox.`);
+      }
+      
       throw new Error(`Failed to list VMs: ${error.message}`);
     }
   }

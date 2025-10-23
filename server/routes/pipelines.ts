@@ -229,7 +229,7 @@ router.post("/:id/dry-run", async (req: AuthRequest, res: Response) => {
         const samples = getSamples(provider.kind, mappings[0].sourceType, 10);
         
         // Generate sample changes for demonstration
-        samples.slice(0, 5).forEach((sample, idx) => {
+        samples.slice(0, 5).forEach((sample: any, idx) => {
           const action = idx === 0 ? 'create' : idx === 1 ? 'update' : 'unchanged';
           
           if (action === 'create') {
@@ -238,7 +238,7 @@ router.post("/:id/dry-run", async (req: AuthRequest, res: Response) => {
               action: 'create',
               targetType: mappings[0].targetType,
               name: sample.name || `Object-${idx}`,
-              extId: sample.id,
+              extId: sample.id || `ext-${idx}`,
               field: 'name',
               from: null,
               to: sample.name || 'New Object',
@@ -249,7 +249,7 @@ router.post("/:id/dry-run", async (req: AuthRequest, res: Response) => {
               action: 'update',
               targetType: mappings[0].targetType,
               name: sample.name || `Object-${idx}`,
-              extId: sample.id,
+              extId: sample.id || `ext-${idx}`,
               field: 'status',
               from: 'active',
               to: 'offline',
@@ -292,7 +292,7 @@ router.get("/:id/runs/:runId/changes.csv", async (req: AuthRequest, res: Respons
       return res.status(404).json({ error: "not_found" });
     }
 
-    const changes = run.summary?.changes || [];
+    const changes = (run.summary as any)?.changes || [];
     
     // Generate CSV
     const headers = ['Action', 'Target Type', 'Name', 'External ID', 'Field', 'From', 'To'];

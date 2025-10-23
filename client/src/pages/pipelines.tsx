@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Play, RefreshCw, Edit, Power, PowerOff } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Plus, Play, RefreshCw, Edit, Power, PowerOff, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface Pipeline {
   id: string;
@@ -45,6 +57,10 @@ interface Cmdb {
 }
 
 export default function Pipelines() {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pipelineToDelete, setPipelineToDelete] = useState<Pipeline | null>(null);
+  const { toast } = useToast();
+
   const { data: pipelines, isLoading: loadingPipelines } = useQuery<Pipeline[]>({
     queryKey: ["/api/pipelines"],
   });
@@ -56,6 +72,39 @@ export default function Pipelines() {
   const { data: cmdbs } = useQuery<Cmdb[]>({
     queryKey: ["/api/cmdbs"],
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/pipelines/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/pipelines"] });
+      toast({
+        title: "Pipeline deleted",
+        description: "The pipeline has been successfully deleted.",
+      });
+      setDeleteDialogOpen(false);
+      setPipelineToDelete(null);
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error deleting pipeline",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleDeleteClick = (pipeline: Pipeline) => {
+    setPipelineToDelete(pipeline);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (pipelineToDelete) {
+      deleteMutation.mutate(pipelineToDelete.id);
+    }
+  };
 
   const getProviderName = (id: string) => {
     return providers?.find((p) => p.id === id)?.name || id;
@@ -218,6 +267,14 @@ export default function Pipelines() {
                             <Edit className="h-4 w-4" />
                           </Button>
                         </Link>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteClick(pipeline)}
+                          data-testid={`button-delete-${pipeline.id}`}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -227,6 +284,28 @@ export default function Pipelines() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Pipeline</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the pipeline "{pipelineToDelete?.name}"?
+              This action cannot be undone and will also delete all associated mappings and run history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive hover:bg-destructive/90"
+              data-testid="button-confirm-delete"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

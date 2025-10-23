@@ -10,6 +10,7 @@ import { IdoitAdapter } from "../services/idoit-adapter";
 import { rulesEngine } from "../services/rules-engine";
 import { getSamples, getObjectTypes } from "../services/sample-fixtures";
 import { getPresets, getPreset } from "../services/preset-rules";
+import { getProviderCollector } from "../services/providers/registry";
 
 const router = Router();
 
@@ -359,7 +360,7 @@ router.get("/:id/runs/:runId", async (req: AuthRequest, res: Response) => {
   }
 });
 
-// POST /api/pipelines/:id/sync - Enqueue sync worker
+// POST /api/pipelines/:id/sync - Execute real sync
 router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
   try {
     const pipeline = await storage.getPipeline(req.params.id);
@@ -374,15 +375,111 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
       dryRun: false,
     });
 
-    // Simulate async execution - mark complete after 12 seconds
-    setTimeout(async () => {
-      await storage.updatePipelineRun(run.id, {
-        status: "ok",
-        startedAt: new Date(Date.now() - 12000),
-        finishedAt: new Date(),
-        summary: { created: 2, updated: 3, unchanged: 5, errors: 0 },
-      });
-    }, 12000);
+    // Execute sync asynchronously
+    (async () => {
+      const startTime = Date.now();
+      const summary: any = {
+        created: 0,
+        updated: 0,
+        unchanged: 0,
+        errors: 0,
+      };
+
+      try {
+        // Get provider account and create collector
+        const providerAccount = await storage.getProvider(pipeline.providerAccountId);
+        if (!providerAccount) {
+          throw new Error("Provider account not found");
+        }
+
+        const collector = getProviderCollector(providerAccount.kind, providerAccount.config);
+
+        // Get CMDB adapter
+        const cmdbAdapter = await getCmdbAdapter(pipeline.cmdbAccountId);
+
+        // Get mappings
+        const mappings = await storage.getPipelineMappings(pipeline.id);
+        if (mappings.length === 0) {
+          throw new Error("No mappings configured");
+        }
+
+        // Discover VMs from provider
+        console.log(`[Pipeline ${pipeline.id}] Discovering VMs from provider...`);
+        const vms = await collector.listVms();
+        console.log(`[Pipeline ${pipeline.id}] Found ${vms.length} VMs`);
+
+        // Process each VM
+        for (const vm of vms) {
+          try {
+            // Find matching mapping (for now, use first VM->VM mapping)
+            const mapping = mappings.find(m => m.sourceType === 'vm' && m.targetType === 'vm');
+            if (!mapping) {
+              console.warn(`No mapping found for VM ${vm.name}`);
+              continue;
+            }
+
+            // Get data from raw provider data
+            const rawData = vm.raw || {};
+
+            // Apply mapping rules to transform the VM
+            const transformedVm: any = {
+              name: vm.name,
+              status: rawData.status || 'active',
+              vcpus: rawData.vcpus || rawData.cores || 1,
+              memory: rawData.memory || rawData.maxmem || null,
+              disk: rawData.disk || rawData.maxdisk || null,
+              tags: vm.tags || [],
+            };
+
+            // Apply custom field rules from mapping if they exist
+            const mappingRules = mapping.rules as any;
+            if (mappingRules && mappingRules.fieldMappings) {
+              for (const fieldMapping of mappingRules.fieldMappings) {
+                const sourceValue = vm[fieldMapping.source as keyof typeof vm] || rawData[fieldMapping.source];
+                if (sourceValue !== undefined) {
+                  transformedVm[fieldMapping.target] = sourceValue;
+                }
+              }
+            }
+
+            // Upsert to CMDB
+            const extId = vm.externalId;
+            const result = await (cmdbAdapter as NetBoxAdapter).upsertVm(transformedVm, extId);
+
+            if (result.created) {
+              summary.created++;
+              console.log(`[Pipeline ${pipeline.id}] Created VM: ${vm.name}`);
+            } else {
+              summary.updated++;
+              console.log(`[Pipeline ${pipeline.id}] Updated VM: ${vm.name}`);
+            }
+          } catch (vmError: any) {
+            summary.errors++;
+            console.error(`[Pipeline ${pipeline.id}] Error processing VM ${vm.name}:`, vmError.message);
+          }
+        }
+
+        // Update run as successful
+        await storage.updatePipelineRun(run.id, {
+          status: "ok",
+          startedAt: new Date(startTime),
+          finishedAt: new Date(),
+          summary,
+        });
+
+        console.log(`[Pipeline ${pipeline.id}] Sync completed:`, summary);
+      } catch (error: any) {
+        // Update run as failed
+        await storage.updatePipelineRun(run.id, {
+          status: "error",
+          startedAt: new Date(startTime),
+          finishedAt: new Date(),
+          summary: { ...summary, error: error.message },
+        });
+
+        console.error(`[Pipeline ${pipeline.id}] Sync failed:`, error.message);
+      }
+    })();
 
     res.status(202).json({ runId: run.id });
   } catch (error: any) {

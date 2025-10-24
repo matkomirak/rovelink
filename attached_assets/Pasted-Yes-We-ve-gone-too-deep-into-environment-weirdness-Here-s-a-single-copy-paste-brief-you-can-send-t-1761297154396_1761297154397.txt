@@ -1,0 +1,132 @@
+Yes. We’ve gone too deep into environment weirdness. Here’s a single copy-paste brief you can send to Replit so they ship a **clean, out-of-the-box Ubuntu 22.04 build**.
+
+---
+
+# 📩 Message to Replit: “Make the Bridge app run OOTB on Ubuntu 22.04”
+
+**Goal:** I need a production build that runs on a fresh Ubuntu 22.04 VM with just Node 20+ and Postgres. No global tools. No Vite at runtime. One command to build, one to start.
+
+## Required changes
+
+1. **No Vite in production runtime**
+
+* Refactor server entry so **Vite is only used in dev** (`NODE_ENV !== 'production'`) via dynamic import.
+* In production, the server must **only**:
+
+  * serve API routes, and
+  * serve prebuilt static files from `dist/public` (no `/src/...`).
+* Ensure the server bundle (`dist/index.js`) contains **no imports of `vite`, `rollup`, or dev tooling**.
+
+2. **Production static assets**
+
+* Add a reliable `vite build` that outputs to `dist/public`:
+
+  * `dist/public/index.html`
+  * `dist/public/assets/*`
+* Make the client use **relative API** calls (e.g. `/api/...`), not a hardcoded `https://127.0.0.1`. Remove dependency on `PUBLIC_API_BASE` unless explicitly provided; default to relative.
+
+3. **NPM scripts (Linux-friendly)**
+
+```json
+"scripts": {
+  "dev": "cross-env NODE_ENV=development tsx server/index.ts",
+  "build:client": "vite build",
+  "build:server": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+  "build": "npm run build:client && npm run build:server",
+  "start": "cross-env NODE_ENV=production node dist/index.js",
+  "db:push": "drizzle-kit push"
+}
+```
+
+* Ensure `cross-env`, `vite`, `@vitejs/plugin-react`, `esbuild` are in **devDependencies** and installed locally (no globals).
+* Provide a **package-lock.json** consistent with Node 20.
+
+4. **Server code shape**
+
+* `server/index.ts` must:
+
+  * In dev: call `setupViteDev(app, server)` via `await import('./vite-dev')`.
+  * In prod: `express.static('dist/public')` and `res.sendFile('dist/public/index.html')` for all non-`/api` routes.
+* No direct imports of Vite in the main module body.
+
+5. **Env + defaults**
+
+* Provide `.env.example`:
+
+  ```
+  DATABASE_URL=postgres://bridge:bridgepass@localhost:5432/bridge_db
+  PORT=5000
+  AUTH_DISABLE=true
+  JWT_SECRET=change-me
+  ```
+* App must run if only `DATABASE_URL` and `PORT` are set. CMDBs (NetBox, etc.) are added via UI; no env hard-require.
+
+6. **Auth toggle**
+
+* When `AUTH_DISABLE=true`, the login page is **not rendered** and `/api/auth/me` returns a stub “viewer/admin” user. No external calls during login.
+
+7. **Build artifacts included**
+
+* A `release/` script or GitHub Action that does:
+
+  ```
+  npm ci
+  npm run db:push
+  npm run build
+  ```
+
+  and publishes an artifact (tar/zip) containing:
+
+  * `dist/` (server bundle + `public` assets)
+  * `package.json`, `package-lock.json`
+  * `.env.example`
+  * `README.md` with Ubuntu 22.04 run instructions
+
+8. **Docker (optional but nice)**
+
+* Include `Dockerfile` + `docker-compose.yml` that start app + Postgres.
+* Image must start with just `docker compose up -d`.
+
+## Acceptance criteria (I will test these)
+
+On a clean **Ubuntu 22.04** VM:
+
+```bash
+# prerequisites
+sudo apt-get update && sudo apt-get install -y curl ca-certificates git postgresql
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# DB
+sudo -u postgres psql <<'SQL'
+CREATE ROLE bridge WITH LOGIN PASSWORD 'bridgepass';
+CREATE DATABASE bridge_db OWNER bridge;
+GRANT ALL PRIVILEGES ON DATABASE bridge_db TO bridge;
+SQL
+
+# app
+git clone <my repo> /opt/bridge && cd /opt/bridge
+cp .env.example .env    # and tweak if needed
+npm ci
+npm run db:push
+npm run build
+npm start
+```
+
+**Expected:**
+
+* Server logs: “serving on port 5000”, **no Vite/rollup errors**.
+* Browser: `http://<vm-ip>:5000` shows UI immediately (with `AUTH_DISABLE=true`) and API calls hit `/api/...` on the same origin (no redirects to `https://127.0.0.1:443`).
+* `grep -i "vite\|rollup" dist/index.js` returns nothing.
+
+## Known issues to prevent
+
+* Frontend hardcoding `https://127.0.0.1` for API → must use relative `/api` or read `PUBLIC_API_BASE` if provided.
+* Server importing Vite in prod → **must not happen**.
+* Requiring global vite/esbuild → **must install locally** and work with `npm ci`.
+
+Please implement the above and push a release I can run verbatim on Ubuntu 22.04. If anything is unclear, propose the exact file diffs you’ll make (server entry, vite-dev helper, scripts, README).
+
+---
+
+Send that to them. Once they deliver, your install on Ubuntu will be a straight shot: `npm ci && npm run build && npm start`.

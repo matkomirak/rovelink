@@ -89,6 +89,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/login", async (req, res) => {
     try {
+      // If AUTH_DISABLE is true, skip authentication
+      if (process.env.AUTH_DISABLE === "true") {
+        const stubUser = {
+          id: "stub-admin-id",
+          username: "admin",
+          role: "admin"
+        };
+        const token = jwt.sign({ userId: stubUser.id }, JWT_SECRET);
+        return res.json({ token, user: stubUser });
+      }
+
       const { username, password } = insertUserSchema.parse(req.body);
       
       const user = await storage.getUserByUsername(username);
@@ -109,6 +120,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/auth/me", authMiddleware, async (req: AuthRequest, res) => {
+    // If AUTH_DISABLE is true, return stub user
+    if (process.env.AUTH_DISABLE === "true") {
+      return res.json({
+        id: "stub-admin-id",
+        username: "admin",
+        role: "admin"
+      });
+    }
+
     if (!req.user) {
       return res.status(401).json({ message: "Not authenticated" });
     }

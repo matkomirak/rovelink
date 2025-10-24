@@ -86,32 +86,157 @@ router.post("/", async (req: AuthRequest, res: Response) => {
       })
       .returning();
 
-    // For linked inventories, trigger initial refresh
-    if (newInventory.type === "linked") {
-      // This would trigger an async refresh - for now just set mock data
-      await db
-        .update(automationInventories)
-        .set({
-          groupsCount: 12,
-          hostsCount: 145,
-          lastRefreshedAt: new Date(),
-          previewData: {
-            groups: ["customer_acme", "os_ubuntu", "wave_1", "wave_2"],
-            sampleHosts: [
-              { name: "web-01.acme.com", ip: "10.0.1.10" },
-              { name: "web-02.acme.com", ip: "10.0.1.11" },
-              { name: "db-01.acme.com", ip: "10.0.2.10" },
-            ],
-          },
-        })
-        .where(eq(automationInventories.id, newInventory.id));
+    // For linked inventories, fetch real data from CMDB
+    if (newInventory.type === "linked" && newInventory.sourceRef) {
+      try {
+        // Get the linked CMDB account
+        const [cmdb] = await db
+          .select()
+          .from(cmdbAccounts)
+          .where(eq(cmdbAccounts.id, newInventory.sourceRef));
 
-      // Re-fetch to get updated data
-      const [updated] = await db
-        .select()
-        .from(automationInventories)
-        .where(eq(automationInventories.id, newInventory.id));
-      return res.status(201).json(updated);
+        if (!cmdb) {
+          return res.status(404).json({ message: "Linked CMDB not found" });
+        }
+
+        // Test connection and fetch VMs from NetBox
+        const adapter = new NetBoxAdapter(cmdb.config as any);
+        
+        // First test the connection
+        const testResult = await adapter.test();
+        if (!testResult.ok) {
+          return res.status(400).json({ 
+            message: `Failed to connect to NetBox: ${testResult.error}`,
+            hint: "Please verify the NetBox URL and API token are correct in the CMDB configuration."
+          });
+        }
+
+        // Fetch VMs from NetBox
+        let vms;
+        try {
+          vms = await adapter.listAllVms();
+        } catch (error: any) {
+          console.error("Failed to fetch VMs from NetBox:", error.message);
+          
+          if (error.message.includes("403")) {
+            return res.status(403).json({ 
+              message: `NetBox API access denied. The configured API token does not have permission to read virtualization resources.`,
+              hint: "The token needs 'virtualization.view_virtualmachine' permission in NetBox. Update the CMDB account with a valid token.",
+              cmdb_name: cmdb.name,
+              cmdb_url: (cmdb.config as any).url
+            });
+          }
+          
+          return res.status(500).json({ 
+            message: `Failed to fetch VMs from NetBox: ${error.message}`,
+            cmdb_name: cmdb.name
+          });
+        }
+
+        // Calculate groups from VM metadata
+        const groupsMap = new Map<string, Set<string>>();
+        
+        for (const vm of vms) {
+          const hostName = vm.name;
+          
+          // Count groups from tags
+          if (vm.tags && Array.isArray(vm.tags)) {
+            for (const tag of vm.tags) {
+              const tagName = typeof tag === 'string' ? tag : tag.name;
+              if (tagName) {
+                if (!groupsMap.has(tagName)) {
+                  groupsMap.set(tagName, new Set());
+                }
+                groupsMap.get(tagName)!.add(hostName);
+              }
+            }
+          }
+
+          // Count groups from metadata
+          if (vm.tenant?.name) {
+            const groupName = `tenant_${vm.tenant.name}`;
+            if (!groupsMap.has(groupName)) {
+              groupsMap.set(groupName, new Set());
+            }
+            groupsMap.get(groupName)!.add(hostName);
+          }
+
+          if (vm.site?.name) {
+            const groupName = `site_${vm.site.name}`;
+            if (!groupsMap.has(groupName)) {
+              groupsMap.set(groupName, new Set());
+            }
+            groupsMap.get(groupName)!.add(hostName);
+          }
+
+          if (vm.cluster?.name) {
+            const groupName = `cluster_${vm.cluster.name}`;
+            if (!groupsMap.has(groupName)) {
+              groupsMap.set(groupName, new Set());
+            }
+            groupsMap.get(groupName)!.add(hostName);
+          }
+
+          if (vm.platform?.name) {
+            const groupName = `platform_${vm.platform.name}`;
+            if (!groupsMap.has(groupName)) {
+              groupsMap.set(groupName, new Set());
+            }
+            groupsMap.get(groupName)!.add(hostName);
+          }
+        }
+
+        // Update inventory with real data from NetBox
+        await db
+          .update(automationInventories)
+          .set({
+            groupsCount: groupsMap.size,
+            hostsCount: vms.length,
+            lastRefreshedAt: new Date(),
+            previewData: {
+              groups: Array.from(groupsMap.keys()).slice(0, 10),
+              sampleHosts: vms.slice(0, 5).map((vm: any) => ({
+                name: vm.name,
+                ip: vm.primary_ip4?.address?.split('/')[0] || '',
+                status: vm.status?.value || vm.status || '',
+              })),
+            },
+          })
+          .where(eq(automationInventories.id, newInventory.id));
+
+        // Re-fetch to get updated data
+        const [updated] = await db
+          .select()
+          .from(automationInventories)
+          .where(eq(automationInventories.id, newInventory.id));
+        return res.status(201).json(updated);
+      } catch (error: any) {
+        console.error("Error fetching NetBox data for linked inventory:", error.message);
+        
+        // Still create the inventory but with error state
+        await db
+          .update(automationInventories)
+          .set({
+            groupsCount: 0,
+            hostsCount: 0,
+            previewData: {
+              groups: [],
+              sampleHosts: [],
+              error: error.message
+            },
+          })
+          .where(eq(automationInventories.id, newInventory.id));
+
+        const [updated] = await db
+          .select()
+          .from(automationInventories)
+          .where(eq(automationInventories.id, newInventory.id));
+        
+        return res.status(201).json({
+          ...updated,
+          warning: `Inventory created but failed to fetch data: ${error.message}`
+        });
+      }
     }
 
     // For file inventories, parse and count groups/hosts

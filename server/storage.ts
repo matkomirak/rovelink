@@ -126,9 +126,14 @@ export interface IStorage {
 
   // Pipeline Run operations
   getPipelineRuns(pipelineId: string, limit?: number): Promise<PipelineRun[]>;
+  getAllPipelineRuns(limit?: number): Promise<PipelineRun[]>;
   getPipelineRun(id: string): Promise<PipelineRun | undefined>;
   createPipelineRun(run: InsertPipelineRun): Promise<PipelineRun>;
   updatePipelineRun(id: string, data: Partial<PipelineRun>): Promise<PipelineRun | undefined>;
+
+  // Sync Run operations
+  getAllSyncRuns(limit?: number): Promise<SyncRun[]>;
+  getSyncRun(id: string): Promise<SyncRun | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -734,6 +739,24 @@ export class DatabaseStorage implements IStorage {
       .where(eq(pipelineRuns.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  // All pipeline runs (not filtered by pipeline)
+  async getAllPipelineRuns(limit: number = 100): Promise<PipelineRun[]> {
+    return await db
+      .select()
+      .from(pipelineRuns)
+      .orderBy(desc(pipelineRuns.createdAt))
+      .limit(limit);
+  }
+
+  // All sync runs (not filtered by provider)
+  async getAllSyncRuns(limit: number = 100): Promise<SyncRun[]> {
+    return await db
+      .select()
+      .from(syncRuns)
+      .orderBy(desc(syncRuns.createdAt))
+      .limit(limit);
   }
 }
 

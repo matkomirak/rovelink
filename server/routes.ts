@@ -421,22 +421,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Runs routes
+  // Unified Runs routes - combines job_runs, pipeline_runs, and sync_runs
   app.get("/api/runs", authMiddleware, async (req, res) => {
     try {
-      const { status, archived, startDate, endDate, page = "1", pageSize = "50" } = req.query;
-      const filters: any = {};
+      const { status, archived, startDate, endDate, type, page = "1", pageSize = "100" } = req.query;
+      const typeFilter = type && type !== "_all" ? type as string : null;
+      const statusFilter = status && status !== "_all" ? status as string : null;
       
-      if (status) filters.status = status;
-      if (archived) filters.archived = archived === "true";
-      if (startDate) filters.startDate = new Date(startDate as string);
-      if (endDate) filters.endDate = new Date(endDate as string);
+      // Fetch all run types in parallel
+      const [jobRunsData, pipelineRunsData, syncRunsData, pipelinesData, providersData] = await Promise.all([
+        storage.getJobRuns({}, 1, 100),
+        storage.getAllPipelineRuns(100),
+        storage.getAllSyncRuns(100),
+        storage.getPipelines(),
+        storage.getProviders(),
+      ]);
+
+      // Create lookup maps for names
+      const pipelineNameMap = new Map(pipelinesData.map((p: { id: string; name: string }) => [p.id, p.name]));
+      const providerNameMap = new Map(providersData.map((p: { id: string; name: string }) => [p.id, p.name]));
+
+      // Normalize all runs to a common format
+      interface UnifiedRun {
+        id: string;
+        runType: 'playbook-run' | 'bdp-sync' | 'provider-sync';
+        status: string;
+        startedAt: Date | null;
+        finishedAt: Date | null;
+        createdAt: Date;
+        logs: string | null;
+        summary: any;
+        archived: boolean;
+        sourceId: string | null;
+        sourceName: string | null;
+        sourceType: string | null;
+      }
+
+      const unifiedRuns: UnifiedRun[] = [];
+
+      // Add job runs (playbook runs)
+      for (const run of jobRunsData) {
+        unifiedRuns.push({
+          id: run.id,
+          runType: 'playbook-run',
+          status: run.status,
+          startedAt: run.startedAt,
+          finishedAt: run.completedAt,
+          createdAt: run.createdAt,
+          logs: run.logs,
+          summary: run.resultSummary,
+          archived: run.archived || false,
+          sourceId: run.templateId,
+          sourceName: null, // Would need to fetch template name
+          sourceType: 'template',
+        });
+      }
+
+      // Add pipeline runs
+      for (const run of pipelineRunsData) {
+        unifiedRuns.push({
+          id: run.id,
+          runType: 'bdp-sync',
+          status: run.status,
+          startedAt: run.startedAt,
+          finishedAt: run.finishedAt,
+          createdAt: run.createdAt,
+          logs: run.logs,
+          summary: run.summary,
+          archived: false, // Pipeline runs don't have archive
+          sourceId: run.pipelineId,
+          sourceName: pipelineNameMap.get(run.pipelineId) || 'Unknown Pipeline',
+          sourceType: 'pipeline',
+        });
+      }
+
+      // Add sync runs (provider syncs)
+      for (const run of syncRunsData) {
+        unifiedRuns.push({
+          id: run.id,
+          runType: 'provider-sync',
+          status: run.status,
+          startedAt: run.startedAt,
+          finishedAt: run.finishedAt,
+          createdAt: run.createdAt,
+          logs: run.logs,
+          summary: run.counts,
+          archived: false, // Sync runs don't have archive
+          sourceId: run.providerAccountId,
+          sourceName: providerNameMap.get(run.providerAccountId) || 'Unknown Provider',
+          sourceType: 'provider',
+        });
+      }
+
+      // Sort by createdAt descending
+      unifiedRuns.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      // Apply filters
+      let filteredRuns = unifiedRuns;
       
-      const pageNum = parseInt(page as string);
-      const pageSizeNum = parseInt(pageSize as string);
-      
-      const runs = await storage.getJobRuns(filters, pageNum, pageSizeNum);
-      res.json(runs);
+      if (typeFilter) {
+        filteredRuns = filteredRuns.filter(r => r.runType === typeFilter);
+      }
+      if (statusFilter) {
+        filteredRuns = filteredRuns.filter(r => r.status === statusFilter);
+      }
+      if (archived) {
+        const showArchived = archived === "true";
+        filteredRuns = filteredRuns.filter(r => r.archived === showArchived);
+      }
+      if (startDate) {
+        const start = new Date(startDate as string);
+        filteredRuns = filteredRuns.filter(r => new Date(r.createdAt) >= start);
+      }
+      if (endDate) {
+        const end = new Date(endDate as string);
+        filteredRuns = filteredRuns.filter(r => new Date(r.createdAt) <= end);
+      }
+
+      res.json(filteredRuns);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch runs" });
     }
@@ -444,11 +546,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/runs/:id", authMiddleware, async (req, res) => {
     try {
-      const run = await storage.getJobRun(req.params.id);
-      if (!run) {
-        return res.status(404).json({ message: "Run not found" });
+      const id = req.params.id;
+      
+      // Try to find the run in all three tables
+      const jobRun = await storage.getJobRun(id);
+      if (jobRun) {
+        return res.json({
+          ...jobRun,
+          runType: 'playbook-run',
+          sourceType: 'template',
+          finishedAt: jobRun.completedAt,
+        });
       }
-      res.json(run);
+
+      const pipelineRun = await storage.getPipelineRun(id);
+      if (pipelineRun) {
+        const pipeline = await storage.getPipeline(pipelineRun.pipelineId);
+        return res.json({
+          ...pipelineRun,
+          runType: 'bdp-sync',
+          sourceType: 'pipeline',
+          sourceName: pipeline?.name || 'Unknown Pipeline',
+        });
+      }
+
+      const syncRun = await storage.getSyncRun(id);
+      if (syncRun) {
+        const provider = await storage.getProvider(syncRun.providerAccountId);
+        return res.json({
+          ...syncRun,
+          runType: 'provider-sync',
+          sourceType: 'provider',
+          sourceName: provider?.name || 'Unknown Provider',
+        });
+      }
+
+      return res.status(404).json({ message: "Run not found" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch run" });
     }

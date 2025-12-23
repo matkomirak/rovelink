@@ -162,61 +162,71 @@ export class NetBoxAdapter {
   }
 
   /**
-   * Ensure NetBox custom fields exist
+   * Check if ext_id custom field exists in NetBox
    */
-  async ensureCustomFields(): Promise<void> {
+  async checkExtIdFieldExists(): Promise<boolean> {
+    try {
+      const response = await this.client.get('/extras/custom-fields/?name=ext_id');
+      return response.data.count > 0;
+    } catch (error: any) {
+      console.error('Failed to check custom fields:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Ensure NetBox custom fields exist
+   * Note: This requires admin permissions in NetBox. If it fails, the user needs to create
+   * the ext_id custom field manually in NetBox (Customization > Custom Fields).
+   */
+  async ensureCustomFields(): Promise<{ success: boolean; message: string }> {
     const requiredFields = [
       {
         name: 'ext_id',
         label: 'External ID',
         type: 'text',
-        description: 'External provider unique identifier',
-        content_types: ['virtualization.virtualmachine'],
-      },
-      {
-        name: 'ext_provider',
-        label: 'External Provider',
-        type: 'text',
-        description: 'Source provider (proxmox, vmware, azure)',
-        content_types: ['virtualization.virtualmachine'],
-      },
-      {
-        name: 'patch_wave',
-        label: 'Patch Wave',
-        type: 'text',
-        description: 'Patching wave assignment',
-        content_types: ['virtualization.virtualmachine'],
-      },
-      {
-        name: 'patch_subwave',
-        label: 'Patch Subwave',
-        type: 'text',
-        description: 'Patching subwave assignment',
-        content_types: ['virtualization.virtualmachine'],
-      },
-      {
-        name: 'ansible_user',
-        label: 'Ansible User',
-        type: 'text',
-        description: 'Default Ansible user for automation',
-        content_types: ['virtualization.virtualmachine'],
+        description: 'External provider unique identifier for Bridge sync',
+        object_types: ['virtualization.virtualmachine'],
+        filter_logic: 'loose',
       },
     ];
+
+    const results: string[] = [];
 
     for (const field of requiredFields) {
       try {
         // Check if field exists
         const existing = await this.client.get(`/extras/custom-fields/?name=${field.name}`);
         
-        if (existing.data.count === 0) {
-          // Create the field
-          await this.client.post('/extras/custom-fields/', field);
-          console.log(`Created custom field: ${field.name}`);
+        if (existing.data.count > 0) {
+          results.push(`Custom field '${field.name}' already exists`);
+          continue;
         }
+
+        // Create the field
+        await this.client.post('/extras/custom-fields/', field);
+        console.log(`Created custom field: ${field.name}`);
+        results.push(`Created custom field '${field.name}'`);
       } catch (error: any) {
-        console.error(`Failed to ensure custom field ${field.name}:`, error.message);
+        const errorDetail = error.response?.data || error.message;
+        console.error(`Failed to create custom field ${field.name}:`, JSON.stringify(errorDetail));
+        
+        // Check if it's a permission error
+        if (error.response?.status === 403) {
+          return {
+            success: false,
+            message: `Permission denied: Your NetBox API token does not have permission to create custom fields. Please create the 'ext_id' custom field manually in NetBox: Customization > Custom Fields > Add (Type: Text, Object Types: Virtual Machine, Name: ext_id)`
+          };
+        }
+        
+        return {
+          success: false,
+          message: `Failed to create custom field '${field.name}': ${JSON.stringify(errorDetail)}. Please create it manually in NetBox: Customization > Custom Fields`
+        };
       }
     }
+
+    return { success: true, message: results.join('; ') };
   }
 
   /**

@@ -327,24 +327,8 @@ router.get("/:id/runs/:runId", async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: "not_found" });
     }
 
-    // Simulate progressive log output
-    const logs: string[] = [];
-    const elapsedSeconds = run.startedAt 
-      ? Math.floor((Date.now() - new Date(run.startedAt).getTime()) / 1000)
-      : 0;
-    
-    if (run.status === "running" || run.status === "ok") {
-      logs.push(`[${new Date().toISOString()}] Starting pipeline sync...`);
-      if (elapsedSeconds > 2) logs.push(`[${new Date().toISOString()}] Fetching source objects from provider...`);
-      if (elapsedSeconds > 4) logs.push(`[${new Date().toISOString()}] Found 10 objects to process`);
-      if (elapsedSeconds > 6) logs.push(`[${new Date().toISOString()}] Applying mapping rules...`);
-      if (elapsedSeconds > 8) logs.push(`[${new Date().toISOString()}] Validating transformed objects...`);
-      if (elapsedSeconds > 10) logs.push(`[${new Date().toISOString()}] Syncing to target CMDB...`);
-      if (run.status === "ok") {
-        logs.push(`[${new Date().toISOString()}] Sync completed successfully`);
-        logs.push(`[${new Date().toISOString()}] Created: 2, Updated: 3, Errors: 0`);
-      }
-    }
+    // Return actual logs from the database
+    const logs = run.logs ? run.logs.split('\n').filter(Boolean) : [];
 
     res.json({
       id: run.id,
@@ -378,6 +362,7 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
     // Execute sync asynchronously
     (async () => {
       const startTime = Date.now();
+      let logs = "";
       const summary: any = {
         created: 0,
         updated: 0,
@@ -385,22 +370,47 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
         errors: 0,
       };
 
+      // Helper to add log and update database
+      const addLog = async (message: string, updateDb = true) => {
+        const timestamp = new Date().toISOString();
+        const logLine = `[${timestamp}] ${message}`;
+        logs += logLine + "\n";
+        console.log(`[Pipeline ${pipeline.id}] ${message}`);
+        if (updateDb) {
+          try {
+            await storage.updatePipelineRun(run.id, { logs });
+          } catch (e) {
+            // Ignore log update errors
+          }
+        }
+      };
+
       try {
+        await addLog("Starting pipeline sync...");
+
         // Get provider account and create collector
         const providerAccount = await storage.getProvider(pipeline.providerAccountId);
         if (!providerAccount) {
           throw new Error("Provider account not found");
         }
 
+        await addLog(`Connecting to provider: ${providerAccount.name} (${providerAccount.kind})`);
         const collector = getProviderCollector(providerAccount.kind, providerAccount.config);
 
         // Get CMDB adapter
+        await addLog("Connecting to CMDB...");
         const cmdbAdapter = await getCmdbAdapter(pipeline.cmdbAccountId);
 
         // Ensure NetBox has required custom fields (ext_id, etc.)
         if (cmdbAdapter instanceof NetBoxAdapter) {
-          console.log(`[Pipeline ${pipeline.id}] Ensuring NetBox custom fields exist...`);
-          await cmdbAdapter.ensureCustomFields();
+          await addLog("Checking NetBox custom fields...");
+          const cfResult = await cmdbAdapter.ensureCustomFields();
+          if (!cfResult.success) {
+            await addLog(`WARNING: ${cfResult.message}`);
+            await addLog("Sync will attempt to continue, but may fail if ext_id field is missing.");
+          } else {
+            await addLog(cfResult.message);
+          }
         }
 
         // Get mappings
@@ -410,27 +420,28 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
         }
 
         // Discover VMs from provider
-        console.log(`[Pipeline ${pipeline.id}] Discovering VMs from provider...`);
+        await addLog("Discovering VMs from provider...");
         const vms = await collector.listVms();
-        console.log(`[Pipeline ${pipeline.id}] Found ${vms.length} VMs`);
+        await addLog(`Found ${vms.length} VMs to process`);
+
+        await addLog(`Loaded ${mappings.length} mapping rule(s): ${mappings.map(m => `${m.sourceType} -> ${m.targetType}`).join(', ')}`);
+        await addLog("Starting sync to target CMDB...");
 
         // Process each VM
+        let processedCount = 0;
         for (const vm of vms) {
+          processedCount++;
           try {
             // Find matching mapping - check for VM-like source types case-insensitively
-            // Source types can be: "Vm", "VM", "vm", "VirtualMachine", etc.
-            // Target types can be: "VirtualMachine", "VM", "vm", etc.
             const mapping = mappings.find(m => {
               const srcType = (m.sourceType || '').toLowerCase();
               const tgtType = (m.targetType || '').toLowerCase();
               
-              // Match VM-like source types
               const isVmSource = srcType === 'vm' || 
                                  srcType === 'virtualmachine' || 
                                  srcType.includes('vm') ||
                                  srcType.includes('virtualmachine');
               
-              // Match VM-like target types
               const isVmTarget = tgtType === 'vm' || 
                                  tgtType === 'virtualmachine' ||
                                  tgtType.includes('vm') ||
@@ -440,7 +451,7 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
             });
             
             if (!mapping) {
-              console.warn(`No mapping found for VM ${vm.name} (available mappings: ${mappings.map(m => `${m.sourceType}->${m.targetType}`).join(', ')})`);
+              await addLog(`SKIP: No mapping found for VM ${vm.name}`, false);
               continue;
             }
 
@@ -474,36 +485,42 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
 
             if (result.created) {
               summary.created++;
-              console.log(`[Pipeline ${pipeline.id}] Created VM: ${vm.name}`);
+              await addLog(`[${processedCount}/${vms.length}] CREATED: ${vm.name}`);
             } else {
               summary.updated++;
-              console.log(`[Pipeline ${pipeline.id}] Updated VM: ${vm.name}`);
+              // Only log updates every 10 VMs to reduce log noise
+              if (summary.updated % 10 === 0 || summary.updated === 1) {
+                await addLog(`[${processedCount}/${vms.length}] Updated ${summary.updated} VM(s) so far...`);
+              }
             }
           } catch (vmError: any) {
             summary.errors++;
-            console.error(`[Pipeline ${pipeline.id}] Error processing VM ${vm.name}:`, vmError.message);
+            await addLog(`[${processedCount}/${vms.length}] ERROR: ${vm.name} - ${vmError.message}`);
           }
         }
 
+        // Final summary
+        await addLog(`Sync completed: Created ${summary.created}, Updated ${summary.updated}, Errors ${summary.errors}`);
+
         // Update run as successful
         await storage.updatePipelineRun(run.id, {
-          status: "ok",
+          status: summary.errors > 0 ? "ok" : "ok",
           startedAt: new Date(startTime),
           finishedAt: new Date(),
           summary,
+          logs,
         });
-
-        console.log(`[Pipeline ${pipeline.id}] Sync completed:`, summary);
       } catch (error: any) {
+        await addLog(`FATAL ERROR: ${error.message}`);
+        
         // Update run as failed
         await storage.updatePipelineRun(run.id, {
           status: "error",
           startedAt: new Date(startTime),
           finishedAt: new Date(),
           summary: { ...summary, error: error.message },
+          logs,
         });
-
-        console.error(`[Pipeline ${pipeline.id}] Sync failed:`, error.message);
       }
     })();
 

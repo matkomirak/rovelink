@@ -411,10 +411,30 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
         // Process each VM
         for (const vm of vms) {
           try {
-            // Find matching mapping (for now, use first VM->VM mapping)
-            const mapping = mappings.find(m => m.sourceType === 'vm' && m.targetType === 'vm');
+            // Find matching mapping - check for VM-like source types case-insensitively
+            // Source types can be: "Vm", "VM", "vm", "VirtualMachine", etc.
+            // Target types can be: "VirtualMachine", "VM", "vm", etc.
+            const mapping = mappings.find(m => {
+              const srcType = (m.sourceType || '').toLowerCase();
+              const tgtType = (m.targetType || '').toLowerCase();
+              
+              // Match VM-like source types
+              const isVmSource = srcType === 'vm' || 
+                                 srcType === 'virtualmachine' || 
+                                 srcType.includes('vm') ||
+                                 srcType.includes('virtualmachine');
+              
+              // Match VM-like target types
+              const isVmTarget = tgtType === 'vm' || 
+                                 tgtType === 'virtualmachine' ||
+                                 tgtType.includes('vm') ||
+                                 tgtType.includes('virtualmachine');
+              
+              return isVmSource && isVmTarget;
+            });
+            
             if (!mapping) {
-              console.warn(`No mapping found for VM ${vm.name}`);
+              console.warn(`No mapping found for VM ${vm.name} (available mappings: ${mappings.map(m => `${m.sourceType}->${m.targetType}`).join(', ')})`);
               continue;
             }
 

@@ -55,7 +55,7 @@ export const jobTemplates = pgTable("job_templates", {
   projectId: varchar("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   playbook: text("playbook").notNull(),
   credentialId: varchar("credential_id").references(() => credentials.id, { onDelete: "set null" }),
-  inventoryId: varchar("inventory_id").references(() => netboxInventorySources.id, { onDelete: "set null" }),
+  inventoryId: varchar("inventory_id").references(() => automationInventories.id, { onDelete: "set null" }),
   limitExpr: text("limit_expr"), // Host limit expression
   extraVars: jsonb("extra_vars").default({}), // JSON extra variables
   checkMode: boolean("check_mode").default(false),

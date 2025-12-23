@@ -43,7 +43,20 @@ export const getQueryFn: <T>(options: {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const res = await fetch(queryKey.join("/") as string, {
+    // Build URL: first element is the base path, second element (if exists) is query params
+    let url = queryKey[0] as string;
+    if (queryKey.length > 1 && queryKey[1]) {
+      const params = queryKey[1] as string;
+      // If it looks like query params (contains =), append with ?
+      if (params && params.includes('=')) {
+        url = `${url}?${params}`;
+      } else if (params) {
+        // Otherwise treat as path segment
+        url = `${url}/${params}`;
+      }
+    }
+
+    const res = await fetch(url, {
       headers,
       credentials: "include",
     });

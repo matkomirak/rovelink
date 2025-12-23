@@ -411,6 +411,15 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
           } else {
             await addLog(cfResult.message);
           }
+
+          // Ensure default cluster exists
+          await addLog("Ensuring default cluster exists for VM creation...");
+          try {
+            const clusterId = await cmdbAdapter.ensureDefaultCluster();
+            await addLog(`Using cluster ID: ${clusterId} (Bridge-Default)`);
+          } catch (clusterError: any) {
+            await addLog(`WARNING: Could not create default cluster - ${clusterError.message}`);
+          }
         }
 
         // Get mappings

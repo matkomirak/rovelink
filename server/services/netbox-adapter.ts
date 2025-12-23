@@ -255,6 +255,83 @@ export class NetBoxAdapter {
   }
 
   /**
+   * Cached cluster ID to avoid repeated API calls
+   */
+  private defaultClusterId: number | null = null;
+
+  /**
+   * Ensure a default cluster exists for VMs
+   * NetBox requires VMs to be assigned to a cluster or site
+   */
+  async ensureDefaultCluster(): Promise<number> {
+    // Return cached ID if available
+    if (this.defaultClusterId !== null) {
+      return this.defaultClusterId;
+    }
+
+    const clusterName = 'Bridge-Default';
+    const clusterSlug = 'bridge-default';
+
+    try {
+      // Search for existing cluster
+      const response = await this.client.get(`/virtualization/clusters/?name=${encodeURIComponent(clusterName)}`);
+      
+      if (response.data.count > 0) {
+        const clusterId: number = response.data.results[0].id;
+        this.defaultClusterId = clusterId;
+        return clusterId;
+      }
+
+      // Need to create a cluster type first
+      const clusterTypeId = await this.ensureClusterType();
+
+      // Create new cluster
+      const createResponse = await this.client.post('/virtualization/clusters/', {
+        name: clusterName,
+        slug: clusterSlug,
+        type: clusterTypeId,
+      });
+
+      const newClusterId: number = createResponse.data.id;
+      this.defaultClusterId = newClusterId;
+      console.log(`Created default cluster: ${clusterName} (ID: ${newClusterId})`);
+      return newClusterId;
+    } catch (error: any) {
+      console.error(`Failed to ensure default cluster:`, error.response?.data || error.message);
+      throw new Error(`Failed to create default cluster: ${error.message}`);
+    }
+  }
+
+  /**
+   * Ensure a default cluster type exists
+   */
+  private async ensureClusterType(): Promise<number> {
+    const typeName = 'Bridge';
+    const typeSlug = 'bridge';
+
+    try {
+      // Search for existing type
+      const response = await this.client.get(`/virtualization/cluster-types/?name=${encodeURIComponent(typeName)}`);
+      
+      if (response.data.count > 0) {
+        return response.data.results[0].id;
+      }
+
+      // Create new cluster type
+      const createResponse = await this.client.post('/virtualization/cluster-types/', {
+        name: typeName,
+        slug: typeSlug,
+      });
+
+      console.log(`Created cluster type: ${typeName}`);
+      return createResponse.data.id;
+    } catch (error: any) {
+      console.error(`Failed to ensure cluster type:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Upsert a VM to NetBox based on ext_id
    * NetBox 4.x requires specific field formats
    */
@@ -270,7 +347,7 @@ export class NetBoxAdapter {
 
       // Build a clean payload with only valid NetBox fields
       // NetBox 4.x is strict about field formats
-      const buildPayload = async () => {
+      const buildPayload = async (forCreate: boolean = false) => {
         // Ensure tags exist and get their IDs
         const tagIds: number[] = [];
         if (vmData.tags) {
@@ -304,6 +381,12 @@ export class NetBoxAdapter {
           },
         };
 
+        // For new VMs, ensure a cluster is assigned (required by NetBox)
+        if (forCreate) {
+          const clusterId = await this.ensureDefaultCluster();
+          payload.cluster = clusterId;
+        }
+
         // Only add optional fields if they have valid values
         if (vmData.vcpus && Number(vmData.vcpus) > 0) {
           payload.vcpus = Number(vmData.vcpus);
@@ -327,13 +410,13 @@ export class NetBoxAdapter {
       };
 
       if (searchResponse.data.count > 0) {
-        // Update existing VM
+        // Update existing VM (don't change cluster on update)
         vmId = searchResponse.data.results[0].id;
-        const updatePayload = await buildPayload();
+        const updatePayload = await buildPayload(false);
         await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, updatePayload);
       } else {
-        // Create new VM
-        const createPayload = await buildPayload();
+        // Create new VM (include cluster assignment)
+        const createPayload = await buildPayload(true);
         const createResponse = await this.client.post('/virtualization/virtual-machines/', createPayload);
         vmId = createResponse.data.id;
         created = true;

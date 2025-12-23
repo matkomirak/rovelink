@@ -43,16 +43,23 @@ export const getQueryFn: <T>(options: {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    // Build URL: first element is the base path, second element (if exists) is query params
+    // Build URL from query key segments
+    // Handles: ["/api/path"], ["/api/path", id], ["/api/path", id, "subpath"], ["/api/path", "key=value"]
     let url = queryKey[0] as string;
-    if (queryKey.length > 1 && queryKey[1]) {
-      const params = queryKey[1] as string;
+    
+    for (let i = 1; i < queryKey.length; i++) {
+      const segment = queryKey[i];
+      if (segment === null || segment === undefined || segment === '') {
+        continue;
+      }
+      const strSegment = String(segment);
+      
       // If it looks like query params (contains =), append with ?
-      if (params && params.includes('=')) {
-        url = `${url}?${params}`;
-      } else if (params) {
+      if (strSegment.includes('=')) {
+        url = `${url}?${strSegment}`;
+      } else {
         // Otherwise treat as path segment
-        url = `${url}/${params}`;
+        url = `${url}/${strSegment}`;
       }
     }
 

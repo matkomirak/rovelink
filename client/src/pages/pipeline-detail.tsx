@@ -161,7 +161,7 @@ export default function PipelineDetail() {
       // Validate cron before saving
       if (cron) {
         try {
-          parser.parseExpression(cron);
+          parser.parse(cron);
         } catch (error: any) {
           throw new Error(`Invalid cron expression: ${error.message}`);
         }
@@ -198,7 +198,7 @@ export default function PipelineDetail() {
     }
     
     try {
-      const interval = parser.parseExpression(value);
+      const interval = parser.parse(value);
       const next = interval.next().toDate();
       setNextRun(next.toLocaleString());
       setCronError(null);
@@ -438,7 +438,7 @@ export default function PipelineDetail() {
             )}
             {pipeline.scheduleCron && !editingSchedule && (() => {
               try {
-                const interval = parser.parseExpression(pipeline.scheduleCron);
+                const interval = parser.parse(pipeline.scheduleCron);
                 const next = interval.next().toDate();
                 return (
                   <div className="text-xs text-muted-foreground">

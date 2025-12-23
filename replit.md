@@ -22,6 +22,7 @@ The UI follows a dark-first design principle using the Inter font family for UI 
 - **Credentials Management:** CRUD for mock credential references (SSH key, WinRM, sudo, vault types) storing non-secret metadata.
 - **Job Templates:** Creation of templates linked to projects, playbooks, and credentials, supporting limit expressions, extra variables, check mode, and diff mode. Templates can be launched immediately or scheduled.
 - **Job Runs:** Simulated Ansible execution (FakeRunner) with real-time log streaming via WebSockets, persistent logs, and CSV export.
+- **Unified Runs View:** Consolidated view of all execution types (playbook runs, pipeline syncs, provider syncs) with color-coded badges, source names, summary statistics, and clickable navigation to detailed log views.
 - **Scheduling:** Deferred execution via `scheduledAt` timestamps, with simplified background triggering.
 - **Reports Dashboard:** Widgets for inventory health (coverage, IP/user counts) and run statistics (success rate, failures).
 - **Notifications:** Configurable email and webhook notifications with trigger conditions, variable interpolation, retry logic, and custom headers/body.
@@ -34,7 +35,8 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - **Pipelines List & Wizard:** Table view of pipelines, creation wizard for selecting source provider, target CMDB, and defining mappings.
   - **Pipeline Detail Page:** Header with actions, settings card with schedule editor, tabs for mappings and runs.
   - **Mapping Editor:** Configuration of mappings with source/target type pairs and field rules.
-  - **Dry-Run & Sync:** Functionality to perform dry-runs to preview changes and execute syncs.
+  - **Dry-Run & Sync:** Functionality to perform dry-runs to preview changes and execute syncs with automatic IP address syncing.
+  - **IP Address Syncing:** Pipeline sync automatically creates IP addresses in NetBox IPAM, assigns them to VM interfaces, and sets the primary_ip4 reference.
   - **Rules Engine Service:** Backend service for transformation and validation with various transforms (e.g., lower, upper, regex_extract), conflict policies (provider-wins, cmdb-wins), and validation rules.
   - **CMDB Adapters Enhanced:** NetBox and i-doit adapters extended with `objectTypes()` and `validate()` methods.
   - **Preset RTC Rules:** 6 pre-configured mapping templates for common provider-to-CMDB integrations.

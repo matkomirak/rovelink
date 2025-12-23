@@ -492,9 +492,20 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
             const extId = vm.externalId;
             const result = await (cmdbAdapter as NetBoxAdapter).upsertVm(transformedVm, extId);
 
+            // Sync primary IP address if available
+            const primaryIp = vm.primaryIp4;
+            if (primaryIp && result.id && cmdbAdapter instanceof NetBoxAdapter) {
+              try {
+                await (cmdbAdapter as NetBoxAdapter).syncVmPrimaryIp(result.id, primaryIp);
+              } catch (ipError: any) {
+                // Log IP sync error but don't fail the VM sync
+                await addLog(`[${processedCount}/${vms.length}] WARNING: Could not sync IP ${primaryIp} for ${vm.name}: ${ipError.message}`, false);
+              }
+            }
+
             if (result.created) {
               summary.created++;
-              await addLog(`[${processedCount}/${vms.length}] CREATED: ${vm.name}`);
+              await addLog(`[${processedCount}/${vms.length}] CREATED: ${vm.name}${primaryIp ? ` (IP: ${primaryIp})` : ''}`);
             } else if (result.unchanged) {
               summary.unchanged++;
               // Log unchanged every 20 to reduce noise

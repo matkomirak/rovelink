@@ -536,6 +536,124 @@ export class NetBoxAdapter {
   }
 
   /**
+   * Ensure a VM interface exists for a given VM
+   * Returns the interface ID
+   */
+  async ensureVmInterface(vmId: number, interfaceName: string = 'eth0'): Promise<number> {
+    try {
+      // Check if interface already exists
+      const searchResponse = await this.client.get('/virtualization/interfaces/', {
+        params: {
+          virtual_machine_id: vmId,
+          name: interfaceName,
+        }
+      });
+
+      if (searchResponse.data.count > 0) {
+        return searchResponse.data.results[0].id;
+      }
+
+      // Create the interface
+      const createResponse = await this.client.post('/virtualization/interfaces/', {
+        virtual_machine: vmId,
+        name: interfaceName,
+        enabled: true,
+      });
+
+      console.log(`Created VM interface: ${interfaceName} for VM ${vmId}`);
+      return createResponse.data.id;
+    } catch (error: any) {
+      console.error('Failed to ensure VM interface:', error.response?.data || error.message);
+      throw new Error(`Failed to ensure VM interface: ${error.message}`);
+    }
+  }
+
+  /**
+   * Ensure an IP address exists in NetBox IPAM and optionally assign to a VM interface
+   * Returns the IP address ID
+   */
+  async ensureIpAddress(address: string, vmId?: number, interfaceId?: number): Promise<number> {
+    try {
+      // Normalize address - add /32 if no prefix length
+      let normalizedAddress = address;
+      if (!address.includes('/')) {
+        normalizedAddress = `${address}/32`;
+      }
+
+      // Check if IP already exists
+      const searchResponse = await this.client.get('/ipam/ip-addresses/', {
+        params: { address: normalizedAddress }
+      });
+
+      let ipId: number;
+
+      if (searchResponse.data.count > 0) {
+        ipId = searchResponse.data.results[0].id;
+        
+        // Update assignment if interface is provided and not already assigned
+        if (interfaceId) {
+          const existingIp = searchResponse.data.results[0];
+          const currentAssignment = existingIp.assigned_object_id;
+          
+          if (currentAssignment !== interfaceId) {
+            await this.client.patch(`/ipam/ip-addresses/${ipId}/`, {
+              assigned_object_type: 'virtualization.vminterface',
+              assigned_object_id: interfaceId,
+            });
+            console.log(`Assigned IP ${normalizedAddress} to interface ${interfaceId}`);
+          }
+        }
+      } else {
+        // Create the IP address
+        const createPayload: any = {
+          address: normalizedAddress,
+          status: 'active',
+        };
+
+        // Assign to interface if provided
+        if (interfaceId) {
+          createPayload.assigned_object_type = 'virtualization.vminterface';
+          createPayload.assigned_object_id = interfaceId;
+        }
+
+        const createResponse = await this.client.post('/ipam/ip-addresses/', createPayload);
+        ipId = createResponse.data.id;
+        console.log(`Created IP address: ${normalizedAddress}` + (interfaceId ? ` assigned to interface ${interfaceId}` : ''));
+      }
+
+      return ipId;
+    } catch (error: any) {
+      console.error('Failed to ensure IP address:', error.response?.data || error.message);
+      throw new Error(`Failed to ensure IP address ${address}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Sync primary IP address for a VM
+   * Creates the IP in IPAM, creates a VM interface, assigns IP to interface, and sets as primary
+   */
+  async syncVmPrimaryIp(vmId: number, ipAddress: string): Promise<{ ipId: number; interfaceId: number }> {
+    try {
+      // Step 1: Ensure VM interface exists
+      const interfaceId = await this.ensureVmInterface(vmId, 'eth0');
+
+      // Step 2: Ensure IP address exists and is assigned to interface
+      const ipId = await this.ensureIpAddress(ipAddress, vmId, interfaceId);
+
+      // Step 3: Set as primary IP on the VM
+      await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, {
+        primary_ip4: ipId,
+      });
+
+      console.log(`Set primary_ip4 for VM ${vmId} to ${ipAddress} (IP ID: ${ipId})`);
+      return { ipId, interfaceId };
+    } catch (error: any) {
+      console.error('Failed to sync VM primary IP:', error.response?.data || error.message);
+      throw new Error(`Failed to sync primary IP ${ipAddress}: ${error.message}`);
+    }
+  }
+
+  /**
    * Get object types available in NetBox
    */
   async getObjectTypes(): Promise<string[]> {

@@ -397,6 +397,12 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
         // Get CMDB adapter
         const cmdbAdapter = await getCmdbAdapter(pipeline.cmdbAccountId);
 
+        // Ensure NetBox has required custom fields (ext_id, etc.)
+        if (cmdbAdapter instanceof NetBoxAdapter) {
+          console.log(`[Pipeline ${pipeline.id}] Ensuring NetBox custom fields exist...`);
+          await cmdbAdapter.ensureCustomFields();
+        }
+
         // Get mappings
         const mappings = await storage.getPipelineMappings(pipeline.id);
         if (mappings.length === 0) {

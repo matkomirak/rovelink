@@ -464,22 +464,22 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
               continue;
             }
 
-            // Get data from raw provider data
-            const rawData = vm.raw || {};
-
-            // Apply mapping rules to transform the VM
+                // Apply mapping rules to transform the VM using normalized fields
             const transformedVm: any = {
               name: vm.name,
-              status: rawData.status || 'active',
-              vcpus: rawData.vcpus || rawData.cores || 1,
-              memory: rawData.memory || rawData.maxmem || null,
-              disk: rawData.disk || rawData.maxdisk || null,
+              status: vm.status || 'active',
+              vcpus: vm.vcpus || 1,
+              memory: vm.memory || null,
+              disk: vm.disk || null,
               tags: vm.tags || [],
+              comments: vm.description || null,
+              platform: vm.platform ? { name: vm.platform } : null,
             };
 
             // Apply custom field rules from mapping if they exist
             const mappingRules = mapping.rules as any;
             if (mappingRules && mappingRules.fieldMappings) {
+              const rawData = vm.raw || {};
               for (const fieldMapping of mappingRules.fieldMappings) {
                 const sourceValue = vm[fieldMapping.source as keyof typeof vm] || rawData[fieldMapping.source];
                 if (sourceValue !== undefined) {
@@ -495,9 +495,15 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
             if (result.created) {
               summary.created++;
               await addLog(`[${processedCount}/${vms.length}] CREATED: ${vm.name}`);
+            } else if (result.unchanged) {
+              summary.unchanged++;
+              // Log unchanged every 20 to reduce noise
+              if (summary.unchanged % 20 === 0) {
+                await addLog(`[${processedCount}/${vms.length}] ${summary.unchanged} VM(s) unchanged...`);
+              }
             } else {
               summary.updated++;
-              // Only log updates every 10 VMs to reduce log noise
+              // Log updates every 10 VMs to reduce log noise
               if (summary.updated % 10 === 0 || summary.updated === 1) {
                 await addLog(`[${processedCount}/${vms.length}] Updated ${summary.updated} VM(s) so far...`);
               }
@@ -509,7 +515,7 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
         }
 
         // Final summary
-        await addLog(`Sync completed: Created ${summary.created}, Updated ${summary.updated}, Errors ${summary.errors}`);
+        await addLog(`Sync completed: Created ${summary.created}, Updated ${summary.updated}, Unchanged ${summary.unchanged}, Errors ${summary.errors}`);
 
         // Update run as successful
         await storage.updatePipelineRun(run.id, {

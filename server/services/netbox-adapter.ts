@@ -230,6 +230,34 @@ export class NetBoxAdapter {
   }
 
   /**
+   * Ensure a platform exists or create it
+   */
+  private async ensurePlatform(platformName: string): Promise<number> {
+    try {
+      const slug = platformName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      
+      // Search for existing platform
+      const response = await this.client.get(`/dcim/platforms/?name=${encodeURIComponent(platformName)}`);
+      
+      if (response.data.count > 0) {
+        return response.data.results[0].id;
+      }
+      
+      // Create new platform
+      const createResponse = await this.client.post('/dcim/platforms/', {
+        name: platformName,
+        slug: slug,
+      });
+      
+      console.log(`Created platform: ${platformName}`);
+      return createResponse.data.id;
+    } catch (error: any) {
+      console.error(`Failed to ensure platform ${platformName}:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Find or create tag
    */
   private async ensureTag(tagName: string): Promise<number> {
@@ -334,8 +362,9 @@ export class NetBoxAdapter {
   /**
    * Upsert a VM to NetBox based on ext_id
    * NetBox 4.x requires specific field formats
+   * Implements delta updates - only updates fields that have changed
    */
-  async upsertVm(vmData: NetBoxVmData, extId: string): Promise<{ id: number; created: boolean }> {
+  async upsertVm(vmData: NetBoxVmData, extId: string): Promise<{ id: number; created: boolean; unchanged?: boolean }> {
     try {
       // First, find existing VM by ext_id
       const searchResponse = await this.client.get(
@@ -344,35 +373,43 @@ export class NetBoxAdapter {
 
       let vmId: number;
       let created = false;
+      let unchanged = false;
 
-      // Build a clean payload with only valid NetBox fields
-      // NetBox 4.x is strict about field formats
-      const buildPayload = async (forCreate: boolean = false) => {
-        // Ensure tags exist and get their IDs
-        const tagIds: number[] = [];
-        if (vmData.tags) {
-          for (const tag of vmData.tags) {
-            if (typeof tag === 'object' && 'name' in tag) {
-              const tagId = await this.ensureTag(tag.name);
-              tagIds.push(tagId);
-            } else if (typeof tag === 'string') {
-              const tagId = await this.ensureTag(tag);
-              tagIds.push(tagId);
-            }
+      // Ensure tags exist and get their IDs
+      const tagIds: number[] = [];
+      if (vmData.tags) {
+        for (const tag of vmData.tags) {
+          if (typeof tag === 'object' && 'name' in tag) {
+            const tagId = await this.ensureTag(tag.name);
+            tagIds.push(tagId);
+          } else if (typeof tag === 'string') {
+            const tagId = await this.ensureTag(tag);
+            tagIds.push(tagId);
           }
         }
+      }
 
-        // Map status to NetBox-valid values
-        const statusMap: Record<string, string> = {
-          'running': 'active',
-          'stopped': 'offline',
-          'paused': 'offline',
-          'suspended': 'offline',
-        };
-        const rawStatus = String(vmData.status || 'active').toLowerCase();
-        const status = statusMap[rawStatus] || rawStatus;
+      // Ensure platform exists if specified
+      let platformId: number | undefined;
+      if (vmData.platform) {
+        const platformName = typeof vmData.platform === 'object' ? vmData.platform.name : String(vmData.platform);
+        if (platformName) {
+          platformId = await this.ensurePlatform(platformName);
+        }
+      }
 
-        // Build clean payload - only include valid NetBox VM fields
+      // Map status to NetBox-valid values
+      const statusMap: Record<string, string> = {
+        'running': 'active',
+        'stopped': 'offline',
+        'paused': 'offline',
+        'suspended': 'offline',
+      };
+      const rawStatus = String(vmData.status || 'active').toLowerCase();
+      const status = statusMap[rawStatus] || rawStatus;
+
+      // Build full payload for new VMs or comparison
+      const buildFullPayload = async (forCreate: boolean = false) => {
         const payload: any = {
           name: vmData.name,
           status: status,
@@ -387,16 +424,14 @@ export class NetBoxAdapter {
           payload.cluster = clusterId;
         }
 
-        // Only add optional fields if they have valid values
+        // Add optional fields if they have valid values
         if (vmData.vcpus && Number(vmData.vcpus) > 0) {
           payload.vcpus = Number(vmData.vcpus);
         }
         if (vmData.memory && Number(vmData.memory) > 0) {
-          // NetBox expects memory in MB
           payload.memory = Number(vmData.memory);
         }
         if (vmData.disk && Number(vmData.disk) > 0) {
-          // NetBox expects disk in GB
           payload.disk = Number(vmData.disk);
         }
         if (tagIds.length > 0) {
@@ -405,24 +440,74 @@ export class NetBoxAdapter {
         if (vmData.comments) {
           payload.comments = vmData.comments;
         }
+        if (platformId) {
+          payload.platform = platformId;
+        }
 
         return payload;
       };
 
       if (searchResponse.data.count > 0) {
-        // Update existing VM (don't change cluster on update)
-        vmId = searchResponse.data.results[0].id;
-        const updatePayload = await buildPayload(false);
-        await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, updatePayload);
+        // Existing VM - perform delta update
+        const existingVm = searchResponse.data.results[0];
+        vmId = existingVm.id;
+        
+        // Build delta payload - only include changed fields
+        const deltaPayload: any = {};
+        let hasChanges = false;
+        
+        // Compare and add only changed fields
+        if (existingVm.name !== vmData.name) {
+          deltaPayload.name = vmData.name;
+          hasChanges = true;
+        }
+        if (existingVm.status?.value !== status) {
+          deltaPayload.status = status;
+          hasChanges = true;
+        }
+        if (vmData.vcpus && Number(vmData.vcpus) > 0 && existingVm.vcpus !== Number(vmData.vcpus)) {
+          deltaPayload.vcpus = Number(vmData.vcpus);
+          hasChanges = true;
+        }
+        if (vmData.memory && Number(vmData.memory) > 0 && existingVm.memory !== Number(vmData.memory)) {
+          deltaPayload.memory = Number(vmData.memory);
+          hasChanges = true;
+        }
+        if (vmData.disk && Number(vmData.disk) > 0 && existingVm.disk !== Number(vmData.disk)) {
+          deltaPayload.disk = Number(vmData.disk);
+          hasChanges = true;
+        }
+        if (vmData.comments && existingVm.comments !== vmData.comments) {
+          deltaPayload.comments = vmData.comments;
+          hasChanges = true;
+        }
+        if (platformId && existingVm.platform?.id !== platformId) {
+          deltaPayload.platform = platformId;
+          hasChanges = true;
+        }
+        
+        // Compare tags (by ID)
+        const existingTagIds = (existingVm.tags || []).map((t: any) => t.id).sort();
+        const newTagIds = tagIds.sort();
+        if (JSON.stringify(existingTagIds) !== JSON.stringify(newTagIds) && tagIds.length > 0) {
+          deltaPayload.tags = tagIds;
+          hasChanges = true;
+        }
+
+        if (hasChanges) {
+          await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, deltaPayload);
+        } else {
+          unchanged = true;
+        }
       } else {
         // Create new VM (include cluster assignment)
-        const createPayload = await buildPayload(true);
+        const createPayload = await buildFullPayload(true);
         const createResponse = await this.client.post('/virtualization/virtual-machines/', createPayload);
         vmId = createResponse.data.id;
         created = true;
       }
 
-      return { id: vmId, created };
+      return { id: vmId, created, unchanged };
     } catch (error: any) {
       // Log detailed error info for debugging
       const errorDetails = error.response?.data;

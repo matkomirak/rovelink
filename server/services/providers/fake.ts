@@ -119,12 +119,26 @@ export class FakeCollector implements IProviderCollector {
     
     const interfaces = this.generateInterfaces(rng);
     const ips = this.generateIps(interfaces, rng);
+    const ipv6 = this.generateIpv6(rng);
+    
+    const vcpus = rng.pick([1, 2, 4, 8, 16]);
+    const memory = rng.pick([512, 1024, 2048, 4096, 8192, 16384]);
+    const disk = rng.pick([20, 40, 80, 100, 200, 500]);
+    const platform = isLinux ? "linux" : "windows";
+    const description = `${customer} ${role} server - ${wave} - Managed by Bridge`;
 
     return {
       externalId: `${node}-${vmid}`,
       name,
       provider: "proxmox",
       primaryIp4: ips.length > 0 ? ips[0].split("/")[0] : undefined,
+      primaryIp6: ipv6,
+      vcpus,
+      memory,
+      disk,
+      platform,
+      description,
+      status,
       tags: [`provider/proxmox`, `node/${node}`, `customer/${customer}`, `wave/${wave}`, `role/${role}`],
       tenant: customer,
       site: rng.pick(this.config.sites || ["PRG-DC1"]),
@@ -133,7 +147,10 @@ export class FakeCollector implements IProviderCollector {
         vm: {
           name,
           status,
-          guest: { os: isLinux ? "linux" : "windows" },
+          vcpus,
+          memory,
+          disk,
+          guest: { os: platform },
           tags: { customer, wave, role },
           node,
           vmid,
@@ -344,6 +361,27 @@ export class FakeCollector implements IProviderCollector {
     const o4 = rng.nextInt(1, 254);
     
     return `${o1}.${o2}.${o3}.${o4}/24`;
+  }
+
+  private generateIpv6(rng: SeededRandom): string | undefined {
+    // 30% chance of having IPv6
+    if (rng.next() > 0.3) {
+      return undefined;
+    }
+    
+    // Generate a random ULA (Unique Local Address) fd00::/8
+    const segments = [
+      'fd' + this.generateHex(2, rng),
+      this.generateHex(4, rng),
+      this.generateHex(4, rng),
+      this.generateHex(4, rng),
+      '0000',
+      '0000',
+      '0000',
+      this.generateHex(4, rng),
+    ];
+    
+    return segments.join(':');
   }
 
   private generateUuid(index: number, rng: SeededRandom): string {

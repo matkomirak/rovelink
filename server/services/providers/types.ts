@@ -4,6 +4,13 @@ export interface NormalizedVm {
   name: string;
   provider: string; // Provider kind (proxmox, azure, vmware)
   primaryIp4?: string;
+  primaryIp6?: string;
+  vcpus?: number;
+  memory?: number; // Memory in MB
+  disk?: number; // Disk in GB
+  platform?: string; // OS platform: linux, windows
+  description?: string;
+  status?: string; // running, stopped, etc.
   tags: string[];
   tenant?: string;
   site?: string;

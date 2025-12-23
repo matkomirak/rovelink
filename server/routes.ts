@@ -621,6 +621,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/providers/:id", authMiddleware, async (req, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+      res.json(provider);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get provider" });
+    }
+  });
+
+  // Get VMs discovered by a provider
+  app.get("/api/providers/:id/vms", authMiddleware, async (req, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      const { getProviderCollector } = await import("./services/providers/registry");
+      const collector = getProviderCollector(provider.kind, provider.config);
+      const vms = await collector.listVms();
+      
+      res.json({ 
+        provider: { id: provider.id, name: provider.name, kind: provider.kind },
+        vms 
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get provider VMs" });
+    }
+  });
+
   app.post("/api/providers", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const provider = await storage.createProvider(req.body);

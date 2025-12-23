@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, PlayCircle, TestTube, Loader2, CheckCircle, XCircle, Clock, Eye, Pencil, Trash2 } from "lucide-react";
+import { Plus, PlayCircle, TestTube, Loader2, CheckCircle, XCircle, Clock, Eye, Pencil, Trash2, ExternalLink } from "lucide-react";
+import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { insertProviderAccountSchema, type ProviderAccount } from "@shared/schema";
@@ -854,7 +855,13 @@ export default function Providers() {
                   const stat = stats?.find((s) => s.id === provider.id);
                   return (
                     <TableRow key={provider.id} data-testid={`row-provider-${provider.id}`}>
-                      <TableCell className="font-medium">{provider.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link href={`/providers/${provider.id}`}>
+                          <span className="text-primary hover:underline cursor-pointer" data-testid={`link-provider-${provider.id}`}>
+                            {provider.name}
+                          </span>
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{provider.kind}</Badge>
                       </TableCell>

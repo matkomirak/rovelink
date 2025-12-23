@@ -21,6 +21,7 @@ import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
 import Providers from "@/pages/providers";
+import ProviderDetail from "@/pages/provider-detail";
 import Cmdbs from "@/pages/cmdbs";
 import Pipelines from "@/pages/pipelines";
 import PipelineNew from "@/pages/pipeline-new";
@@ -46,6 +47,7 @@ function AuthenticatedRouter() {
       <Route path="/projects" component={Projects} />
       <Route path="/credentials" component={Credentials} />
       <Route path="/providers" component={Providers} />
+      <Route path="/providers/:id" component={ProviderDetail} />
       <Route path="/cmdbs" component={Cmdbs} />
       <Route path="/pipelines" component={Pipelines} />
       <Route path="/pipelines/new" component={PipelineNew} />

@@ -903,6 +903,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (cmdb.kind === "netbox") {
         const adapter = new NetBoxAdapter(cmdb.config as any);
         const result = await adapter.test();
+        
+        // Only update lastValidatedAt if connection was successful
+        if (result.ok) {
+          await storage.updateCmdbAccount(req.params.id, {
+            lastValidatedAt: new Date(),
+          });
+        }
+        
         res.json(result);
       } else {
         res.status(400).json({ error: "Unsupported CMDB kind" });

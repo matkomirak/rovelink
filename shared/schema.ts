@@ -216,6 +216,8 @@ export const cmdbAccounts = pgTable("cmdb_accounts", {
   name: text("name").notNull(),
   enabled: boolean("enabled").notNull().default(true),
   config: jsonb("config").notNull().default({}), // CMDB-specific configuration (url, token, etc.)
+  lastValidatedAt: timestamp("last_validated_at"), // Last time connection was successfully validated
+  cachedData: jsonb("cached_data").default({}), // Cached CMDB data from last successful validation
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -330,6 +332,7 @@ export const automationInventories = pgTable("automation_inventories", {
   hostsCount: integer("hosts_count").default(0),
   lastRefreshedAt: timestamp("last_refreshed_at"),
   previewData: jsonb("preview_data").default({}), // Sample groups/hosts for preview
+  cachedData: jsonb("cached_data").default({}), // Full cached inventory data (groups + hosts) from last successful refresh
   createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

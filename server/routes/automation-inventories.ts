@@ -133,17 +133,21 @@ router.post("/", async (req: AuthRequest, res: Response) => {
           });
         }
 
-        // Calculate groups from VM metadata
+        // Build full groups and hosts structure for caching
         const groupsMap = new Map<string, Set<string>>();
+        const hostsMap = new Map<string, any>();
         
         for (const vm of vms) {
           const hostName = vm.name;
+          const ip = vm.primary_ip4?.address?.split('/')[0] || '';
+          const hostGroups: string[] = [];
           
-          // Count groups from tags
+          // Create groups from tags
           if (vm.tags && Array.isArray(vm.tags)) {
             for (const tag of vm.tags) {
               const tagName = typeof tag === 'string' ? tag : tag.name;
               if (tagName) {
+                hostGroups.push(tagName);
                 if (!groupsMap.has(tagName)) {
                   groupsMap.set(tagName, new Set());
                 }
@@ -152,9 +156,10 @@ router.post("/", async (req: AuthRequest, res: Response) => {
             }
           }
 
-          // Count groups from metadata
+          // Create groups from metadata
           if (vm.tenant?.name) {
             const groupName = `tenant_${vm.tenant.name}`;
+            hostGroups.push(groupName);
             if (!groupsMap.has(groupName)) {
               groupsMap.set(groupName, new Set());
             }
@@ -163,6 +168,7 @@ router.post("/", async (req: AuthRequest, res: Response) => {
 
           if (vm.site?.name) {
             const groupName = `site_${vm.site.name}`;
+            hostGroups.push(groupName);
             if (!groupsMap.has(groupName)) {
               groupsMap.set(groupName, new Set());
             }
@@ -171,6 +177,7 @@ router.post("/", async (req: AuthRequest, res: Response) => {
 
           if (vm.cluster?.name) {
             const groupName = `cluster_${vm.cluster.name}`;
+            hostGroups.push(groupName);
             if (!groupsMap.has(groupName)) {
               groupsMap.set(groupName, new Set());
             }
@@ -179,14 +186,38 @@ router.post("/", async (req: AuthRequest, res: Response) => {
 
           if (vm.platform?.name) {
             const groupName = `platform_${vm.platform.name}`;
+            hostGroups.push(groupName);
             if (!groupsMap.has(groupName)) {
               groupsMap.set(groupName, new Set());
             }
             groupsMap.get(groupName)!.add(hostName);
           }
+
+          // Store full host data
+          hostsMap.set(hostName, {
+            name: hostName,
+            ansible_host: ip,
+            groups: hostGroups,
+            vars: {
+              status: vm.status?.value || vm.status || '',
+              vcpus: vm.vcpus || 0,
+              memory: vm.memory || 0,
+              tenant: vm.tenant?.name || '',
+              site: vm.site?.name || '',
+              cluster: vm.cluster?.name || '',
+            }
+          });
         }
 
-        // Update inventory with real data from NetBox
+        // Convert maps to arrays for storage
+        const fullGroups = Array.from(groupsMap.entries()).map(([name, hosts]) => ({
+          name,
+          hostsCount: hosts.size,
+          hosts: Array.from(hosts),
+        }));
+        const fullHosts = Array.from(hostsMap.values());
+
+        // Update inventory with both preview and full cached data
         await db
           .update(automationInventories)
           .set({
@@ -200,6 +231,10 @@ router.post("/", async (req: AuthRequest, res: Response) => {
                 ip: vm.primary_ip4?.address?.split('/')[0] || '',
                 status: vm.status?.value || vm.status || '',
               })),
+            },
+            cachedData: {
+              groups: fullGroups,
+              hosts: fullHosts,
             },
           })
           .where(eq(automationInventories.id, newInventory.id));
@@ -294,7 +329,7 @@ router.get("/:id/preview", async (req, res) => {
   }
 });
 
-// Get full inventory structure
+// Get full inventory structure - uses cached data, not live fetch
 router.get("/:id/structure", async (req, res) => {
   try {
     const [inventory] = await db
@@ -315,124 +350,26 @@ router.get("/:id/structure", async (req, res) => {
       });
     }
 
-    // For linked inventories, fetch real data from CMDB
-    if (inventory.type === "linked" && inventory.sourceType && inventory.sourceRef) {
-      // Get the linked CMDB account
-      const [cmdb] = await db
-        .select()
-        .from(cmdbAccounts)
-        .where(eq(cmdbAccounts.id, inventory.sourceRef));
-
-      if (!cmdb) {
-        return res.status(404).json({ message: "Linked CMDB not found" });
-      }
-
-      // Fetch VMs from NetBox
-      const adapter = new NetBoxAdapter(cmdb.config as any);
-      let vms;
-      try {
-        vms = await adapter.listAllVms();
-      } catch (error: any) {
-        console.error("Failed to fetch VMs from CMDB:", error.message);
-        
-        if (error.message.includes("403")) {
-          return res.status(403).json({ 
-            message: `NetBox API access denied. The configured API token does not have permission to read virtualization resources.`,
-            hint: "To fix this: Update the CMDB account with a token that has 'virtualization.view_virtualmachine' permission in NetBox, or delete this inventory and create a new one using File or Script type.",
-            cmdb_name: cmdb.name,
-            cmdb_url: (cmdb.config as any).url
-          });
-        }
-        
-        throw error;
-      }
-
-      // Build groups and hosts structure
-      const groupsMap = new Map<string, Set<string>>();
-      const hostsMap = new Map<string, any>();
-
-      for (const vm of vms) {
-        const hostName = vm.name;
-        const ip = vm.primary_ip4?.address?.split('/')[0] || '';
-        const groups: string[] = [];
-        
-        // Create groups from tags
-        if (vm.tags && Array.isArray(vm.tags)) {
-          for (const tag of vm.tags) {
-            const tagName = typeof tag === 'string' ? tag : tag.name;
-            if (tagName) {
-              groups.push(tagName);
-              if (!groupsMap.has(tagName)) {
-                groupsMap.set(tagName, new Set());
-              }
-              groupsMap.get(tagName)!.add(hostName);
-            }
-          }
-        }
-
-        // Create groups from tenant, site, cluster, platform
-        if (vm.tenant?.name) {
-          const groupName = `tenant_${vm.tenant.name}`;
-          groups.push(groupName);
-          if (!groupsMap.has(groupName)) {
-            groupsMap.set(groupName, new Set());
-          }
-          groupsMap.get(groupName)!.add(hostName);
-        }
-
-        if (vm.site?.name) {
-          const groupName = `site_${vm.site.name}`;
-          groups.push(groupName);
-          if (!groupsMap.has(groupName)) {
-            groupsMap.set(groupName, new Set());
-          }
-          groupsMap.get(groupName)!.add(hostName);
-        }
-
-        if (vm.cluster?.name) {
-          const groupName = `cluster_${vm.cluster.name}`;
-          groups.push(groupName);
-          if (!groupsMap.has(groupName)) {
-            groupsMap.set(groupName, new Set());
-          }
-          groupsMap.get(groupName)!.add(hostName);
-        }
-
-        if (vm.platform?.name) {
-          const groupName = `platform_${vm.platform.name}`;
-          groups.push(groupName);
-          if (!groupsMap.has(groupName)) {
-            groupsMap.set(groupName, new Set());
-          }
-          groupsMap.get(groupName)!.add(hostName);
-        }
-
-        // Create host entry
-        hostsMap.set(hostName, {
-          name: hostName,
-          ansible_host: ip,
-          groups,
-          vars: {
-            status: vm.status?.value || vm.status || '',
-            vcpus: vm.vcpus || 0,
-            memory: vm.memory || 0,
-            tenant: vm.tenant?.name || '',
-            site: vm.site?.name || '',
-            cluster: vm.cluster?.name || '',
-          }
+    // For linked inventories, use cached data from last successful refresh
+    if (inventory.type === "linked") {
+      const cachedData = inventory.cachedData as { groups?: any[]; hosts?: any[] } | null;
+      
+      if (cachedData && cachedData.groups && cachedData.hosts) {
+        // Return cached data
+        return res.json({
+          groups: cachedData.groups,
+          hosts: cachedData.hosts,
+          cachedAt: inventory.lastRefreshedAt,
         });
       }
-
-      // Convert maps to arrays
-      const groups = Array.from(groupsMap.entries()).map(([name, hosts]) => ({
-        name,
-        hostsCount: hosts.size,
-        hosts: Array.from(hosts),
-      }));
-
-      const hosts = Array.from(hostsMap.values());
-
-      return res.json({ groups, hosts });
+      
+      // No cached data available - return empty with message
+      return res.json({
+        groups: [],
+        hosts: [],
+        message: "No cached data available. Please refresh the inventory to fetch data from the CMDB.",
+        lastRefreshedAt: inventory.lastRefreshedAt,
+      });
     }
 
     res.json({ groups: [], hosts: [] });
@@ -480,17 +417,21 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     const adapter = new NetBoxAdapter(cmdb.config as any);
     const vms = await adapter.listAllVms();
 
-    // Calculate groups and hosts counts
+    // Build full groups and hosts structure for caching
     const groupsMap = new Map<string, Set<string>>();
+    const hostsMap = new Map<string, any>();
     
     for (const vm of vms) {
       const hostName = vm.name;
+      const ip = vm.primary_ip4?.address?.split('/')[0] || '';
+      const hostGroups: string[] = [];
       
-      // Count groups from tags
+      // Create groups from tags
       if (vm.tags && Array.isArray(vm.tags)) {
         for (const tag of vm.tags) {
           const tagName = typeof tag === 'string' ? tag : tag.name;
           if (tagName) {
+            hostGroups.push(tagName);
             if (!groupsMap.has(tagName)) {
               groupsMap.set(tagName, new Set());
             }
@@ -499,9 +440,10 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
         }
       }
 
-      // Count groups from metadata
+      // Create groups from metadata
       if (vm.tenant?.name) {
         const groupName = `tenant_${vm.tenant.name}`;
+        hostGroups.push(groupName);
         if (!groupsMap.has(groupName)) {
           groupsMap.set(groupName, new Set());
         }
@@ -510,6 +452,7 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
 
       if (vm.site?.name) {
         const groupName = `site_${vm.site.name}`;
+        hostGroups.push(groupName);
         if (!groupsMap.has(groupName)) {
           groupsMap.set(groupName, new Set());
         }
@@ -518,6 +461,7 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
 
       if (vm.cluster?.name) {
         const groupName = `cluster_${vm.cluster.name}`;
+        hostGroups.push(groupName);
         if (!groupsMap.has(groupName)) {
           groupsMap.set(groupName, new Set());
         }
@@ -526,14 +470,38 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
 
       if (vm.platform?.name) {
         const groupName = `platform_${vm.platform.name}`;
+        hostGroups.push(groupName);
         if (!groupsMap.has(groupName)) {
           groupsMap.set(groupName, new Set());
         }
         groupsMap.get(groupName)!.add(hostName);
       }
+
+      // Store full host data
+      hostsMap.set(hostName, {
+        name: hostName,
+        ansible_host: ip,
+        groups: hostGroups,
+        vars: {
+          status: vm.status?.value || vm.status || '',
+          vcpus: vm.vcpus || 0,
+          memory: vm.memory || 0,
+          tenant: vm.tenant?.name || '',
+          site: vm.site?.name || '',
+          cluster: vm.cluster?.name || '',
+        }
+      });
     }
 
-    // Update inventory with real counts
+    // Convert maps to arrays for storage
+    const fullGroups = Array.from(groupsMap.entries()).map(([name, hosts]) => ({
+      name,
+      hostsCount: hosts.size,
+      hosts: Array.from(hosts),
+    }));
+    const fullHosts = Array.from(hostsMap.values());
+
+    // Update inventory with both preview and full cached data
     await db
       .update(automationInventories)
       .set({
@@ -547,6 +515,10 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
             ip: vm.primary_ip4?.address?.split('/')[0] || '',
             status: vm.status?.value || vm.status || '',
           })),
+        },
+        cachedData: {
+          groups: fullGroups,
+          hosts: fullHosts,
         },
         updatedAt: new Date(),
       })

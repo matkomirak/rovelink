@@ -256,6 +256,7 @@ export class NetBoxAdapter {
 
   /**
    * Upsert a VM to NetBox based on ext_id
+   * NetBox 4.x requires specific field formats
    */
   async upsertVm(vmData: NetBoxVmData, extId: string): Promise<{ id: number; created: boolean }> {
     try {
@@ -267,10 +268,9 @@ export class NetBoxAdapter {
       let vmId: number;
       let created = false;
 
-      if (searchResponse.data.count > 0) {
-        // Update existing VM
-        vmId = searchResponse.data.results[0].id;
-        
+      // Build a clean payload with only valid NetBox fields
+      // NetBox 4.x is strict about field formats
+      const buildPayload = async () => {
         // Ensure tags exist and get their IDs
         const tagIds: number[] = [];
         if (vmData.tags) {
@@ -278,42 +278,62 @@ export class NetBoxAdapter {
             if (typeof tag === 'object' && 'name' in tag) {
               const tagId = await this.ensureTag(tag.name);
               tagIds.push(tagId);
-            }
-          }
-        }
-
-        const updatePayload: any = {
-          ...vmData,
-          tags: tagIds,
-          custom_fields: {
-            ...vmData.custom_fields,
-            ext_id: extId,
-          },
-        };
-
-        await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, updatePayload);
-      } else {
-        // Create new VM
-        // Ensure tags exist
-        const tagIds: number[] = [];
-        if (vmData.tags) {
-          for (const tag of vmData.tags) {
-            if (typeof tag === 'object' && 'name' in tag) {
-              const tagId = await this.ensureTag(tag.name);
+            } else if (typeof tag === 'string') {
+              const tagId = await this.ensureTag(tag);
               tagIds.push(tagId);
             }
           }
         }
 
-        const createPayload: any = {
-          ...vmData,
-          tags: tagIds,
+        // Map status to NetBox-valid values
+        const statusMap: Record<string, string> = {
+          'running': 'active',
+          'stopped': 'offline',
+          'paused': 'offline',
+          'suspended': 'offline',
+        };
+        const rawStatus = String(vmData.status || 'active').toLowerCase();
+        const status = statusMap[rawStatus] || rawStatus;
+
+        // Build clean payload - only include valid NetBox VM fields
+        const payload: any = {
+          name: vmData.name,
+          status: status,
           custom_fields: {
-            ...vmData.custom_fields,
             ext_id: extId,
           },
         };
 
+        // Only add optional fields if they have valid values
+        if (vmData.vcpus && Number(vmData.vcpus) > 0) {
+          payload.vcpus = Number(vmData.vcpus);
+        }
+        if (vmData.memory && Number(vmData.memory) > 0) {
+          // NetBox expects memory in MB
+          payload.memory = Number(vmData.memory);
+        }
+        if (vmData.disk && Number(vmData.disk) > 0) {
+          // NetBox expects disk in GB
+          payload.disk = Number(vmData.disk);
+        }
+        if (tagIds.length > 0) {
+          payload.tags = tagIds;
+        }
+        if (vmData.comments) {
+          payload.comments = vmData.comments;
+        }
+
+        return payload;
+      };
+
+      if (searchResponse.data.count > 0) {
+        // Update existing VM
+        vmId = searchResponse.data.results[0].id;
+        const updatePayload = await buildPayload();
+        await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, updatePayload);
+      } else {
+        // Create new VM
+        const createPayload = await buildPayload();
         const createResponse = await this.client.post('/virtualization/virtual-machines/', createPayload);
         vmId = createResponse.data.id;
         created = true;
@@ -321,8 +341,29 @@ export class NetBoxAdapter {
 
       return { id: vmId, created };
     } catch (error: any) {
-      console.error('NetBox upsert failed:', error.response?.data || error.message);
-      throw new Error(`Failed to upsert VM: ${error.message}`);
+      // Log detailed error info for debugging
+      const errorDetails = error.response?.data;
+      console.error('NetBox upsert failed:', {
+        vmName: vmData.name,
+        extId,
+        status: error.response?.status,
+        error: errorDetails
+      });
+      
+      // Create a more helpful error message
+      let errorMsg = error.message;
+      if (errorDetails) {
+        if (typeof errorDetails === 'object') {
+          const fieldErrors = Object.entries(errorDetails)
+            .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+            .join('; ');
+          errorMsg = fieldErrors || JSON.stringify(errorDetails);
+        } else {
+          errorMsg = String(errorDetails);
+        }
+      }
+      
+      throw new Error(`Failed to upsert VM: ${errorMsg}`);
     }
   }
 

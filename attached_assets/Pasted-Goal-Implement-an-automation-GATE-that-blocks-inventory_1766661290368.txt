@@ -1,0 +1,314 @@
+Goal: Implement an automation GATE that blocks inventory unless CMDB governance exists, while preserving provider metadata as non-authoritative suggestions for future use.
+
+CONTEXT (READ ONLY)
+
+Existing bridge app codebase (TypeScript)
+
+Providers:
+
+fake.ts
+
+proxmox.ts
+
+CMDB:
+
+NetBox
+
+Platform:
+
+Replit
+
+No UI work required
+
+Fake Proxmox data is acceptable
+
+CORE PRINCIPLE (DO NOT VIOLATE)
+
+Provider metadata may be collected, stored, and shown —
+but must NEVER directly grant automation access.
+
+Provider → suggests
+CMDB → confirms
+Gate → decides
+
+HARD CONSTRAINTS
+
+Providers must not set CMDB governance fields
+
+Providers must not affect gate decisions directly
+
+CMDB governance fields are authoritative
+
+Automation inventory includes only gated-approved VMs
+
+Gate decisions must be explainable
+
+DEFINITIONS
+Observed Asset
+
+Raw provider data describing existence and state.
+
+Provider Hints
+
+Optional metadata from providers that MAY help humans later (e.g. folder, tags).
+
+Governance Attributes (CMDB)
+
+tenant
+
+role
+
+tag automatable
+
+Gate Decision
+
+Allow or block automation based on CMDB governance only.
+
+IMPLEMENTATION TASKS
+TASK 1 — Provider Output Separation
+
+Files:
+
+providers/fake.ts
+
+providers/proxmox.ts
+
+providers/types.ts
+
+Action:
+Providers must return two clearly separated objects:
+
+{
+  observed: {
+    provider_id: string
+    name: string
+    status: string
+    cpu?: number
+    memory?: number
+    last_seen_at: Date
+  },
+  hints?: {
+    provider_tags?: string[]
+    provider_project?: string
+    provider_folder?: string
+  }
+}
+
+
+Rules:
+
+observed is mandatory
+
+hints is optional
+
+hints MUST NOT be used for gate decisions
+
+hints MUST NOT populate NetBox governance fields
+
+TASK 2 — ObservedAsset Model
+
+File:
+
+shared/schema.ts
+
+Define:
+
+export interface ObservedAsset {
+  provider_id: string
+  name: string
+  status: string
+  last_seen_at: Date
+}
+
+
+Do NOT mix hints into this model.
+
+TASK 3 — NetBox Sync (Unconditional)
+
+Files:
+
+provider-sync.ts
+
+syncWorker.ts
+
+netbox-adapter.ts
+
+Action:
+For every ObservedAsset:
+
+Create/update NetBox VM
+
+Set ONLY:
+
+name
+
+status
+
+cluster or site
+
+Explicitly DO NOT set:
+
+tenant
+
+role
+
+tags
+
+TASK 4 — Store Provider Hints (Future Use)
+
+File:
+
+new file provider-hints-store.ts
+
+Action:
+Persist provider hints keyed by VM name or provider ID.
+
+Example:
+
+{
+  vm_name: "vm-01",
+  hints: {
+    provider_tags: ["customer-a", "prod"],
+    provider_project: "cust-a-project"
+  }
+}
+
+
+These hints:
+
+Are read-only
+
+Are NOT authoritative
+
+Are NOT used by the gate
+
+TASK 5 — Gate Evaluation Logic
+
+File:
+
+rules-engine.ts
+
+Add function:
+
+evaluateGate(netboxVm): {
+  allowed: boolean
+  missing: string[]
+}
+
+
+Rules:
+
+tenant exists
+
+role exists
+
+tag automatable exists
+
+Ignore provider hints completely.
+
+TASK 6 — Gate Decision Store
+
+File:
+
+gate-store.ts
+
+Store:
+
+{
+  vm_name: string
+  allowed: boolean
+  missing: string[]
+  evaluated_at: Date
+}
+
+
+Gate decisions MUST be reproducible and inspectable.
+
+TASK 7 — Automation Inventory Generation
+
+Files:
+
+inventory generator
+
+syncWorker.ts
+
+Action:
+Generate automation inventory using:
+
+GateDecision.allowed === true
+
+
+Blocked VMs:
+
+Must never appear
+
+Must never be targetable
+
+TASK 8 — API Endpoints
+
+File:
+
+API router
+
+Create endpoints:
+
+GET /gate/allowed
+
+GET /gate/blocked
+
+GET /gate/hints/:vm_name
+
+Responses must include:
+
+VM name
+
+Gate status
+
+Missing governance fields
+
+Provider hints (read-only)
+
+ACCEPTANCE CRITERIA
+
+Provider metadata is visible but powerless
+
+CMDB governance controls automation
+
+Removing governance data removes automation access
+
+Provider hints do not bypass gate
+
+Gate decisions are explainable via API
+
+NON-GOALS
+
+UI
+
+Auto-approval
+
+Auto-mapping
+
+Multi-tenancy
+
+Workflow engines
+
+FINAL INSTRUCTION
+
+If a VM is automatable without explicit CMDB confirmation, the implementation is incorrect.
+
+WHY THIS MATTERS (FOR FUTURE YOU)
+
+This design lets you later add:
+
+suggestion mapping
+
+one-click confirmation
+
+confidence scoring
+
+approval workflows
+
+without breaking the gate model.
+
+You’re not closing doors —
+you’re making sure the right ones are locked first.

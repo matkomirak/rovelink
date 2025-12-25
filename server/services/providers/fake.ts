@@ -1,4 +1,4 @@
-import { IProviderCollector, TestConnectionResult, NormalizedVm } from "./types";
+import { IProviderCollector, TestConnectionResult, NormalizedVm, ProviderOutput, ObservedAsset, ProviderHints } from "./types";
 
 export interface FakeConfig {
   variant: "proxmox" | "vsphere" | "azure" | "aws";
@@ -89,6 +89,42 @@ export class FakeCollector implements IProviderCollector {
     }
 
     return vms;
+  }
+
+  async listVmsWithHints(): Promise<ProviderOutput[]> {
+    const rng = new SeededRandom(this.config.seed);
+    const outputs: ProviderOutput[] = [];
+
+    for (let i = 0; i < this.config.vms; i++) {
+      const legacyVm = this.generateVm(i, rng);
+      
+      const observed: ObservedAsset = {
+        provider_id: legacyVm.externalId,
+        name: legacyVm.name,
+        provider: legacyVm.provider,
+        status: legacyVm.status || "unknown",
+        last_seen_at: new Date(),
+        primaryIp4: legacyVm.primaryIp4,
+        primaryIp6: legacyVm.primaryIp6,
+        vcpus: legacyVm.vcpus,
+        memory: legacyVm.memory,
+        disk: legacyVm.disk,
+        platform: legacyVm.platform,
+        description: legacyVm.description,
+        site: legacyVm.site,
+      };
+
+      const hints: ProviderHints = {
+        provider_tags: legacyVm.tags,
+        provider_tenant: legacyVm.tenant,
+        provider_role: legacyVm.role,
+        raw: legacyVm.raw,
+      };
+
+      outputs.push({ observed, hints });
+    }
+
+    return outputs;
   }
 
   private generateVm(index: number, rng: SeededRandom): NormalizedVm {

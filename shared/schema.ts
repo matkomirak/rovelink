@@ -551,3 +551,44 @@ export type PipelineRun = typeof pipelineRuns.$inferSelect;
 
 export type InsertAutomationInventory = z.infer<typeof insertAutomationInventorySchema>;
 export type AutomationInventory = typeof automationInventories.$inferSelect;
+
+// Provider Hints - non-authoritative metadata from providers
+// These are stored for future use but MUST NOT affect gate decisions
+export const providerHints = pgTable("provider_hints", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerAccountId: varchar("provider_account_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  vmName: text("vm_name").notNull(),
+  providerId: text("provider_id").notNull(), // External ID from provider
+  hints: jsonb("hints").default({}), // ProviderHints object
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertProviderHintsSchema = createInsertSchema(providerHints).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProviderHints = z.infer<typeof insertProviderHintsSchema>;
+export type ProviderHint = typeof providerHints.$inferSelect;
+
+// Gate Decisions - authoritative decisions based on CMDB governance
+// A VM is only automatable if allowed === true
+export const gateDecisions = pgTable("gate_decisions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vmName: text("vm_name").notNull().unique(),
+  netboxVmId: integer("netbox_vm_id"), // Reference to NetBox VM
+  allowed: boolean("allowed").notNull().default(false),
+  missing: jsonb("missing").default([]), // Array of missing governance fields
+  evaluatedAt: timestamp("evaluated_at").notNull().defaultNow(),
+  cmdbAccountId: varchar("cmdb_account_id"),
+  reason: text("reason"), // Human-readable explanation
+});
+
+export const insertGateDecisionSchema = createInsertSchema(gateDecisions).omit({
+  id: true,
+});
+
+export type InsertGateDecision = z.infer<typeof insertGateDecisionSchema>;
+export type GateDecision = typeof gateDecisions.$inferSelect;

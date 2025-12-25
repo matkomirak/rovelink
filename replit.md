@@ -50,6 +50,21 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - **File Inventory Editor:** Real-time validation and editing of YAML/JSON/INI inventory files.
   - **Refresh Functionality:** Updates group/host counts from live NetBox data.
   - **Preview Data:** Sample hosts and groups displayed in list view for quick inspection.
+  - **Gate Filtering:** VMs must pass governance checks (tenant, role, automatable tag) to be included in automation inventories.
+- **Automation GATE System:** Governance layer ensuring VMs can only be automated when properly governed in CMDB.
+  - **Provider Output Separation:** Provider data split into "observed" (factual VM data) and "hints" (non-authoritative suggestions like tags/tenant from provider). Hints stored but NEVER used to populate governance fields.
+  - **Gate Requirements:** VMs require three governance fields in NetBox to be allowed for automation: (1) tenant assignment, (2) role assignment, (3) "automatable" tag.
+  - **Gate Evaluation:** Batch evaluation of VMs from NetBox CMDB, storing allowed/blocked decisions with missing field details.
+  - **Gate Store:** Persistent storage of gate decisions in `gate_decisions` table.
+  - **Provider Hints Store:** Storage of provider hints in `provider_hints` table for reference (not used for gate decisions).
+  - **Gate API Endpoints:** 
+    - `GET /api/gate/allowed` - List all allowed VMs
+    - `GET /api/gate/blocked` - List all blocked VMs with missing fields
+    - `GET /api/gate/status/:vmName` - Get gate status for specific VM
+    - `GET /api/gate/hints/:vmName` - Get provider hints for specific VM
+    - `POST /api/gate/evaluate` - Trigger gate evaluation for CMDB
+    - `GET /api/gate/summary` - Summary stats with missing field counts
+  - **Inventory Integration:** Automation inventories automatically filter VMs through gate, only including allowed VMs.
 
 **System Design Choices:**
 - **Database Schema:** Designed to support users, projects, credentials, job templates, job runs, notifications, settings, provider accounts, sync runs, external objects, NetBox VM imports, CMDBs, and pipeline-related entities (pipelines, pipeline_mappings, pipeline_runs). Roles include admin, operator, and viewer.

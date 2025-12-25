@@ -1,4 +1,11 @@
-import { IProviderCollector, TestConnectionResult, NormalizedVm, ProviderOutput, ObservedAsset, ProviderHints } from "./types";
+// Providers MUST remain governance-blind.
+// Any logic beyond factual observation is forbidden here.
+// Providers emit raw observed data only - they do NOT know about:
+// - Tenants (governance)
+// - Automation (gate decisions)
+// - Gating (CMDB governance)
+
+import { IProviderCollector, TestConnectionResult, NormalizedVm } from "./types";
 
 export interface FakeConfig {
   variant: "proxmox" | "vsphere" | "azure" | "aws";
@@ -91,41 +98,10 @@ export class FakeCollector implements IProviderCollector {
     return vms;
   }
 
-  async listVmsWithHints(): Promise<ProviderOutput[]> {
-    const rng = new SeededRandom(this.config.seed);
-    const outputs: ProviderOutput[] = [];
-
-    for (let i = 0; i < this.config.vms; i++) {
-      const legacyVm = this.generateVm(i, rng);
-      
-      const observed: ObservedAsset = {
-        provider_id: legacyVm.externalId,
-        name: legacyVm.name,
-        provider: legacyVm.provider,
-        status: legacyVm.status || "unknown",
-        last_seen_at: new Date(),
-        primaryIp4: legacyVm.primaryIp4,
-        primaryIp6: legacyVm.primaryIp6,
-        vcpus: legacyVm.vcpus,
-        memory: legacyVm.memory,
-        disk: legacyVm.disk,
-        platform: legacyVm.platform,
-        description: legacyVm.description,
-        site: legacyVm.site,
-      };
-
-      const hints: ProviderHints = {
-        provider_tags: legacyVm.tags,
-        provider_tenant: legacyVm.tenant,
-        provider_role: legacyVm.role,
-        raw: legacyVm.raw,
-      };
-
-      outputs.push({ observed, hints });
-    }
-
-    return outputs;
-  }
+  // NOTE: listVmsWithHints() was REMOVED.
+  // Providers MUST remain governance-blind.
+  // They emit raw observed data only, with no knowledge of
+  // tenants, automation, or gating concepts.
 
   private generateVm(index: number, rng: SeededRandom): NormalizedVm {
     switch (this.config.variant) {

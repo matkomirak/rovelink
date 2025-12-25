@@ -1,11 +1,10 @@
+// Gate API routes - READ-ONLY endpoints for transparency.
+// Gate evaluation is AUTOMATIC and NON-OPTIONAL.
+// These endpoints exist for observability only, not for triggering evaluation.
+
 import { Router, Request, Response } from "express";
 import { gateStore } from "../services/gate-store";
-import { gateEvaluator } from "../services/gate-evaluator";
 import { providerHintsStore } from "../services/provider-hints-store";
-import { db } from "../db";
-import { cmdbAccounts } from "@shared/schema";
-import { eq } from "drizzle-orm";
-import { NetBoxAdapter } from "../services/netbox-adapter";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -14,6 +13,7 @@ interface AuthRequest extends Request {
 
 const router = Router();
 
+// GET /api/gate/allowed - List all allowed VMs (transparency only)
 router.get("/allowed", async (req: AuthRequest, res: Response) => {
   try {
     const allowed = await gateStore.getAllowedVms();
@@ -32,6 +32,7 @@ router.get("/allowed", async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/gate/blocked - List all blocked VMs with missing fields (transparency only)
 router.get("/blocked", async (req: AuthRequest, res: Response) => {
   try {
     const blocked = await gateStore.getBlockedVms();
@@ -51,6 +52,7 @@ router.get("/blocked", async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/gate/status/:vmName - Get gate status for specific VM (transparency only)
 router.get("/status/:vmName", async (req: AuthRequest, res: Response) => {
   try {
     const { vmName } = req.params;
@@ -76,6 +78,8 @@ router.get("/status/:vmName", async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/gate/hints/:vmName - Get provider hints for specific VM (transparency only)
+// NOTE: Provider hints are NON-AUTHORITATIVE and never affect gate decisions
 router.get("/hints/:vmName", async (req: AuthRequest, res: Response) => {
   try {
     const { vmName } = req.params;
@@ -91,86 +95,25 @@ router.get("/hints/:vmName", async (req: AuthRequest, res: Response) => {
       hints: hints.hints,
       created_at: hints.createdAt,
       updated_at: hints.updatedAt,
+      _warning: "Provider hints are NON-AUTHORITATIVE and do not affect gate decisions",
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }
 });
 
-router.post("/evaluate", async (req: AuthRequest, res: Response) => {
-  try {
-    const userRole = req.user?.role;
-    if (userRole !== "admin" && userRole !== "operator") {
-      return res.status(403).json({ message: "Admin or operator role required" });
-    }
+// POST /api/gate/evaluate - REMOVED
+// Gate evaluation is AUTOMATIC and NON-OPTIONAL.
+// It occurs during inventory generation and NetBox data refresh.
+// Manual triggering is forbidden to prevent the illusion that gating is optional.
 
-    const { cmdb_account_id } = req.body;
-
-    if (!cmdb_account_id) {
-      return res.status(400).json({ message: "cmdb_account_id is required" });
-    }
-
-    const [cmdb] = await db
-      .select()
-      .from(cmdbAccounts)
-      .where(eq(cmdbAccounts.id, cmdb_account_id));
-
-    if (!cmdb) {
-      return res.status(404).json({ message: "CMDB account not found" });
-    }
-
-    if (cmdb.kind !== "netbox") {
-      return res.status(400).json({ message: "Only NetBox CMDBs are supported for gate evaluation" });
-    }
-
-    const adapter = new NetBoxAdapter(cmdb.config as any);
-    const vms = await adapter.listAllVms();
-
-    const results = await gateEvaluator.evaluateBatch(vms, cmdb_account_id);
-
-    let allowedCount = 0;
-    let blockedCount = 0;
-    const blockedVms: Array<{ name: string; missing: string[] }> = [];
-
-    results.forEach((result, vmName) => {
-      if (result.allowed) {
-        allowedCount++;
-      } else {
-        blockedCount++;
-        blockedVms.push({ name: vmName, missing: result.missing });
-      }
-    });
-
-    res.json({
-      total: vms.length,
-      allowed: allowedCount,
-      blocked: blockedCount,
-      blocked_vms: blockedVms.slice(0, 20),
-      message: `Evaluated ${vms.length} VMs. ${allowedCount} allowed, ${blockedCount} blocked.`,
-    });
-  } catch (error: any) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
+// GET /api/gate/summary - Minimal summary stats (transparency only)
 router.get("/summary", async (req: AuthRequest, res: Response) => {
   try {
-    const allowed = await gateStore.getAllowedVms();
-    const blocked = await gateStore.getBlockedVms();
-
-    const missingCounts: Record<string, number> = {};
-    for (const decision of blocked) {
-      const missing = decision.missing as string[];
-      for (const field of missing) {
-        missingCounts[field] = (missingCounts[field] || 0) + 1;
-      }
-    }
-
+    const summary = await gateStore.getSummary();
     res.json({
-      total: allowed.length + blocked.length,
-      allowed: allowed.length,
-      blocked: blocked.length,
-      missing_field_counts: missingCounts,
+      allowed: summary.allowed,
+      blocked: summary.blocked,
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message });

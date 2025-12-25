@@ -1,9 +1,12 @@
-import { db } from "../db";
-import { gateDecisions } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+// WARNING:
+// This store contains DERIVED STATE ONLY.
+// Data here is non-authoritative and may be dropped at any time.
+// Do NOT build business logic that depends on persistence here.
+//
+// Gate decisions are RECOMPUTABLE from CMDB state at any time.
+// Stored decisions are for TRANSPARENCY and EXPLAINABILITY only.
 
 export interface GateDecision {
-  id: string;
   vmName: string;
   netboxVmId?: number;
   allowed: boolean;
@@ -22,88 +25,72 @@ export interface GateEvaluationInput {
   cmdbAccountId?: string;
 }
 
+/**
+ * Ephemeral in-memory gate decision store.
+ * 
+ * Gate decisions are DERIVED from CMDB state and must be recomputable.
+ * This store exists only for transparency - it has NO authority.
+ */
 export class GateStore {
+  // Ephemeral in-memory storage - can be cleared at any time
+  private decisions: Map<string, GateDecision> = new Map();
+
   async storeDecision(decision: Omit<GateDecision, "id">): Promise<GateDecision> {
-    const existing = await db
-      .select()
-      .from(gateDecisions)
-      .where(eq(gateDecisions.vmName, decision.vmName))
-      .limit(1);
-
-    if (existing.length > 0) {
-      const [updated] = await db
-        .update(gateDecisions)
-        .set({
-          allowed: decision.allowed,
-          missing: decision.missing,
-          evaluatedAt: decision.evaluatedAt,
-          netboxVmId: decision.netboxVmId,
-          cmdbAccountId: decision.cmdbAccountId,
-          reason: decision.reason,
-        })
-        .where(eq(gateDecisions.id, existing[0].id))
-        .returning();
-      return updated as GateDecision;
-    }
-
-    const [created] = await db
-      .insert(gateDecisions)
-      .values({
-        vmName: decision.vmName,
-        netboxVmId: decision.netboxVmId,
-        allowed: decision.allowed,
-        missing: decision.missing,
-        evaluatedAt: decision.evaluatedAt,
-        cmdbAccountId: decision.cmdbAccountId,
-        reason: decision.reason,
-      })
-      .returning();
-    return created as GateDecision;
+    const stored: GateDecision = {
+      vmName: decision.vmName,
+      netboxVmId: decision.netboxVmId,
+      allowed: decision.allowed,
+      missing: decision.missing,
+      evaluatedAt: decision.evaluatedAt,
+      cmdbAccountId: decision.cmdbAccountId,
+      reason: decision.reason,
+    };
+    this.decisions.set(decision.vmName, stored);
+    return stored;
   }
 
   async getDecision(vmName: string): Promise<GateDecision | null> {
-    const [decision] = await db
-      .select()
-      .from(gateDecisions)
-      .where(eq(gateDecisions.vmName, vmName))
-      .limit(1);
-    return decision ? (decision as GateDecision) : null;
+    return this.decisions.get(vmName) || null;
   }
 
   async getAllowedVms(): Promise<GateDecision[]> {
-    const decisions = await db
-      .select()
-      .from(gateDecisions)
-      .where(eq(gateDecisions.allowed, true))
-      .orderBy(desc(gateDecisions.evaluatedAt));
-    return decisions as GateDecision[];
+    return Array.from(this.decisions.values())
+      .filter((d) => d.allowed)
+      .sort((a, b) => b.evaluatedAt.getTime() - a.evaluatedAt.getTime());
   }
 
   async getBlockedVms(): Promise<GateDecision[]> {
-    const decisions = await db
-      .select()
-      .from(gateDecisions)
-      .where(eq(gateDecisions.allowed, false))
-      .orderBy(desc(gateDecisions.evaluatedAt));
-    return decisions as GateDecision[];
+    return Array.from(this.decisions.values())
+      .filter((d) => !d.allowed)
+      .sort((a, b) => b.evaluatedAt.getTime() - a.evaluatedAt.getTime());
   }
 
   async getAllDecisions(): Promise<GateDecision[]> {
-    const decisions = await db
-      .select()
-      .from(gateDecisions)
-      .orderBy(desc(gateDecisions.evaluatedAt));
-    return decisions as GateDecision[];
+    return Array.from(this.decisions.values())
+      .sort((a, b) => b.evaluatedAt.getTime() - a.evaluatedAt.getTime());
   }
 
   async deleteDecision(vmName: string): Promise<void> {
-    await db
-      .delete(gateDecisions)
-      .where(eq(gateDecisions.vmName, vmName));
+    this.decisions.delete(vmName);
   }
 
   async deleteAllDecisions(): Promise<void> {
-    await db.delete(gateDecisions);
+    this.decisions.clear();
+  }
+
+  // Get summary statistics - minimal, no preview optimization
+  async getSummary(): Promise<{ allowed: number; blocked: number }> {
+    let allowed = 0;
+    let blocked = 0;
+    const decisions = Array.from(this.decisions.values());
+    for (const decision of decisions) {
+      if (decision.allowed) {
+        allowed++;
+      } else {
+        blocked++;
+      }
+    }
+    return { allowed, blocked };
   }
 }
 

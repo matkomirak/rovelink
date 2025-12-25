@@ -1,0 +1,197 @@
+Objective: Harden the automation GATE implementation by removing premature commitments, enforcing authority boundaries, and eliminating optional or misleading behavior.
+
+ABSOLUTE PRIORITY
+
+The gate must be inescapable, non-optional, and non-bypassable by provider metadata or manual triggers.
+
+Any implementation that weakens this is incorrect.
+
+CORRECTION 1 — REMOVE PERMANENT DATABASE COMMITMENTS
+Problem
+
+Persistent database tables (gate_decisions, provider_hints) were created too early and imply long-term authority.
+
+Instruction
+
+Refactor gate-store and provider-hints-store to be explicitly ephemeral
+
+Use in-memory storage (Map or equivalent)
+
+OR clearly document and code them as cache-only derived state
+
+Add explicit comments in both stores:
+
+// WARNING:
+// This store contains DERIVED STATE ONLY.
+// Data here is non-authoritative and may be dropped at any time.
+// Do NOT build business logic that depends on persistence here.
+
+
+If removing tables is risky, stop writing to them and mark them deprecated.
+
+CORRECTION 2 — REMOVE MANUAL GATE TRIGGERING
+Problem
+
+POST /api/gate/evaluate implies gate evaluation is optional or workflow-driven.
+
+Instruction
+
+Remove or disable manual gate evaluation endpoints
+
+Gate evaluation must occur automatically:
+
+After provider sync
+
+After NetBox data refresh
+
+Add comment in gate evaluator:
+
+// Gate evaluation is AUTOMATIC and NON-OPTIONAL.
+// There must be no execution path that bypasses this check.
+
+CORRECTION 3 — HARDEN PROVIDER DUMBNESS
+Problem
+
+Fake provider was “enhanced” with special methods (listVmsWithHints) that introduce product semantics.
+
+Instruction
+
+Refactor fake provider to:
+
+Emit raw observed data
+
+Emit raw hints as plain metadata
+
+No provider-specific convenience methods
+
+Providers must NOT:
+
+Know about tenants
+
+Know about automation
+
+Know about gating
+
+Add provider-level comment:
+
+// Providers MUST remain governance-blind.
+// Any logic beyond factual observation is forbidden here.
+
+CORRECTION 4 — ADD AN EXPLICIT AUTHORITY GUARDRAIL
+Problem
+
+Nothing explicitly prevents provider hints from being used to satisfy gate requirements in the future.
+
+Instruction
+
+In evaluateGate() or equivalent:
+
+Explicitly ignore provider hints
+
+Log or throw if hints are passed accidentally
+
+Example:
+
+if (providerHintsUsed) {
+  throw new Error("SECURITY VIOLATION: Provider hints must not affect gate decisions");
+}
+
+
+Add a comment block explaining:
+
+// Governance authority resides EXCLUSIVELY in the CMDB.
+// Provider metadata may only suggest, never confirm intent.
+
+CORRECTION 5 — REFRAME GATE DECISIONS AS DERIVED, NOT STATEFUL
+Problem
+
+Gate decisions feel like stored facts rather than computed outcomes.
+
+Instruction
+
+Treat gate decisions as:
+
+Recomputable
+
+Derived from NetBox state
+
+If stored:
+
+Store only for explainability
+
+Never for logic branching
+
+Add invariant comment:
+
+// Gate decisions must always be reproducible from CMDB state.
+// Stored decisions are for transparency only.
+
+CORRECTION 6 — REMOVE “PREVIEW” OPTIMIZATION BIAS
+Problem
+
+Gate statistics and previews risk prioritizing visibility over correctness.
+
+Instruction
+
+Keep gate stats minimal:
+
+Allowed count
+
+Blocked count
+
+Remove any logic that:
+
+Optimizes for UI
+
+Adds complexity not needed for enforcement
+
+CORRECTION 7 — ADD ONE NON-NEGOTIABLE INVARIANT CHECK
+Problem
+
+No single, explicit invariant enforces the gate’s authority.
+
+Instruction
+
+Add a single invariant check during inventory generation:
+
+if (vmInInventory && !gateDecision.allowed) {
+  throw new Error("INVARIANT VIOLATION: Blocked VM in automation inventory");
+}
+
+
+This must crash or loudly log in development mode.
+
+This is your tripwire.
+
+CORRECTION 8 — DOCUMENT FUTURE MAPPING AS NON-BINDING
+Problem
+
+Future provider → CMDB mapping is not clearly framed as suggestion-only.
+
+Instruction
+
+Add a comment or README section:
+
+Provider-to-CMDB mapping (future feature):
+- May pre-fill governance fields
+- Must require explicit human confirmation
+- Must never automatically grant automation access
+
+
+Do NOT implement mapping now.
+
+ACCEPTANCE CRITERIA (MANDATORY)
+
+Gate evaluation cannot be skipped
+
+Provider hints cannot grant automation access
+
+Removing CMDB governance immediately removes automation access
+
+No manual approval endpoints exist
+
+Inventory generation fails loudly on violations
+
+FINAL INSTRUCTION TO AGENT
+
+If any code path allows automation without CMDB-confirmed governance, the task has failed and must be corrected.

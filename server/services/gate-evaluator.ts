@@ -1,3 +1,22 @@
+// Gate evaluation is AUTOMATIC and NON-OPTIONAL.
+// There must be no execution path that bypasses this check.
+//
+// Governance authority resides EXCLUSIVELY in the CMDB.
+// Provider metadata may only suggest, never confirm intent.
+//
+// Gate decisions must always be reproducible from CMDB state.
+// Stored decisions are for transparency only.
+//
+// ================================================================
+// FUTURE PROVIDER-TO-CMDB MAPPING (NOT YET IMPLEMENTED):
+// ================================================================
+// When implemented, provider-to-CMDB mapping:
+// - May pre-fill governance fields (tenant, role, tags)
+// - Must require explicit human confirmation
+// - Must never automatically grant automation access
+// - Should be clearly labeled as "suggestions" in the UI
+// ================================================================
+
 import { gateStore, GateEvaluationInput } from "./gate-store";
 
 export interface GateEvaluationResult {
@@ -14,20 +33,46 @@ export interface NetBoxVmForGate {
   tags?: Array<{ name: string } | string>;
 }
 
+/**
+ * Gate Evaluator - determines if VMs are allowed for automation.
+ * 
+ * INVARIANTS:
+ * 1. Gate evaluation CANNOT be skipped
+ * 2. Provider hints CANNOT grant automation access
+ * 3. Removing CMDB governance immediately removes automation access
+ * 4. Gate decisions are DERIVED from CMDB state, not stored state
+ */
 export class GateEvaluator {
-  evaluateGate(netboxVm: NetBoxVmForGate): GateEvaluationResult {
+  /**
+   * Evaluate gate requirements for a single VM.
+   * 
+   * SECURITY: This method ONLY accepts CMDB data (NetBox VM).
+   * Provider hints are EXPLICITLY FORBIDDEN as input.
+   * 
+   * @param netboxVm - VM data from CMDB (NetBox) ONLY
+   * @param providerHintsUsed - MUST be false, throws if true
+   */
+  evaluateGate(netboxVm: NetBoxVmForGate, providerHintsUsed: boolean = false): GateEvaluationResult {
+    // SECURITY GUARDRAIL: Explicitly reject provider hints
+    if (providerHintsUsed) {
+      throw new Error("SECURITY VIOLATION: Provider hints must not affect gate decisions");
+    }
+
     const missing: string[] = [];
 
+    // Check tenant - MUST come from CMDB only
     const tenantName = this.extractName(netboxVm.tenant);
     if (!tenantName) {
       missing.push("tenant");
     }
 
+    // Check role - MUST come from CMDB only
     const roleName = this.extractName(netboxVm.role);
     if (!roleName) {
       missing.push("role");
     }
 
+    // Check automatable tag - MUST come from CMDB only
     const hasAutomatableTag = this.hasTag(netboxVm.tags, "automatable");
     if (!hasAutomatableTag) {
       missing.push("tag:automatable");
@@ -45,12 +90,18 @@ export class GateEvaluator {
     return { allowed, missing, reason };
   }
 
+  /**
+   * Evaluate and store decision for transparency.
+   * Storage is ephemeral and for explainability only.
+   */
   async evaluateAndStore(
     netboxVm: NetBoxVmForGate,
     cmdbAccountId?: string
   ): Promise<GateEvaluationResult> {
-    const result = this.evaluateGate(netboxVm);
+    // Evaluate gate - never pass provider hints
+    const result = this.evaluateGate(netboxVm, false);
 
+    // Store for transparency only - this is derived state
     await gateStore.storeDecision({
       vmName: netboxVm.name,
       netboxVmId: netboxVm.id,
@@ -64,6 +115,10 @@ export class GateEvaluator {
     return result;
   }
 
+  /**
+   * Evaluate a batch of VMs from CMDB.
+   * Gate evaluation is AUTOMATIC during inventory generation.
+   */
   async evaluateBatch(
     vms: NetBoxVmForGate[],
     cmdbAccountId?: string

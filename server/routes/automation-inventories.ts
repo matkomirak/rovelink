@@ -145,6 +145,17 @@ router.post("/", async (req: AuthRequest, res: Response) => {
         
         const blockedCount = vms.length - allowedVms.length;
         console.log(`Gate filtering: ${allowedVms.length} allowed, ${blockedCount} blocked of ${vms.length} total VMs`);
+        
+        // INVARIANT CHECK: Verify no blocked VMs made it through
+        // This is our tripwire - if this fires, something is seriously wrong
+        for (const vm of allowedVms) {
+          const result = gateResults.get(vm.name);
+          if (!result || !result.allowed) {
+            const errorMsg = `INVARIANT VIOLATION: Blocked VM "${vm.name}" in automation inventory`;
+            console.error(errorMsg);
+            throw new Error(errorMsg);
+          }
+        }
 
         // Build full groups and hosts structure for caching
         const groupsMap = new Map<string, Set<string>>();
@@ -244,8 +255,8 @@ router.post("/", async (req: AuthRequest, res: Response) => {
                 ip: vm.primary_ip4?.address?.split('/')[0] || '',
                 status: vm.status?.value || vm.status || '',
               })),
+              // Minimal gate stats - no preview optimization bias
               gateStats: {
-                total: vms.length,
                 allowed: allowedVms.length,
                 blocked: blockedCount,
               },
@@ -446,6 +457,17 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     
     const blockedCount = vms.length - allowedVms.length;
     console.log(`Gate filtering (refresh): ${allowedVms.length} allowed, ${blockedCount} blocked of ${vms.length} total VMs`);
+    
+    // INVARIANT CHECK: Verify no blocked VMs made it through
+    // This is our tripwire - if this fires, something is seriously wrong
+    for (const vm of allowedVms) {
+      const result = gateResults.get(vm.name);
+      if (!result || !result.allowed) {
+        const errorMsg = `INVARIANT VIOLATION: Blocked VM "${vm.name}" in automation inventory`;
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+    }
 
     // Build full groups and hosts structure for caching
     const groupsMap = new Map<string, Set<string>>();
@@ -545,8 +567,8 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
             ip: vm.primary_ip4?.address?.split('/')[0] || '',
             status: vm.status?.value || vm.status || '',
           })),
+          // Minimal gate stats - no preview optimization bias
           gateStats: {
-            total: vms.length,
             allowed: allowedVms.length,
             blocked: blockedCount,
           },

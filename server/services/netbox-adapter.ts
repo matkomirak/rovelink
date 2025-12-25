@@ -709,4 +709,93 @@ export class NetBoxAdapter {
       throw new Error(`Failed to list VMs: ${error.message}`);
     }
   }
+
+  /**
+   * Check if adapter has write access to NetBox.
+   * Used to determine if block reasons can be written.
+   */
+  hasWriteAccess(): boolean {
+    // For now, assume we don't have write access unless explicitly configured
+    // In production, this would check token permissions
+    return false;
+  }
+
+  /**
+   * Update VM block status in NetBox (informational only).
+   * 
+   * This data is INFORMATIONAL ONLY.
+   * Gate logic must NEVER read these fields.
+   * Overwrites on every gate evaluation.
+   * 
+   * @param vmName - The VM name to update
+   * @param blockStatus - Block status information
+   */
+  async updateVmBlockStatus(
+    vmName: string,
+    blockStatus: { tag: string; reason: string; missingFields: string[] }
+  ): Promise<void> {
+    try {
+      // Find VM by name
+      const response = await this.client.get('/virtualization/virtual-machines/', {
+        params: { name: vmName }
+      });
+
+      if (!response.data.results || response.data.results.length === 0) {
+        console.warn(`VM not found in NetBox for block status update: ${vmName}`);
+        return;
+      }
+
+      const vm = response.data.results[0];
+      const vmId = vm.id;
+
+      // Get or create the automation-blocked tag
+      const tagId = await this.getOrCreateTag(blockStatus.tag);
+
+      // Update VM with tag and custom field
+      const existingTags = vm.tags?.map((t: any) => t.id || t) || [];
+      const tagSet = new Set([...existingTags, tagId]);
+      const newTags = Array.from(tagSet);
+
+      await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, {
+        tags: newTags,
+        custom_fields: {
+          ...vm.custom_fields,
+          automation_block_reason: blockStatus.reason,
+        },
+      });
+
+      console.log(`Updated block status in NetBox for VM: ${vmName}`);
+    } catch (error: any) {
+      console.warn(`Failed to update block status for ${vmName}: ${error.message}`);
+      // Non-fatal - just log and continue
+    }
+  }
+
+  /**
+   * Get or create a tag by name
+   */
+  private async getOrCreateTag(tagName: string): Promise<number> {
+    try {
+      // Check if tag exists
+      const response = await this.client.get('/extras/tags/', {
+        params: { name: tagName }
+      });
+
+      if (response.data.results && response.data.results.length > 0) {
+        return response.data.results[0].id;
+      }
+
+      // Create tag
+      const createResponse = await this.client.post('/extras/tags/', {
+        name: tagName,
+        slug: tagName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        color: 'f44336', // Red color for blocked
+      });
+
+      return createResponse.data.id;
+    } catch (error: any) {
+      console.warn(`Failed to get/create tag ${tagName}: ${error.message}`);
+      throw error;
+    }
+  }
 }

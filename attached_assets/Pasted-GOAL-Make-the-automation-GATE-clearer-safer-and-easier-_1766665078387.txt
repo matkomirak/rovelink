@@ -1,0 +1,140 @@
+GOAL
+
+Make the automation GATE clearer, safer, and easier to reason about without adding features.
+
+1. Make Gate Evaluation a First-Class Phase
+
+Do this:
+
+Create a new file:
+
+server/services/gate-phase.ts
+
+
+Move all logic that:
+
+fetches NetBox VMs
+
+evaluates gate rules
+
+populates the gate store
+into a single exported function:
+
+export async function runGatePhase()
+
+
+Rules:
+
+syncWorker must call runGatePhase() explicitly
+
+Inventory generation must ONLY read gate results
+
+Inventory generation must NEVER evaluate gates
+
+2. Enforce Stable Internal Asset Identity
+
+Do this:
+
+Create ONE helper function:
+
+deriveAssetId(providerId: string, vmName: string): string
+
+
+Use asset_id as the key for:
+
+gate decisions
+
+provider hints
+
+inventory inclusion
+
+Rules:
+
+VM names are display-only
+
+No map or store may be keyed by VM name
+
+3. Make Blocked State Visible in NetBox
+
+Do this:
+
+When a VM is blocked by the gate:
+
+Add NetBox tag: automation-blocked
+
+Add/update custom field: automation_block_reason
+
+Rules:
+
+This data is informational only
+
+Gate logic must NEVER read these fields
+
+Overwrite on every gate evaluation
+
+4. Separate Fatal vs Non-Fatal Gate Failures
+
+Do this:
+
+Treat these as fatal errors (crash / loud log):
+
+blocked VM appears in automation inventory
+
+provider hints used in gate logic
+
+Treat these as normal blocks:
+
+missing tenant
+
+missing role
+
+missing automatable tag
+
+5. Add One Architecture Anchor File
+
+Do this:
+
+Create file:
+
+server/ARCHITECTURE.md
+
+
+Content (short):
+
+Automation inventory = permission, not reality
+
+Provider metadata is suggestive, never authoritative
+
+Gate refusal is a success condition
+
+No more than 1 page.
+
+6. Do NOT Add Anything Else
+
+Explicitly do NOT implement:
+
+UI
+
+provider → CMDB auto-mapping
+
+approval workflows
+
+multi-tenancy
+
+RBAC
+
+metrics dashboards
+
+ACCEPTANCE CHECK
+
+This must be true:
+
+A VM without CMDB governance never appears in automation inventory
+
+Removing governance immediately removes automation access
+
+Provider data cannot bypass the gate
+
+Block reasons are visible in NetBox
+
+Gate logic runs as its own explicit phase

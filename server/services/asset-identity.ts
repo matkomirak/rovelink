@@ -1,49 +1,32 @@
-// asset_id is the stable internal identity.
-// VM names are NOT trusted identifiers.
+// ================================================================
+// ASSET IDENTITY - Stable Internal Identity
+// ================================================================
 //
-// asset_id is a deterministic composite of source and external identity.
-// This prepares the system for real providers with mutable VM names.
+// asset_id is the stable internal identity.
+// VM names are display-only, NOT trusted identifiers.
+//
+// Use asset_id as the key for:
+// - gate decisions
+// - provider hints
+// - inventory inclusion
+//
+// No map or store may be keyed by VM name.
+//
+// ================================================================
 
 import { createHash } from "crypto";
 
 /**
- * Generate a stable asset_id from source and external identifier.
+ * Derive a stable asset_id from provider and VM name.
  * 
- * The asset_id is a deterministic hash that:
- * - Survives VM name changes
- * - Prevents name collisions across providers
- * - Provides stable internal identity for gate decisions
+ * This is the ONE helper function for asset identity.
+ * All gate, hint, and inventory logic must use this.
  * 
- * @param source - The source system (e.g., "netbox", "proxmox", "vsphere")
- * @param externalId - The external identifier (provider VM ID or name if ID unavailable)
- * @returns Stable asset_id hash
+ * @param providerId - The provider/CMDB identifier (e.g., CMDB account ID)
+ * @param vmName - The VM name (used only because VM ID may not always be available)
+ * @returns Stable asset_id hash (16 hex characters)
  */
-export function generateAssetId(source: string, externalId: string | number): string {
-  const composite = `${source}:${externalId}`;
+export function deriveAssetId(providerId: string, vmName: string): string {
+  const composite = `${providerId}:${vmName}`;
   return createHash("sha256").update(composite).digest("hex").substring(0, 16);
-}
-
-/**
- * Generate asset_id from CMDB (NetBox) VM data.
- * Prefers NetBox VM ID, falls back to name if ID unavailable.
- */
-export function assetIdFromNetBox(vmId?: number, vmName?: string): string {
-  if (vmId) {
-    return generateAssetId("netbox", vmId);
-  }
-  if (vmName) {
-    return generateAssetId("netbox", vmName);
-  }
-  throw new Error("Cannot generate asset_id: both vmId and vmName are empty");
-}
-
-/**
- * Generate asset_id from provider data.
- * Each provider should have its own ID generation logic.
- */
-export function assetIdFromProvider(
-  providerId: string,
-  providerVmId: string | number
-): string {
-  return generateAssetId(providerId, providerVmId);
 }

@@ -24,7 +24,7 @@
 // ================================================================
 
 import { gateStore, GateDecision } from "./gate-store";
-import { assetIdFromNetBox } from "./asset-identity";
+import { deriveAssetId } from "./asset-identity";
 import { GATE_DESIGN_PRINCIPLE, GATE_INVARIANTS } from "./gate-design-principle";
 
 // Re-export GATE_DESIGN_PRINCIPLE for consumers
@@ -78,8 +78,9 @@ export class GateEvaluator {
       throw new Error("INVARIANT VIOLATION: Provider hints must not affect gate decisions");
     }
 
-    // Generate stable asset_id
-    const assetId = assetIdFromNetBox(netboxVm.id, netboxVm.name);
+    // Generate stable asset_id using VM name (ID may not always be available)
+    // Note: Callers should use deriveAssetId directly when cmdbAccountId is known
+    const assetId = deriveAssetId("netbox", netboxVm.name);
     
     const missing: string[] = [];
 

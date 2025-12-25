@@ -5,18 +5,26 @@
 //
 // Gate decisions are RECOMPUTABLE from CMDB state at any time.
 // Stored decisions are for TRANSPARENCY and EXPLAINABILITY only.
+//
+// Gate evaluation is a FIRST-CLASS PHASE.
+// Inventory generation must never implicitly re-evaluate gates.
+
+import { GATE_DESIGN_PRINCIPLE } from "./gate-design-principle";
 
 export interface GateDecision {
-  vmName: string;
+  assetId: string;           // Stable internal identity - NOT vm name
+  vmName: string;            // Display only - NOT authoritative
   netboxVmId?: number;
   allowed: boolean;
   missing: string[];
   evaluatedAt: Date;
   cmdbAccountId?: string;
   reason?: string;
+  failureType?: "governance" | "invariant"; // Classification of failure
 }
 
 export interface GateEvaluationInput {
+  assetId: string;
   vmName: string;
   netboxVmId?: number;
   tenant?: string | null;
@@ -30,13 +38,21 @@ export interface GateEvaluationInput {
  * 
  * Gate decisions are DERIVED from CMDB state and must be recomputable.
  * This store exists only for transparency - it has NO authority.
+ * 
+ * KEY: Uses asset_id (stable identity), not vm name.
  */
 export class GateStore {
   // Ephemeral in-memory storage - can be cleared at any time
+  // Keyed by asset_id for stable identity
   private decisions: Map<string, GateDecision> = new Map();
+  
+  // Track when gates were last evaluated (for first-class phase tracking)
+  private lastEvaluationTime: Date | null = null;
+  private evaluationComplete: boolean = false;
 
   async storeDecision(decision: Omit<GateDecision, "id">): Promise<GateDecision> {
     const stored: GateDecision = {
+      assetId: decision.assetId,
       vmName: decision.vmName,
       netboxVmId: decision.netboxVmId,
       allowed: decision.allowed,
@@ -44,13 +60,26 @@ export class GateStore {
       evaluatedAt: decision.evaluatedAt,
       cmdbAccountId: decision.cmdbAccountId,
       reason: decision.reason,
+      failureType: decision.failureType,
     };
-    this.decisions.set(decision.vmName, stored);
+    // Key by asset_id for stable identity
+    this.decisions.set(decision.assetId, stored);
     return stored;
   }
 
-  async getDecision(vmName: string): Promise<GateDecision | null> {
-    return this.decisions.get(vmName) || null;
+  async getDecision(assetId: string): Promise<GateDecision | null> {
+    return this.decisions.get(assetId) || null;
+  }
+
+  async getDecisionByVmName(vmName: string): Promise<GateDecision | null> {
+    // Fallback lookup by VM name (less reliable but useful for API)
+    const allDecisions = Array.from(this.decisions.values());
+    for (const decision of allDecisions) {
+      if (decision.vmName === vmName) {
+        return decision;
+      }
+    }
+    return null;
   }
 
   async getAllowedVms(): Promise<GateDecision[]> {
@@ -70,12 +99,13 @@ export class GateStore {
       .sort((a, b) => b.evaluatedAt.getTime() - a.evaluatedAt.getTime());
   }
 
-  async deleteDecision(vmName: string): Promise<void> {
-    this.decisions.delete(vmName);
+  async deleteDecision(assetId: string): Promise<void> {
+    this.decisions.delete(assetId);
   }
 
   async deleteAllDecisions(): Promise<void> {
     this.decisions.clear();
+    this.evaluationComplete = false;
   }
 
   // Get summary statistics - minimal, no preview optimization
@@ -91,6 +121,22 @@ export class GateStore {
       }
     }
     return { allowed, blocked };
+  }
+
+  // Mark gate evaluation as complete (first-class phase tracking)
+  markEvaluationComplete(): void {
+    this.lastEvaluationTime = new Date();
+    this.evaluationComplete = true;
+  }
+
+  // Check if gate evaluation has been completed
+  isEvaluationComplete(): boolean {
+    return this.evaluationComplete;
+  }
+
+  // Get last evaluation time
+  getLastEvaluationTime(): Date | null {
+    return this.lastEvaluationTime;
   }
 }
 

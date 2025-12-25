@@ -4,7 +4,9 @@ import { automationInventories, cmdbAccounts, type AutomationInventory, type Ins
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
-import { gateEvaluator } from "../services/gate-evaluator";
+import { gateEvaluator, GATE_DESIGN_PRINCIPLE } from "../services/gate-evaluator";
+import { gateStore } from "../services/gate-store";
+import { assetIdFromNetBox } from "../services/asset-identity";
 
 // Auth request type
 interface AuthRequest extends Request {
@@ -134,13 +136,23 @@ router.post("/", async (req: AuthRequest, res: Response) => {
           });
         }
 
-        // Evaluate gate decisions for all VMs
-        const gateResults = await gateEvaluator.evaluateBatch(vms, cmdb.id);
+        // ================================================================
+        // FIRST-CLASS GATE EVALUATION PHASE
+        // Gate evaluation runs BEFORE inventory generation.
+        // Inventory generation must ONLY read from gate store.
+        // ================================================================
+        await gateEvaluator.evaluateAllGates(vms, cmdb.id);
+        
+        // Read gate decisions from store - NEVER trigger evaluation here
+        // This is the decoupled read phase
+        const gateDecisions = await gateEvaluator.readGateDecisions();
+        const gateResultsByAssetId = new Map(gateDecisions.map(d => [d.assetId, d]));
         
         // Filter VMs through gate - only include allowed VMs
         const allowedVms = vms.filter((vm: any) => {
-          const result = gateResults.get(vm.name);
-          return result?.allowed === true;
+          const assetId = assetIdFromNetBox(vm.id, vm.name);
+          const decision = gateResultsByAssetId.get(assetId);
+          return decision?.allowed === true;
         });
         
         const blockedCount = vms.length - allowedVms.length;
@@ -149,9 +161,10 @@ router.post("/", async (req: AuthRequest, res: Response) => {
         // INVARIANT CHECK: Verify no blocked VMs made it through
         // This is our tripwire - if this fires, something is seriously wrong
         for (const vm of allowedVms) {
-          const result = gateResults.get(vm.name);
-          if (!result || !result.allowed) {
-            const errorMsg = `INVARIANT VIOLATION: Blocked VM "${vm.name}" in automation inventory`;
+          const assetId = assetIdFromNetBox(vm.id, vm.name);
+          const decision = gateResultsByAssetId.get(assetId);
+          if (!decision || !decision.allowed) {
+            const errorMsg = `INVARIANT VIOLATION: Blocked VM "${vm.name}" (asset_id: ${assetId}) in automation inventory`;
             console.error(errorMsg);
             throw new Error(errorMsg);
           }
@@ -446,13 +459,22 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     const adapter = new NetBoxAdapter(cmdb.config as any);
     const vms = await adapter.listAllVms();
 
-    // Evaluate gate decisions for all VMs
-    const gateResults = await gateEvaluator.evaluateBatch(vms, cmdb.id);
+    // ================================================================
+    // FIRST-CLASS GATE EVALUATION PHASE (REFRESH)
+    // Gate evaluation runs BEFORE inventory generation.
+    // Inventory generation must ONLY read from gate store.
+    // ================================================================
+    await gateEvaluator.evaluateAllGates(vms, cmdb.id);
+    
+    // Read gate decisions from store - NEVER trigger evaluation here
+    const gateDecisions = await gateEvaluator.readGateDecisions();
+    const gateResultsByAssetId = new Map(gateDecisions.map(d => [d.assetId, d]));
     
     // Filter VMs through gate - only include allowed VMs
     const allowedVms = vms.filter((vm: any) => {
-      const result = gateResults.get(vm.name);
-      return result?.allowed === true;
+      const assetId = assetIdFromNetBox(vm.id, vm.name);
+      const decision = gateResultsByAssetId.get(assetId);
+      return decision?.allowed === true;
     });
     
     const blockedCount = vms.length - allowedVms.length;
@@ -461,9 +483,10 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     // INVARIANT CHECK: Verify no blocked VMs made it through
     // This is our tripwire - if this fires, something is seriously wrong
     for (const vm of allowedVms) {
-      const result = gateResults.get(vm.name);
-      if (!result || !result.allowed) {
-        const errorMsg = `INVARIANT VIOLATION: Blocked VM "${vm.name}" in automation inventory`;
+      const assetId = assetIdFromNetBox(vm.id, vm.name);
+      const decision = gateResultsByAssetId.get(assetId);
+      if (!decision || !decision.allowed) {
+        const errorMsg = `INVARIANT VIOLATION: Blocked VM "${vm.name}" (asset_id: ${assetId}) in automation inventory`;
         console.error(errorMsg);
         throw new Error(errorMsg);
       }

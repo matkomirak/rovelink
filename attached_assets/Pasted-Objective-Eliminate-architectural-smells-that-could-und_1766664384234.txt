@@ -1,0 +1,218 @@
+Objective: Eliminate architectural smells that could undermine trust, without expanding scope or weakening the automation gate.
+
+SMELL 1 — Gate Evaluation Is Coupled to Inventory Generation
+Why this is dangerous
+
+Right now, the mental model is:
+
+“Gate runs when inventory runs”
+
+That creates:
+
+temporal ambiguity
+
+debugging confusion
+
+future bypass risks
+
+The gate must be conceptually first-class, even if implementation stays simple.
+
+✅ CORRECTION 1 — Make Gate Evaluation an Explicit Phase (Still Automatic)
+Instruction
+
+Introduce a function explicitly named:
+
+evaluateAllGates()
+
+
+This function must:
+
+Fetch all relevant NetBox VMs
+
+Evaluate gate rules
+
+Populate the ephemeral gate store
+
+Call evaluateAllGates():
+
+During sync
+
+BEFORE inventory generation
+
+Inventory generation must:
+
+ONLY read from gate store
+
+NEVER trigger gate evaluation itself
+
+Guardrail (mandatory)
+
+Add a comment:
+
+// Gate evaluation is a FIRST-CLASS PHASE.
+// Inventory generation must never implicitly re-evaluate gates.
+
+
+This removes ambiguity without adding complexity.
+
+SMELL 2 — VM Identity Is Too Implicit (Name-Based)
+Why this is dangerous
+
+Names:
+
+are mutable
+
+collide
+
+lie
+
+Even in a POC, you want the concept of stable identity.
+
+✅ CORRECTION 2 — Introduce a Logical Asset ID (Not Provider-Specific)
+Instruction
+
+Define an internal asset_id:
+
+asset_id = hash(provider_id + vm_name)
+
+
+(or any deterministic composite)
+
+Use asset_id internally for:
+
+gate decisions
+
+provider hints
+
+inventory inclusion
+
+VM name remains:
+
+display-only
+
+never authoritative
+
+Guardrail
+
+Add a comment:
+
+// asset_id is the stable internal identity.
+// VM names are NOT trusted identifiers.
+
+
+This prepares you for real providers later.
+
+SMELL 3 — Human Feedback Loop Is Invisible
+Why this matters
+
+Right now, the system blocks correctly — but humans have to hunt for why.
+
+This is acceptable for engineering, but even MSP engineers will push back.
+
+You do not need UI.
+
+✅ CORRECTION 3 — Write Block Reasons Back to NetBox (Non-Governing)
+Instruction
+
+For blocked VMs, update NetBox with:
+
+a custom field or
+
+a tag like automation-blocked
+
+Include block reason text:
+
+missing tenant
+
+missing role
+
+missing automatable tag
+
+This data must be:
+
+informational only
+
+NOT used for gate evaluation
+
+overwritten on each evaluation
+
+Guardrail
+
+Add comment:
+
+// Block reason sync-back is informational only.
+// NetBox remains the source of governance, not of gate decisions.
+
+
+This creates a human-visible feedback loop without weakening authority.
+
+SMELL 4 — Gate Evaluation Errors Are Too “Developer-Centric”
+Why this matters
+
+Crashing is good for invariants — but some failures should be diagnosable, not fatal.
+
+✅ CORRECTION 4 — Classify Gate Failures
+Instruction
+
+Define two categories:
+
+Invariant violations
+
+Blocked VM in inventory
+
+Provider hints used for governance
+→ Hard error / crash
+
+Governance failures
+
+Missing tenant
+
+Missing role
+
+Missing tag
+→ Normal block, visible, non-fatal
+
+Implement this distinction explicitly in code.
+
+SMELL 5 — No Explicit “Why This Exists” Anchor
+
+This is subtle but critical.
+
+Future-you (or future AI) will refactor this unless intent is anchored.
+
+✅ CORRECTION 5 — Add a Non-Negotiable Design Comment
+Instruction
+
+Create a short file or header comment, e.g.:
+
+/*
+AUTOMATION GATE DESIGN PRINCIPLE
+
+Automation inventory represents PERMISSION, not reality.
+
+If an asset is not explicitly governed and accountable,
+it must not be automatable — even if it exists.
+
+Any code change that weakens this principle is incorrect.
+*/
+
+
+Place it somewhere central (rules engine or sync worker).
+
+This is not fluff — it is architectural self-defense.
+
+ACCEPTANCE CRITERIA (ALL MUST HOLD)
+
+Gate evaluation is explicit and first-class
+
+Inventory generation never evaluates gates
+
+Stable internal asset identity exists
+
+Block reasons are visible to humans via NetBox
+
+Invariant violations crash loudly
+
+Governance failures block silently but visibly
+
+No provider data can bypass CMDB governance

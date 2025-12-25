@@ -53,19 +53,27 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - **Gate Filtering:** VMs must pass governance checks (tenant, role, automatable tag) to be included in automation inventories.
 - **Automation GATE System:** Governance layer ensuring VMs can only be automated when properly governed in CMDB.
   - **Inescapable Gate:** Gate evaluation is AUTOMATIC and NON-OPTIONAL - there is no execution path that bypasses this check.
+  - **First-Class Phase:** Gate evaluation is an EXPLICIT PHASE that runs BEFORE inventory generation. Inventory generation ONLY reads from gate store, never triggers evaluation.
   - **Provider Governance Blindness:** Providers emit raw observed data only - they have NO knowledge of tenants, automation, or gating concepts.
   - **CMDB Authority:** Governance authority resides EXCLUSIVELY in the CMDB. Provider metadata may only suggest, never confirm intent.
   - **Gate Requirements:** VMs require three governance fields in NetBox to be allowed for automation: (1) tenant assignment, (2) role assignment, (3) "automatable" tag.
+  - **Stable Asset Identity:** Uses `asset_id` (deterministic hash of source + external ID) as stable internal identity. VM names are display-only, NOT trusted identifiers.
   - **Ephemeral State:** Gate decisions and provider hints are stored in ephemeral in-memory storage (derived state only, can be dropped at any time).
-  - **Security Guardrail:** Gate evaluator explicitly rejects provider hints - throws SECURITY VIOLATION if hints are passed.
+  - **Failure Classification:** 
+    - INVARIANT VIOLATIONS (crash): blocked VM in inventory, provider hints used for governance
+    - GOVERNANCE FAILURES (block): missing tenant/role/tag - visible, non-fatal
+  - **Security Guardrail:** Gate evaluator explicitly rejects provider hints - throws INVARIANT VIOLATION if hints are passed.
   - **Invariant Check:** Inventory generation includes a tripwire that crashes if a blocked VM ever appears in an automation inventory.
+  - **Human Feedback Loop:** Block reasons can be synced back to NetBox as informational tags/fields. Sync-back is INFORMATIONAL ONLY - not used for gate decisions.
   - **Gate API Endpoints (Read-Only for Transparency):** 
-    - `GET /api/gate/allowed` - List all allowed VMs
-    - `GET /api/gate/blocked` - List all blocked VMs with missing fields
+    - `GET /api/gate/allowed` - List all allowed VMs with asset_id
+    - `GET /api/gate/blocked` - List all blocked VMs with missing fields and failure_type
     - `GET /api/gate/status/:vmName` - Get gate status for specific VM
     - `GET /api/gate/hints/:vmName` - Get provider hints for specific VM (with warning that hints are non-authoritative)
-    - `GET /api/gate/summary` - Minimal summary stats (allowed/blocked counts only)
+    - `GET /api/gate/summary` - Summary stats with last evaluation time
+    - `POST /api/gate/sync-blocks` - Sync block reasons to NetBox for human visibility (admin only)
   - **Inventory Integration:** Automation inventories automatically filter VMs through gate, only including allowed VMs.
+  - **Design Principle Anchor:** See `server/services/gate-design-principle.ts` for architectural intent documentation.
   - **Future Mapping (Not Implemented):** Provider-to-CMDB mapping, when implemented, may pre-fill governance fields but MUST require explicit human confirmation and never automatically grant automation access.
 
 **System Design Choices:**

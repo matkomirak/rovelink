@@ -4,6 +4,7 @@ import { automationInventories, cmdbAccounts, type AutomationInventory, type Ins
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
+import { gateEvaluator } from "../services/gate-evaluator";
 
 // Auth request type
 interface AuthRequest extends Request {
@@ -133,11 +134,23 @@ router.post("/", async (req: AuthRequest, res: Response) => {
           });
         }
 
+        // Evaluate gate decisions for all VMs
+        const gateResults = await gateEvaluator.evaluateBatch(vms, cmdb.id);
+        
+        // Filter VMs through gate - only include allowed VMs
+        const allowedVms = vms.filter((vm: any) => {
+          const result = gateResults.get(vm.name);
+          return result?.allowed === true;
+        });
+        
+        const blockedCount = vms.length - allowedVms.length;
+        console.log(`Gate filtering: ${allowedVms.length} allowed, ${blockedCount} blocked of ${vms.length} total VMs`);
+
         // Build full groups and hosts structure for caching
         const groupsMap = new Map<string, Set<string>>();
         const hostsMap = new Map<string, any>();
         
-        for (const vm of vms) {
+        for (const vm of allowedVms) {
           const hostName = vm.name;
           const ip = vm.primary_ip4?.address?.split('/')[0] || '';
           const hostGroups: string[] = [];
@@ -222,15 +235,20 @@ router.post("/", async (req: AuthRequest, res: Response) => {
           .update(automationInventories)
           .set({
             groupsCount: groupsMap.size,
-            hostsCount: vms.length,
+            hostsCount: allowedVms.length,
             lastRefreshedAt: new Date(),
             previewData: {
               groups: Array.from(groupsMap.keys()).slice(0, 10),
-              sampleHosts: vms.slice(0, 5).map((vm: any) => ({
+              sampleHosts: allowedVms.slice(0, 5).map((vm: any) => ({
                 name: vm.name,
                 ip: vm.primary_ip4?.address?.split('/')[0] || '',
                 status: vm.status?.value || vm.status || '',
               })),
+              gateStats: {
+                total: vms.length,
+                allowed: allowedVms.length,
+                blocked: blockedCount,
+              },
             },
             cachedData: {
               groups: fullGroups,
@@ -417,11 +435,23 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     const adapter = new NetBoxAdapter(cmdb.config as any);
     const vms = await adapter.listAllVms();
 
+    // Evaluate gate decisions for all VMs
+    const gateResults = await gateEvaluator.evaluateBatch(vms, cmdb.id);
+    
+    // Filter VMs through gate - only include allowed VMs
+    const allowedVms = vms.filter((vm: any) => {
+      const result = gateResults.get(vm.name);
+      return result?.allowed === true;
+    });
+    
+    const blockedCount = vms.length - allowedVms.length;
+    console.log(`Gate filtering (refresh): ${allowedVms.length} allowed, ${blockedCount} blocked of ${vms.length} total VMs`);
+
     // Build full groups and hosts structure for caching
     const groupsMap = new Map<string, Set<string>>();
     const hostsMap = new Map<string, any>();
     
-    for (const vm of vms) {
+    for (const vm of allowedVms) {
       const hostName = vm.name;
       const ip = vm.primary_ip4?.address?.split('/')[0] || '';
       const hostGroups: string[] = [];
@@ -506,15 +536,20 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
       .update(automationInventories)
       .set({
         groupsCount: groupsMap.size,
-        hostsCount: vms.length,
+        hostsCount: allowedVms.length,
         lastRefreshedAt: new Date(),
         previewData: {
           groups: Array.from(groupsMap.keys()).slice(0, 10),
-          sampleHosts: vms.slice(0, 5).map((vm: any) => ({
+          sampleHosts: allowedVms.slice(0, 5).map((vm: any) => ({
             name: vm.name,
             ip: vm.primary_ip4?.address?.split('/')[0] || '',
             status: vm.status?.value || vm.status || '',
           })),
+          gateStats: {
+            total: vms.length,
+            allowed: allowedVms.length,
+            blocked: blockedCount,
+          },
         },
         cachedData: {
           groups: fullGroups,

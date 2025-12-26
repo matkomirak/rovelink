@@ -37,6 +37,10 @@ interface BlockedAsset {
   missing: string[];
   blocked_reason: string;
   last_evaluated: string;
+  // Provider tracking fields
+  gateProviderId?: string | null;
+  clusterName?: string | null;
+  providerState?: string | null;
 }
 
 interface BlockedResponse {

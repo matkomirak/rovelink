@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Server, Cpu, HardDrive, MemoryStick, Network, Search, Filter } from "lucide-react";
+import { ArrowLeft, Server, Cpu, HardDrive, MemoryStick, Network, Search, Filter, RefreshCw } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { ProviderAccount } from "@shared/schema";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface NormalizedVM {
   externalId: string;
@@ -41,6 +43,7 @@ export default function ProviderDetail() {
   const [searchTerm, setSearchTerm] = useState("");
   const [platformFilter, setPlatformFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const { data: provider, isLoading: providerLoading } = useQuery<ProviderAccount>({
     queryKey: ["/api/providers", id],
@@ -49,6 +52,28 @@ export default function ProviderDetail() {
   const { data: vmsData, isLoading: vmsLoading } = useQuery<ProviderVmsResponse>({
     queryKey: ["/api/providers", id, "vms"],
     enabled: !!id,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/providers/${id}/sync`);
+    },
+    onSuccess: async (response) => {
+      const data = await response.json();
+      toast({
+        title: "Sync Started",
+        description: `Sync run ${data.runId} has been queued`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/providers", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/providers", id, "vms"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to start sync",
+        variant: "destructive",
+      });
+    },
   });
 
   const filteredVms = useMemo(() => {
@@ -149,23 +174,33 @@ export default function ProviderDetail() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/providers">
-          <Button variant="ghost" size="icon" data-testid="button-back">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold" data-testid="text-provider-name">{provider.name}</h1>
-          <p className="text-muted-foreground">
-            <Badge variant="outline" className="mr-2">{provider.kind}</Badge>
-            {provider.enabled ? (
-              <Badge className="bg-green-500/10 text-green-500 border-green-500/20">Enabled</Badge>
-            ) : (
-              <Badge variant="secondary">Disabled</Badge>
-            )}
-          </p>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-4">
+          <Link href="/providers">
+            <Button variant="ghost" size="icon" data-testid="button-back">
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold" data-testid="text-provider-name">{provider.name}</h1>
+            <p className="text-muted-foreground">
+              <Badge variant="outline" className="mr-2">{provider.kind}</Badge>
+              {provider.enabled ? (
+                <Badge className="bg-green-500/10 text-green-500 border-green-500/20">Enabled</Badge>
+              ) : (
+                <Badge variant="secondary">Disabled</Badge>
+              )}
+            </p>
+          </div>
         </div>
+        <Button
+          onClick={() => syncMutation.mutate()}
+          disabled={syncMutation.isPending}
+          data-testid="button-sync-provider"
+        >
+          <RefreshCw className={`w-4 h-4 mr-2 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+          Sync Now
+        </Button>
       </div>
 
       <div className="grid grid-cols-5 gap-4">

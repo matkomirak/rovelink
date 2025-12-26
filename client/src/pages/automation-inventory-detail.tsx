@@ -439,15 +439,15 @@ export default function AutomationInventoryDetail() {
         </Card>
       </div>
 
-      <Tabs defaultValue="groups" className="w-full">
+      <Tabs defaultValue="hosts" className="w-full">
         <TabsList>
-          <TabsTrigger value="groups" data-testid="tab-groups">
-            <Users className="h-4 w-4 mr-2" />
-            Groups
-          </TabsTrigger>
           <TabsTrigger value="hosts" data-testid="tab-hosts">
             <Server className="h-4 w-4 mr-2" />
             Hosts
+          </TabsTrigger>
+          <TabsTrigger value="groups" data-testid="tab-groups">
+            <Users className="h-4 w-4 mr-2" />
+            Groups
           </TabsTrigger>
           {inventory.type === "linked" && blockedData && blockedData.count > 0 && (
             <TabsTrigger value="blocked" data-testid="tab-blocked">

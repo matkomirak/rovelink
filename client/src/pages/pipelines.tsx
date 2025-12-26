@@ -95,6 +95,48 @@ export default function Pipelines() {
     },
   });
 
+  const syncMutation = useMutation({
+    mutationFn: async (pipelineId: string) => {
+      return apiRequest("POST", `/api/pipelines/${pipelineId}/sync`);
+    },
+    onSuccess: async (response) => {
+      const data = await response.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/pipelines"] });
+      toast({
+        title: "Sync Started",
+        description: `Sync run ${data.runId} has been queued`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error starting sync",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const dryRunMutation = useMutation({
+    mutationFn: async (pipelineId: string) => {
+      return apiRequest("POST", `/api/pipelines/${pipelineId}/dry-run`);
+    },
+    onSuccess: async (response) => {
+      const data = await response.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/pipelines"] });
+      toast({
+        title: "Dry-Run Started",
+        description: `Dry-run ${data.runId} has been queued`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error starting dry-run",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleDeleteClick = (pipeline: Pipeline) => {
     setPipelineToDelete(pipeline);
     setDeleteDialogOpen(true);
@@ -245,6 +287,8 @@ export default function Pipelines() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => dryRunMutation.mutate(pipeline.id)}
+                          disabled={dryRunMutation.isPending}
                           data-testid={`button-dry-run-${pipeline.id}`}
                         >
                           <Play className="h-4 w-4 mr-1" />
@@ -253,9 +297,11 @@ export default function Pipelines() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => syncMutation.mutate(pipeline.id)}
+                          disabled={syncMutation.isPending}
                           data-testid={`button-sync-${pipeline.id}`}
                         >
-                          <RefreshCw className="h-4 w-4 mr-1" />
+                          <RefreshCw className={`h-4 w-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
                           Sync Now
                         </Button>
                         <Link href={`/pipelines/${pipeline.id}`}>

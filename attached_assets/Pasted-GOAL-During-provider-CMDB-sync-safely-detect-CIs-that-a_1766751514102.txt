@@ -1,0 +1,196 @@
+GOAL
+
+During provider → CMDB sync, safely detect CIs that are no longer reported by a provider and:
+
+Never affect CIs owned by other providers
+
+Never delete CIs automatically
+
+Reliably block missing CIs from automation
+
+Track provider presence explicitly and audibly
+
+DEFINITIONS
+
+Provider instance: A configured provider in the app with a unique internal ID
+
+Provider inventory: The set of assets returned by a single provider sync
+
+CI ownership: Determined by gate_provider_id
+
+Cluster name: Secondary safety scope inside a provider
+
+PART 1 — Required NetBox Custom Fields (MANDATORY)
+
+Create (or assume exist) the following NetBox custom fields on Virtual Machines:
+
+1️⃣ Provider Identity Field
+
+Name: gate_provider_id
+
+Type: Text
+
+Description:
+Unique identifier of the provider instance that owns this CI
+
+This field is authoritative for provider ownership.
+
+2️⃣ Provider Presence Field
+
+Name: provider_state
+
+Type: Text (or choice)
+
+Allowed values: active, missing
+
+Description:
+Last observed presence state from owning provider
+
+PART 2 — Provider Sync Ownership Rules
+When creating a CI
+
+For each VM created from provider sync:
+
+Set:
+
+custom_field.gate_provider_id = <current_provider_id>
+
+custom_field.provider_state = active
+
+status = active
+
+❌ Never overwrite gate_provider_id if it already exists
+❌ Never change ownership automatically
+
+If a CI already has a different gate_provider_id:
+
+Skip it
+
+Do not modify it
+
+Log a warning
+
+PART 3 — Handling FOUND CIs (Normal Case)
+
+For each CI that is present in the current provider inventory:
+
+Conditions (ALL must match):
+
+gate_provider_id == current_provider_id
+
+cluster_name == current_cluster_name
+
+Actions:
+
+Set:
+
+status = active
+
+custom_field.provider_state = active
+
+This must happen every sync.
+
+PART 4 — Handling MISSING CIs (CRITICAL)
+
+For each CI that exists in NetBox but is NOT present in the current provider inventory:
+
+Mandatory safety checks (ALL REQUIRED)
+
+Before taking any action, verify:
+
+custom_field.gate_provider_id == current_provider_id
+
+cluster_name == current_cluster_name
+
+If any check fails:
+
+Do NOTHING
+
+Skip this CI completely
+
+If ALL checks pass
+
+Update CI:
+
+status = offline
+
+custom_field.provider_state = missing
+
+❌ Do NOT delete the CI
+❌ Do NOT clear tenant, role, automatable
+❌ Do NOT modify tags
+
+PART 5 — Automation Gate Integration
+
+Extend gate rules so that a CI is BLOCKED if any of the following are true:
+
+status != active
+
+custom_field.provider_state == missing
+
+custom_field.gate_provider_id != current_provider_id (when evaluating per source)
+
+tenant missing
+
+role missing
+
+automatable != true
+
+PART 6 — Blocked Assets Output
+
+If a CI is blocked due to provider absence, include in Blocked Assets:
+
+{
+  "asset_id": "...",
+  "blocked_reason": "CI not present in provider inventory",
+  "provider_state": "missing",
+  "gate_provider_id": "<provider_id>",
+  "cluster": "<cluster_name>"
+}
+
+
+Blocked CIs must NEVER appear in automation inventory.
+
+PART 7 — Recovery Behavior (AUTOMATIC)
+
+If a previously missing CI:
+
+Reappears in provider inventory
+
+AND passes ownership + cluster checks
+
+Then automatically:
+
+Set status = active
+
+Set provider_state = active
+
+No human action required.
+
+EXPLICIT PROHIBITIONS (NON-NEGOTIABLE)
+
+Do NOT delete CIs automatically
+
+Do NOT reassign provider ownership
+
+Do NOT infer ownership from cluster name
+
+Do NOT let one provider affect another provider’s CIs
+
+ACCEPTANCE CRITERIA
+
+Provider sync never modifies CIs owned by another provider
+
+Cluster name collisions do not cause cross-impact
+
+Missing CIs are marked offline, not deleted
+
+Missing CIs are always blocked from automation
+
+Reappearing CIs recover cleanly
+
+Provider ownership is explicit and auditable
+
+FINAL CONSTRAINT
+
+If a provider can change the state of a CI it does not own, the implementation is incorrect.

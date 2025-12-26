@@ -207,6 +207,14 @@ export class NetBoxAdapter {
         filter_logic: 'loose',
         default: 'active',
       },
+      {
+        name: 'gate_provider_id',
+        label: 'Gate Provider ID',
+        type: 'text',
+        description: 'Unique identifier of the provider instance that owns this CI. This field is authoritative for provider ownership.',
+        object_types: ['virtualization.virtualmachine'],
+        filter_logic: 'loose',
+      },
     ];
 
     const results: string[] = [];
@@ -381,8 +389,24 @@ export class NetBoxAdapter {
    * Upsert a VM to NetBox based on ext_id
    * NetBox 4.x requires specific field formats
    * Implements delta updates - only updates fields that have changed
+   * 
+   * OWNERSHIP RULES (from specification):
+   * - gate_provider_id is set on creation ONLY
+   * - If a CI already has a different gate_provider_id, skip it and log warning
+   * - Never overwrite gate_provider_id if it already exists
+   * - Never change ownership automatically
+   * 
+   * @param vmData - VM data to upsert
+   * @param extId - External ID for idempotent sync
+   * @param providerId - Optional provider ID for ownership tracking
+   * @param clusterName - Optional cluster name for scope validation
    */
-  async upsertVm(vmData: NetBoxVmData, extId: string): Promise<{ id: number; created: boolean; unchanged?: boolean }> {
+  async upsertVm(
+    vmData: NetBoxVmData, 
+    extId: string,
+    providerId?: string,
+    clusterName?: string
+  ): Promise<{ id: number; created: boolean; unchanged?: boolean; skipped?: boolean; skipReason?: string }> {
     try {
       // First, find existing VM by ext_id
       const searchResponse = await this.client.get(
@@ -437,6 +461,11 @@ export class NetBoxAdapter {
           },
         };
 
+        // For new VMs, set gate_provider_id for ownership tracking
+        if (forCreate && providerId) {
+          payload.custom_fields.gate_provider_id = providerId;
+        }
+
         // For new VMs, ensure a cluster is assigned (required by NetBox)
         if (forCreate) {
           const clusterId = await this.ensureDefaultCluster();
@@ -467,9 +496,41 @@ export class NetBoxAdapter {
       };
 
       if (searchResponse.data.count > 0) {
-        // Existing VM - perform delta update
+        // Existing VM - perform ownership checks first
         const existingVm = searchResponse.data.results[0];
         vmId = existingVm.id;
+        
+        // OWNERSHIP CHECK: If providerId is specified, verify ownership
+        if (providerId) {
+          const existingOwnerId = existingVm.custom_fields?.gate_provider_id;
+          
+          // If CI already has a different gate_provider_id, skip it
+          if (existingOwnerId && existingOwnerId !== providerId) {
+            console.warn(`[OWNERSHIP] Skipping VM '${vmData.name}' (ext_id: ${extId}): ` +
+              `Owned by provider '${existingOwnerId}', current provider is '${providerId}'`);
+            return { 
+              id: vmId, 
+              created: false, 
+              unchanged: true, 
+              skipped: true, 
+              skipReason: `Owned by different provider: ${existingOwnerId}` 
+            };
+          }
+          
+          // CLUSTER CHECK: If clusterName is specified, verify cluster matches
+          const existingClusterName = existingVm.cluster?.name;
+          if (clusterName && existingClusterName && existingClusterName !== clusterName) {
+            console.warn(`[OWNERSHIP] Skipping VM '${vmData.name}' (ext_id: ${extId}): ` +
+              `Cluster mismatch - expected '${clusterName}', found '${existingClusterName}'`);
+            return { 
+              id: vmId, 
+              created: false, 
+              unchanged: true, 
+              skipped: true, 
+              skipReason: `Cluster mismatch: ${existingClusterName} vs ${clusterName}` 
+            };
+          }
+        }
         
         // Build delta payload - only include changed fields
         const deltaPayload: any = {};
@@ -830,7 +891,7 @@ export class NetBoxAdapter {
 
   /**
    * Get all VMs that have been synced by Bridge (have ext_id custom field)
-   * Returns VMs with their ext_id and cluster info for missing CI detection
+   * Returns VMs with their ext_id, cluster info, and ownership for missing CI detection
    */
   async getSyncedVms(): Promise<Array<{
     id: number;
@@ -839,6 +900,7 @@ export class NetBoxAdapter {
     clusterId: number | null;
     clusterName: string | null;
     providerState: string | null;
+    gateProviderId: string | null;
     status: string;
   }>> {
     try {
@@ -875,6 +937,7 @@ export class NetBoxAdapter {
         clusterId: vm.cluster?.id || null,
         clusterName: vm.cluster?.name || null,
         providerState: vm.custom_fields?.provider_state || null,
+        gateProviderId: vm.custom_fields?.gate_provider_id || null,
         status: vm.status?.value || 'unknown',
       }));
     } catch (error: any) {

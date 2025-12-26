@@ -1,13 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Edit, RefreshCw, Server, Users, ChevronRight, Download, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
-import { type AutomationInventory } from "@shared/schema";
+import { Switch } from "@/components/ui/switch";
+import { ArrowLeft, Edit, RefreshCw, Server, Users, ChevronRight, Download, ShieldCheck, ShieldOff, AlertTriangle, Settings, Lock, ToggleRight } from "lucide-react";
+import { type AutomationInventory, type EligibilityPolicy } from "@shared/schema";
 import { useState } from "react";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface InventoryStructure {
   groups: Array<{
@@ -50,11 +53,20 @@ interface BlockedResponse {
   lastEvaluated: string | null;
 }
 
+interface PolicyResponse {
+  coreRules: string[];
+  optionalRules: {
+    requireRole: boolean;
+    requireContacts: boolean;
+  };
+}
+
 export default function AutomationInventoryDetail() {
   const { id } = useParams();
   const [, setLocation] = useLocation();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [selectedHost, setSelectedHost] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const { data: inventory, isLoading: inventoryLoading } = useQuery<AutomationInventory>({
     queryKey: ["/api/inventories", id],
@@ -74,12 +86,48 @@ export default function AutomationInventoryDetail() {
     enabled: inventory?.type === "linked",
   });
 
+  const { data: policyData } = useQuery<PolicyResponse>({
+    queryKey: ["/api/inventories", id, "policy"],
+    enabled: inventory?.type === "linked",
+  });
+
+  const updatePolicyMutation = useMutation({
+    mutationFn: async (updates: Partial<EligibilityPolicy>) => {
+      return apiRequest(`/api/inventories/${id}/policy`, {
+        method: "PATCH",
+        body: JSON.stringify(updates),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "policy"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "gate-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "blocked"] });
+      toast({
+        title: "Policy Updated",
+        description: "Eligibility policy has been updated. Gate will re-evaluate on next refresh.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update policy",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleDownloadAutomation = () => {
     window.location.href = `/api/inventories/${id}/automation.yml`;
   };
 
   const handleDownloadBlocked = () => {
     window.location.href = `/api/inventories/${id}/blocked.json`;
+  };
+
+  const handleToggleRule = (rule: keyof EligibilityPolicy) => {
+    if (!policyData) return;
+    const currentValue = policyData.optionalRules[rule];
+    updatePolicyMutation.mutate({ [rule]: !currentValue });
   };
 
   if (inventoryLoading || structureLoading) {
@@ -263,6 +311,83 @@ export default function AutomationInventoryDetail() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {inventory.type === "linked" && policyData && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Settings className="h-5 w-5 text-muted-foreground" />
+              <CardTitle>Eligibility Rules</CardTitle>
+            </div>
+            <CardDescription>
+              Configure which governance requirements VMs must meet before automation is allowed
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Lock className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Core Rules (Always Enforced)</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {policyData.coreRules.map((rule: string) => (
+                  <div
+                    key={rule}
+                    className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/50 border"
+                    data-testid={`core-rule-${rule.toLowerCase().replace(/\s+/g, "-")}`}
+                  >
+                    <ShieldCheck className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">{rule}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                These rules cannot be disabled. VMs must have tenant, platform, primary IP, automatable=true, and active provider state.
+              </p>
+            </div>
+
+            <div className="border-t pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ToggleRight className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Optional Rules</span>
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-3 rounded-md border hover-elevate">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Require Role</div>
+                    <div className="text-xs text-muted-foreground">
+                      VMs must have a NetBox Role assigned (e.g., web-server, database)
+                    </div>
+                  </div>
+                  <Switch
+                    checked={policyData.optionalRules.requireRole}
+                    onCheckedChange={() => handleToggleRule("requireRole")}
+                    disabled={updatePolicyMutation.isPending}
+                    data-testid="switch-require-role"
+                  />
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-md border hover-elevate">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Require Contacts</div>
+                    <div className="text-xs text-muted-foreground">
+                      VMs must have at least one contact assigned (Customer, Service Owner, or Technical Owner)
+                    </div>
+                  </div>
+                  <Switch
+                    checked={policyData.optionalRules.requireContacts}
+                    onCheckedChange={() => handleToggleRule("requireContacts")}
+                    disabled={updatePolicyMutation.isPending}
+                    data-testid="switch-require-contacts"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                Enable optional rules to add stricter governance requirements for this inventory.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid grid-cols-3 gap-4">

@@ -188,7 +188,7 @@ export default function AutomationInventoryDetail() {
             <CardHeader className="pb-3">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5 text-green-500" />
-                <CardTitle>Automation Inventory</CardTitle>
+                <CardTitle>Allowed Automation Inventory</CardTitle>
               </div>
               <CardDescription>
                 Assets that passed the gate and are safe to automate
@@ -248,17 +248,14 @@ export default function AutomationInventoryDetail() {
                   Download blocked.json
                 </Button>
               </div>
-              {blockedData && blockedData.count > 0 && (
-                <div className="bg-orange-500/10 border border-orange-500/20 rounded-md p-3">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5" />
-                    <div className="text-sm text-muted-foreground">
-                      These assets are blocked due to missing governance data (tenant, role, or automatable tag).
-                      They will not appear in any automation inventory.
-                    </div>
+              <div className="bg-orange-500/10 border border-orange-500/20 rounded-md p-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5" />
+                  <div className="text-sm text-muted-foreground">
+                    To allow automation, assign tenant and role in the CMDB and add the automatable tag.
                   </div>
                 </div>
-              )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -308,7 +305,7 @@ export default function AutomationInventoryDetail() {
           {inventory.type === "linked" && blockedData && blockedData.count > 0 && (
             <TabsTrigger value="blocked" data-testid="tab-blocked">
               <ShieldOff className="h-4 w-4 mr-2" />
-              Blocked by Gate ({blockedData.count})
+              Blocked by Gate – Not Automatable ({blockedData.count})
             </TabsTrigger>
           )}
         </TabsList>
@@ -489,7 +486,7 @@ export default function AutomationInventoryDetail() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <ShieldOff className="h-5 w-5 text-orange-500" />
-                  Blocked by Gate
+                  Blocked by Gate – Not Automatable
                 </CardTitle>
                 <CardDescription>
                   These assets are blocked due to missing governance data.

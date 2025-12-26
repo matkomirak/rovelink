@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import { db } from "../db";
-import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory } from "../../shared/schema";
+import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory, type EligibilityPolicy } from "../../shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
@@ -11,6 +11,25 @@ import { gateStore } from "../services/gate-store";
 // Auth request type
 interface AuthRequest extends Request {
   user?: any;
+}
+
+// Default policy for gate evaluation - all optional rules disabled
+const DEFAULT_POLICY: EligibilityPolicy = {
+  requireRole: false,
+  requireContacts: false,
+};
+
+/**
+ * Extract eligibility policy from inventory, with defaults if not set.
+ */
+function extractPolicy(inventory: any): EligibilityPolicy {
+  if (!inventory.eligibilityPolicy) {
+    return DEFAULT_POLICY;
+  }
+  return {
+    requireRole: inventory.eligibilityPolicy.requireRole === true,
+    requireContacts: inventory.eligibilityPolicy.requireContacts === true,
+  };
 }
 
 const router = express.Router();
@@ -141,7 +160,8 @@ router.post("/", async (req: AuthRequest, res: Response) => {
         // Gate evaluation runs BEFORE inventory generation.
         // Inventory generation must ONLY read from gate store.
         // ================================================================
-        await runGatePhase(cmdb.id);
+        const policy = extractPolicy(newInventory);
+        await runGatePhase(cmdb.id, policy);
         
         // Read gate decisions from store - NEVER trigger evaluation here
         // This is the decoupled read phase
@@ -462,7 +482,8 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     // Gate evaluation runs BEFORE inventory generation.
     // Inventory generation must ONLY read from gate store.
     // ================================================================
-    await runGatePhase(cmdb.id);
+    const policy = extractPolicy(inventory);
+    await runGatePhase(cmdb.id, policy);
     
     // Read gate decisions from store - NEVER trigger evaluation here
     const allowedDecisions = await readAllowedAssets();
@@ -946,7 +967,8 @@ router.get("/:id/automation.yml", async (req, res) => {
     }
 
     // Run gate phase (first-class phase)
-    await runGatePhase(cmdb.id);
+    const policy = extractPolicy(inventory);
+    await runGatePhase(cmdb.id, policy);
 
     // Read ONLY allowed assets from gate store
     const allowedDecisions = await readAllowedAssets();
@@ -1038,7 +1060,8 @@ router.get("/:id/blocked.json", async (req, res) => {
     }
 
     // Run gate phase (first-class phase)
-    await runGatePhase(cmdb.id);
+    const policy = extractPolicy(inventory);
+    await runGatePhase(cmdb.id, policy);
 
     // Read ONLY blocked assets from gate store
     const blockedDecisions = await readBlockedAssets();
@@ -1098,7 +1121,8 @@ router.get("/:id/blocked", async (req, res) => {
     // Check if gate evaluation has been completed
     if (!gateStore.isEvaluationComplete()) {
       // Run gate phase if not yet evaluated
-      await runGatePhase(cmdb.id);
+      const policy = extractPolicy(inventory);
+      await runGatePhase(cmdb.id, policy);
     }
 
     // Read blocked assets from gate store
@@ -1161,7 +1185,8 @@ router.get("/:id/gate-stats", async (req, res) => {
     // Check if gate evaluation has been completed
     if (!gateStore.isEvaluationComplete()) {
       // Run gate phase if not yet evaluated
-      await runGatePhase(cmdb.id);
+      const policy = extractPolicy(inventory);
+      await runGatePhase(cmdb.id, policy);
     }
 
     const summary = await getGateSummary();

@@ -15,11 +15,17 @@
 // ================================================================
 
 import { db } from "../db";
-import { cmdbAccounts } from "../../shared/schema";
+import { cmdbAccounts, type EligibilityPolicy } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { NetBoxAdapter } from "./netbox-adapter";
 import { gateStore, GateDecision } from "./gate-store";
 import { deriveAssetId } from "./asset-identity";
+
+// Default policy - all optional rules disabled
+const DEFAULT_POLICY: EligibilityPolicy = {
+  requireRole: false,
+  requireContacts: false,
+};
 
 export interface GatePhaseResult {
   cmdbId: string;
@@ -46,10 +52,25 @@ export interface GatePhaseResult {
  * This is the EXPLICIT gate evaluation phase.
  * It must be called before inventory generation.
  * 
+ * CORE RULES (always enforced, cannot be disabled):
+ * - Tenant assigned
+ * - Platform detected (Windows/Linux)
+ * - Primary IP present
+ * - Automatable = true
+ * - Provider State = active (not missing)
+ * 
+ * OPTIONAL RULES (can be enabled per inventory via policy):
+ * - Require Role assignment
+ * - Require Contacts assigned
+ * 
  * @param cmdbId - The CMDB account ID to evaluate
+ * @param policy - Optional eligibility policy for optional rules
  * @returns Gate phase result with statistics
  */
-export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
+export async function runGatePhase(
+  cmdbId: string, 
+  policy: EligibilityPolicy = DEFAULT_POLICY
+): Promise<GatePhaseResult> {
   // Fetch CMDB account
   const [cmdb] = await db
     .select()
@@ -75,6 +96,10 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
     const assetId = deriveAssetId(cmdbId, vm.name);
     const missing: string[] = [];
 
+    // ================================================================
+    // CORE RULES - Always enforced, cannot be disabled
+    // ================================================================
+
     // Check VM status - MUST be active to be automatable
     const vmStatus = vm.status?.value || vm.status;
     if (vmStatus !== 'active') {
@@ -84,7 +109,7 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
     // Check provider_state - MUST NOT be missing
     const providerState = vm.custom_fields?.provider_state;
     if (providerState === 'missing') {
-      missing.push("provider_state:missing");
+      missing.push("provider_state:active");
     }
 
     // Check tenant - MUST come from CMDB only
@@ -93,10 +118,16 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
       missing.push("tenant");
     }
 
-    // Check role - MUST come from CMDB only
-    const roleName = extractName(vm.role);
-    if (!roleName) {
-      missing.push("role");
+    // Check platform - MUST be detected (Windows/Linux)
+    const platformName = extractName(vm.platform);
+    if (!platformName) {
+      missing.push("platform");
+    }
+
+    // Check primary IP - MUST be present
+    const primaryIp = vm.primary_ip4?.address || vm.primary_ip?.address;
+    if (!primaryIp) {
+      missing.push("primary_ip");
     }
 
     // Check automatable custom field (boolean) - MUST come from CMDB only
@@ -112,6 +143,27 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
       console.warn(`[DEPRECATED] VM ${vm.name} has legacy 'automatable' tag. This tag is no longer used. Set custom_fields.automatable = true in NetBox instead.`);
     }
 
+    // ================================================================
+    // OPTIONAL RULES - Enabled per policy, can be toggled
+    // ================================================================
+
+    // Check role - OPTIONAL, only if policy.requireRole is true
+    if (policy.requireRole) {
+      const roleName = extractName(vm.role);
+      if (!roleName) {
+        missing.push("role (policy)");
+      }
+    }
+
+    // Check contacts - OPTIONAL, only if policy.requireContacts is true
+    // Contacts must have one of: Customer Owner, Service Owner, Technical Owner
+    if (policy.requireContacts) {
+      const hasValidContact = checkValidContacts(vm);
+      if (!hasValidContact) {
+        missing.push("contacts (policy)");
+      }
+    }
+
     const allowed = missing.length === 0;
     let reason: string;
     let failureType: "governance" | undefined;
@@ -121,12 +173,24 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
     const clusterName = vm.cluster?.name || null;
 
     if (allowed) {
-      reason = `VM has all required governance: tenant=${tenantName}, role=${roleName}, automatable=true`;
+      reason = `VM has all required governance: tenant=${tenantName}, automatable=true`;
       allowedCount++;
     } else {
       // GOVERNANCE FAILURE - normal, visible, non-fatal
       failureType = "governance";
-      reason = `VM missing required governance fields: ${missing.join(", ")}`;
+      
+      // Separate core and policy failures for clear messaging
+      const coreFailures = missing.filter(m => !m.includes("(policy)"));
+      const policyFailures = missing.filter(m => m.includes("(policy)"));
+      
+      if (coreFailures.length > 0 && policyFailures.length > 0) {
+        reason = `Missing core requirements: ${coreFailures.join(", ")}; Policy violations: ${policyFailures.join(", ")}`;
+      } else if (policyFailures.length > 0) {
+        reason = `Blocked by policy: ${policyFailures.map(p => p.replace(" (policy)", "")).join(", ")}`;
+      } else {
+        reason = `Missing required governance fields: ${coreFailures.join(", ")}`;
+      }
+      
       blockedVms.push({ 
         assetId, 
         vmName: vm.name, 
@@ -173,6 +237,27 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
   console.log(`Gate phase complete for ${cmdb.name}: ${allowedCount} allowed, ${blockedVms.length} blocked of ${vms.length} total`);
 
   return result;
+}
+
+/**
+ * Check if VM has valid contacts assigned.
+ * Valid contact roles: Customer Owner, Service Owner, Technical Owner
+ */
+function checkValidContacts(vm: any): boolean {
+  // Check if VM has contacts array
+  const contacts = vm.contacts;
+  if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+    return false;
+  }
+
+  // Valid contact roles that satisfy the requirement
+  const validRoles = ['customer owner', 'service owner', 'technical owner'];
+
+  // Check if any contact has a valid role
+  return contacts.some((contact: any) => {
+    const roleName = extractName(contact.role)?.toLowerCase();
+    return roleName && validRoles.includes(roleName);
+  });
 }
 
 /**

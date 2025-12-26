@@ -499,6 +499,8 @@ export default function AutomationInventoryDetail() {
                     const missingAutomatable = asset.missing.includes("automatable");
                     const missingTenant = asset.missing.includes("tenant");
                     const missingRole = asset.missing.includes("role");
+                    const missingStatus = asset.missing.includes("status:active");
+                    const providerMissing = asset.missing.includes("provider_state:missing");
                     
                     return (
                       <div
@@ -523,6 +525,16 @@ export default function AutomationInventoryDetail() {
                         <div className="mt-3">
                           <div className="text-sm font-medium text-muted-foreground mb-1">Missing governance:</div>
                           <div className="flex flex-wrap gap-1">
+                            {providerMissing && (
+                              <Badge variant="secondary" className="text-xs bg-red-500/10 text-red-600 border-red-500/30">
+                                Not present in provider
+                              </Badge>
+                            )}
+                            {missingStatus && (
+                              <Badge variant="secondary" className="text-xs bg-red-500/10 text-red-600 border-red-500/30">
+                                VM offline
+                              </Badge>
+                            )}
                             {missingTenant && (
                               <Badge variant="secondary" className="text-xs">
                                 Tenant not assigned
@@ -540,7 +552,12 @@ export default function AutomationInventoryDetail() {
                             )}
                           </div>
                         </div>
-                        {missingAutomatable && (
+                        {providerMissing && (
+                          <div className="text-xs text-red-600 mt-2 bg-red-500/5 p-2 rounded">
+                            This VM is no longer present in the provider inventory (provider_state = missing). It has been marked offline automatically.
+                          </div>
+                        )}
+                        {!providerMissing && missingAutomatable && (
                           <div className="text-xs text-orange-600 mt-2 bg-orange-500/5 p-2 rounded">
                             Set <code className="bg-orange-500/20 px-1 rounded">automatable = true</code> on this VM in NetBox to allow automation.
                           </div>

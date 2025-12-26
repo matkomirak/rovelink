@@ -71,6 +71,18 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
     const assetId = deriveAssetId(cmdbId, vm.name);
     const missing: string[] = [];
 
+    // Check VM status - MUST be active to be automatable
+    const vmStatus = vm.status?.value || vm.status;
+    if (vmStatus !== 'active') {
+      missing.push("status:active");
+    }
+
+    // Check provider_state - MUST NOT be missing
+    const providerState = vm.custom_fields?.provider_state;
+    if (providerState === 'missing') {
+      missing.push("provider_state:missing");
+    }
+
     // Check tenant - MUST come from CMDB only
     const tenantName = extractName(vm.tenant);
     if (!tenantName) {

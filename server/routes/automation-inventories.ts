@@ -669,6 +669,90 @@ router.patch("/:id", async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Update eligibility policy
+router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
+  try {
+    const userRole = req.user?.role;
+    if (userRole !== "admin") {
+      return res.status(403).json({ message: "Admin role required" });
+    }
+
+    const [existing] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    if (!existing) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    // Validate policy structure
+    const { requireRole, requireContacts } = req.body;
+    const policy = {
+      requireRole: requireRole === true,
+      requireContacts: requireContacts === true,
+    };
+
+    await db
+      .update(automationInventories)
+      .set({ 
+        eligibilityPolicy: policy,
+        updatedAt: new Date(),
+      })
+      .where(eq(automationInventories.id, req.params.id));
+
+    const [updated] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    res.json({ 
+      message: "Policy updated",
+      policy: updated.eligibilityPolicy,
+    });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get eligibility policy
+router.get("/:id/policy", async (req, res) => {
+  try {
+    const [inventory] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    // Default policy if not set
+    const defaultPolicy = {
+      requireRole: false,
+      requireContacts: false,
+    };
+
+    const policy = inventory.eligibilityPolicy || defaultPolicy;
+
+    res.json({
+      inventoryId: inventory.id,
+      inventoryName: inventory.name,
+      policy,
+      // Core rules that are always enforced (for UI display)
+      coreRules: [
+        { key: "tenant", label: "Tenant assigned", enforced: true },
+        { key: "platform", label: "Platform detected (Windows/Linux)", enforced: true },
+        { key: "primary_ip", label: "Primary IP present", enforced: true },
+        { key: "automatable", label: "Automatable = true", enforced: true },
+        { key: "provider_state", label: "Provider State = active", enforced: true },
+      ],
+    });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Delete inventory
 router.delete("/:id", async (req: AuthRequest, res: Response) => {
   try {

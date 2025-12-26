@@ -562,6 +562,14 @@ export default function AutomationInventoryDetail() {
                             Set <code className="bg-orange-500/20 px-1 rounded">automatable = true</code> on this VM in NetBox to allow automation.
                           </div>
                         )}
+                        {/* Provider tracking info */}
+                        {(asset.gateProviderId || asset.clusterName) && (
+                          <div className="text-xs text-muted-foreground mt-2 font-mono bg-muted/30 p-2 rounded">
+                            {asset.gateProviderId && <span>Provider: {asset.gateProviderId}</span>}
+                            {asset.gateProviderId && asset.clusterName && <span className="mx-2">|</span>}
+                            {asset.clusterName && <span>Cluster: {asset.clusterName}</span>}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

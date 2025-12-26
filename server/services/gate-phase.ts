@@ -33,6 +33,10 @@ export interface GatePhaseResult {
     vmName: string;
     missing: string[];
     reason: string;
+    // Provider tracking fields for blocked assets output
+    gateProviderId?: string | null;
+    clusterName?: string | null;
+    providerState?: string | null;
   }>;
 }
 
@@ -112,6 +116,10 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
     let reason: string;
     let failureType: "governance" | undefined;
 
+    // Extract provider tracking fields
+    const gateProviderId = vm.custom_fields?.gate_provider_id || null;
+    const clusterName = vm.cluster?.name || null;
+
     if (allowed) {
       reason = `VM has all required governance: tenant=${tenantName}, role=${roleName}, automatable=true`;
       allowedCount++;
@@ -119,7 +127,16 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
       // GOVERNANCE FAILURE - normal, visible, non-fatal
       failureType = "governance";
       reason = `VM missing required governance fields: ${missing.join(", ")}`;
-      blockedVms.push({ assetId, vmName: vm.name, missing, reason });
+      blockedVms.push({ 
+        assetId, 
+        vmName: vm.name, 
+        missing, 
+        reason,
+        // Include provider tracking for blocked assets output
+        gateProviderId,
+        clusterName,
+        providerState,
+      });
     }
 
     // Store decision (keyed by asset_id, not VM name)

@@ -326,6 +326,12 @@ export const automationInventories = pgTable("automation_inventories", {
   // For file-based inventories
   fileContent: text("file_content"),
   fileFormat: text("file_format"), // "yaml", "json", "ini"
+  // Eligibility policy for gate rules (optional rules that can be enabled/disabled)
+  // Core rules (tenant, automatable, provider_state, platform, ip) are always enforced
+  eligibilityPolicy: jsonb("eligibility_policy").default({
+    requireRole: false,       // Require NetBox Role assignment
+    requireContacts: false,   // Require at least one contact assigned
+  }),
   // Metadata
   isDefault: boolean("is_default").default(false),
   groupsCount: integer("groups_count").default(0),
@@ -551,6 +557,12 @@ export type PipelineRun = typeof pipelineRuns.$inferSelect;
 
 export type InsertAutomationInventory = z.infer<typeof insertAutomationInventorySchema>;
 export type AutomationInventory = typeof automationInventories.$inferSelect;
+
+// Eligibility Policy type for automation gate rules
+export interface EligibilityPolicy {
+  requireRole: boolean;       // Require NetBox Role assignment (optional)
+  requireContacts: boolean;   // Require at least one contact assigned (optional)
+}
 
 // Provider Hints - non-authoritative metadata from providers
 // These are stored for future use but MUST NOT affect gate decisions

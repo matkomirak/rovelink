@@ -1,0 +1,183 @@
+Replit Prompt — Automation Eligibility Rules (Policy UI)
+GOAL
+
+Add an Automation Eligibility Rules section to the Inventory Source screen that allows users to configure optional eligibility criteria, while keeping core gate rules immutable.
+
+This feature is policy configuration only.
+It must NOT weaken gate authority.
+
+LOCATION
+
+Inventory Source detail page
+(same screen as Automation Inventory / Blocked Assets)
+
+Place the section above the inventory counts.
+
+SECTION TITLE
+
+Automation Eligibility Rules
+
+Subtitle (static text):
+
+“These rules define which assets are eligible for automation.
+Core safety rules are always enforced.”
+
+PART 1 — Immutable Core Rules (Always ON)
+
+Display the following rules as enabled + locked:
+
+Tenant assigned
+
+Platform detected (Windows / Linux)
+
+Primary IP present
+
+Automatable = true
+
+Provider State = active
+
+UI Requirements
+
+Show as checked toggles
+
+Toggles are disabled (read-only)
+
+Add helper text:
+
+“This rule is mandatory and cannot be disabled.”
+
+❌ Do NOT allow changes
+❌ Do NOT store config for these (they are implicit)
+
+PART 2 — Optional Policy Rules (User-Configurable)
+
+Allow users to enable / disable the following rules:
+
+Optional Rules
+
+Require Role assignment
+
+Require Contacts assigned
+(roles like Customer Owner, Technical Owner, etc.)
+
+UI Behavior
+
+Use radio buttons or toggle switches
+
+Default state:
+
+OFF (disabled)
+
+User can toggle ON or OFF
+
+Changes apply immediately to gate evaluation
+
+Rule Semantics
+
+If enabled:
+
+Role rule
+
+Asset must have NetBox Role assigned
+
+Contacts rule
+
+Asset must have at least one contact
+
+Contact role must be one of:
+
+Customer Owner
+
+Service Owner
+
+Technical Owner
+
+If disabled:
+
+Gate ignores this criterion
+
+PART 3 — Policy Storage
+
+Store policy per Inventory Source, e.g.:
+
+{
+  "require_role": true,
+  "require_contacts": false
+}
+
+
+Rules:
+
+Stored server-side
+
+Loaded on page refresh
+
+Defaults applied if missing
+
+PART 4 — Gate Integration (MANDATORY)
+
+Extend gate logic to include optional rules only if enabled.
+
+Final Eligibility Logic (Conceptual)
+
+Asset is eligible only if:
+
+All immutable rules pass
+
+AND all enabled optional rules pass
+
+Optional rules must:
+
+Never override immutable rules
+
+Never allow bypassing provider absence
+
+Never allow automatable=false
+
+PART 5 — UI Feedback Integration
+
+When an asset is blocked:
+
+Show which optional rule caused the block
+
+Example:
+
+“Blocked: Role required by policy”
+
+“Blocked: No Customer Owner assigned”
+
+Do NOT show this for immutable rules (already handled).
+
+PART 6 — Explicit Prohibitions
+
+❌ Do NOT allow disabling:
+
+Automatable
+
+Provider State
+
+Tenant
+
+Platform
+
+IP
+
+❌ Do NOT allow per-asset overrides
+❌ Do NOT allow temporary bypass
+❌ Do NOT allow provider data to satisfy rules
+
+ACCEPTANCE CRITERIA
+
+Core safety rules are visible and immutable
+
+Optional rules can be toggled per inventory source
+
+Gate behavior updates immediately
+
+Blocked Assets clearly show policy-based reasons
+
+Automation Inventory never includes ineligible assets
+
+FINAL CONSTRAINT
+
+If a user can configure the system to automate an asset without explicit permission or provider presence, the implementation is incorrect.

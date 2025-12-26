@@ -7,6 +7,35 @@ import { storage } from '../storage';
 import { ProxmoxCollector, type ProxmoxConfig, type ProxmoxVm } from './proxmox-collector';
 import { NetBoxAdapter, type NetBoxConfig } from './netbox-adapter';
 
+/**
+ * Transform provider tags by adding provider prefix.
+ * 
+ * NON-NEGOTIABLE RULE: Provider tags MUST NOT be written to NetBox verbatim.
+ * All provider-originated tags must be prefixed with the provider name.
+ * 
+ * Example transformations:
+ * - "customer/acme" -> "proxmox_customer/acme"
+ * - "role/web" -> "proxmox_role/web"
+ * - "wave/1" -> "proxmox_wave/1"
+ * 
+ * @param tags - Original tags from provider
+ * @param providerKind - Provider type (e.g., "proxmox", "vsphere", "azure")
+ * @returns Prefixed tags safe for NetBox
+ */
+function namespaceTags(tags: string[], providerKind: string): string[] {
+  // Normalize provider kind to lowercase for consistent prefixing
+  const prefix = providerKind.toLowerCase();
+  
+  return tags.map(tag => {
+    // If tag already has a prefix matching this provider, don't double-prefix
+    if (tag.startsWith(`${prefix}_`)) {
+      return tag;
+    }
+    // Add provider prefix: "customer/acme" -> "proxmox_customer/acme"
+    return `${prefix}_${tag}`;
+  });
+}
+
 export interface SyncOptions {
   providerAccountId: string;
   dryRun?: boolean;
@@ -106,13 +135,17 @@ export class ProviderSyncWorker {
             continue;
           }
 
+          // Transform provider tags with provider prefix
+          // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
+          const namespacedTags = namespaceTags(vm.tags, provider.kind);
+
           // Prepare VM data for NetBox
           const vmData: any = {
             name: vm.name,
             status: vm.status === 'running' ? 'active' : 'offline',
             vcpus: vm.cores,
             memory: vm.memory ? Math.floor(vm.memory / (1024 * 1024)) : undefined, // Convert to MB
-            tags: vm.tags.map(t => ({ name: t })),
+            tags: namespacedTags.map(t => ({ name: t })),
             custom_fields: {
               ext_id: extId,
               ext_provider: provider.kind,

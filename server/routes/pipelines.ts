@@ -12,6 +12,26 @@ import { getSamples, getObjectTypes } from "../services/sample-fixtures";
 import { getPresets, getPreset } from "../services/preset-rules";
 import { getProviderCollector } from "../services/providers/registry";
 
+/**
+ * Transform provider tags by adding provider prefix.
+ * 
+ * NON-NEGOTIABLE RULE: Provider tags MUST NOT be written to NetBox verbatim.
+ * All provider-originated tags must be prefixed with the provider name.
+ * 
+ * @param tags - Original tags from provider
+ * @param providerKind - Provider type (e.g., "proxmox", "vsphere", "azure", "fake")
+ * @returns Prefixed tags safe for NetBox
+ */
+function namespaceTags(tags: string[], providerKind: string): string[] {
+  const prefix = providerKind.toLowerCase();
+  return tags.map(tag => {
+    if (tag.startsWith(`${prefix}_`)) {
+      return tag;
+    }
+    return `${prefix}_${tag}`;
+  });
+}
+
 const router = Router();
 
 interface AuthRequest extends Request {
@@ -464,6 +484,10 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
               continue;
             }
 
+            // Transform provider tags with provider prefix
+            // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
+            const namespacedTags = namespaceTags(vm.tags || [], providerAccount.kind);
+
                 // Apply mapping rules to transform the VM using normalized fields
             const transformedVm: any = {
               name: vm.name,
@@ -471,7 +495,7 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
               vcpus: vm.vcpus || 1,
               memory: vm.memory || null,
               disk: vm.disk || null,
-              tags: vm.tags || [],
+              tags: namespacedTags,
               comments: vm.description || null,
               platform: vm.platform ? { name: vm.platform } : null,
             };

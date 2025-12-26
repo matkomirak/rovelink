@@ -4,6 +4,35 @@ import { eq } from "drizzle-orm";
 import { getProviderCollector } from "./providers/registry";
 import { netboxService } from "./netbox";
 
+/**
+ * Transform provider tags by adding provider prefix.
+ * 
+ * NON-NEGOTIABLE RULE: Provider tags MUST NOT be written to NetBox verbatim.
+ * All provider-originated tags must be prefixed with the provider name.
+ * 
+ * Example transformations:
+ * - "customer/acme" -> "proxmox_customer/acme"
+ * - "role/web" -> "vsphere_role/web"
+ * - "wave/1" -> "azure_wave/1"
+ * 
+ * @param tags - Original tags from provider
+ * @param providerKind - Provider type (e.g., "proxmox", "vsphere", "azure", "fake")
+ * @returns Prefixed tags safe for NetBox
+ */
+function namespaceTags(tags: string[], providerKind: string): string[] {
+  // Normalize provider kind to lowercase for consistent prefixing
+  const prefix = providerKind.toLowerCase();
+  
+  return tags.map(tag => {
+    // If tag already has a prefix matching this provider, don't double-prefix
+    if (tag.startsWith(`${prefix}_`)) {
+      return tag;
+    }
+    // Add provider prefix: "customer/acme" -> "proxmox_customer/acme"
+    return `${prefix}_${tag}`;
+  });
+}
+
 interface SyncCounts {
   created: number;
   updated: number;
@@ -77,13 +106,17 @@ export class SyncWorker {
           try {
             seenExternalIds.add(vm.externalId);
 
+            // Transform provider tags with provider prefix
+            // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
+            const namespacedTags = namespaceTags(vm.tags, syncRun.providerAccount.kind);
+
             // Upsert VM to NetBox
             const result = await netboxService.upsertVm({
               externalId: vm.externalId,
               name: vm.name,
               provider: vm.provider,
               primaryIp4: vm.primaryIp4,
-              tags: vm.tags,
+              tags: namespacedTags,
               customFields: {
                 ext_id: vm.externalId,
                 ext_provider: vm.provider,

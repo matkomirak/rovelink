@@ -51,6 +51,12 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - **Refresh Functionality:** Updates group/host counts from live NetBox data.
   - **Preview Data:** Sample hosts and groups displayed in list view for quick inspection.
   - **Gate Filtering:** VMs must pass governance checks (tenant, role, automatable tag) to be included in automation inventories.
+- **Provider Tag Namespacing:** All provider-originated tags are namespaced before writing to NetBox.
+  - **Non-Negotiable Rule:** Provider tags MUST NOT be written to NetBox verbatim - they are always prefixed with the provider name.
+  - **Transformation Rule:** Tags are transformed from `<key>/<value>` to `<provider>_<key>/<value>` (e.g., `customer/acme` → `proxmox_customer/acme`).
+  - **Scope:** Applied in sync pipelines (provider-sync.ts, syncWorker.ts, pipelines.ts) - NOT in provider output or gate logic.
+  - **NetBox Tag Handling:** Prefixed tags are created automatically; existing NetBox tags are preserved.
+  - **Explicit Prohibition:** Prefixed tags are NEVER used for gate decisions, tenant/role mapping, or CMDB field auto-population.
 - **Automation GATE System:** Governance layer ensuring VMs can only be automated when properly governed in CMDB.
   - **Inescapable Gate:** Gate evaluation is AUTOMATIC and NON-OPTIONAL - there is no execution path that bypasses this check.
   - **First-Class Phase:** Gate evaluation is an EXPLICIT PHASE that runs BEFORE inventory generation. Inventory generation ONLY reads from gate store, never triggers evaluation.

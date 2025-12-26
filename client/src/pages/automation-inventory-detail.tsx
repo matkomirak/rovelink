@@ -53,9 +53,15 @@ interface BlockedResponse {
   lastEvaluated: string | null;
 }
 
+interface CoreRule {
+  key: string;
+  label: string;
+  enforced: boolean;
+}
+
 interface PolicyResponse {
-  coreRules: string[];
-  optionalRules: {
+  coreRules: CoreRule[];
+  policy: {
     requireRole: boolean;
     requireContacts: boolean;
   };
@@ -93,10 +99,7 @@ export default function AutomationInventoryDetail() {
 
   const updatePolicyMutation = useMutation({
     mutationFn: async (updates: Partial<EligibilityPolicy>) => {
-      return apiRequest(`/api/inventories/${id}/policy`, {
-        method: "PATCH",
-        body: JSON.stringify(updates),
-      });
+      return apiRequest("PATCH", `/api/inventories/${id}/policy`, updates);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "policy"] });
@@ -126,7 +129,7 @@ export default function AutomationInventoryDetail() {
 
   const handleToggleRule = (rule: keyof EligibilityPolicy) => {
     if (!policyData) return;
-    const currentValue = policyData.optionalRules[rule];
+    const currentValue = policyData.policy[rule];
     updatePolicyMutation.mutate({ [rule]: !currentValue });
   };
 
@@ -331,14 +334,14 @@ export default function AutomationInventoryDetail() {
                 <span className="text-sm font-medium">Core Rules (Always Enforced)</span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {policyData.coreRules.map((rule: string) => (
+                {policyData.coreRules.map((rule: CoreRule) => (
                   <div
-                    key={rule}
+                    key={rule.key}
                     className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/50 border"
-                    data-testid={`core-rule-${rule.toLowerCase().replace(/\s+/g, "-")}`}
+                    data-testid={`core-rule-${rule.key}`}
                   >
                     <ShieldCheck className="h-4 w-4 text-green-500" />
-                    <span className="text-sm">{rule}</span>
+                    <span className="text-sm">{rule.label}</span>
                   </div>
                 ))}
               </div>
@@ -361,7 +364,7 @@ export default function AutomationInventoryDetail() {
                     </div>
                   </div>
                   <Switch
-                    checked={policyData.optionalRules.requireRole}
+                    checked={policyData.policy.requireRole}
                     onCheckedChange={() => handleToggleRule("requireRole")}
                     disabled={updatePolicyMutation.isPending}
                     data-testid="switch-require-role"
@@ -375,7 +378,7 @@ export default function AutomationInventoryDetail() {
                     </div>
                   </div>
                   <Switch
-                    checked={policyData.optionalRules.requireContacts}
+                    checked={policyData.policy.requireContacts}
                     onCheckedChange={() => handleToggleRule("requireContacts")}
                     disabled={updatePolicyMutation.isPending}
                     data-testid="switch-require-contacts"

@@ -218,7 +218,22 @@ export default function AutomationInventoryDetail() {
         </div>
         <div className="flex gap-2">
           {inventory.type === "linked" && (
-            <Button variant="outline" size="sm" data-testid="button-refresh">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="button-refresh"
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ["/api/inventories", id] });
+                queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "structure"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "gate-stats"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "blocked"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/inventories", id, "policy"] });
+                toast({
+                  title: "Refreshing",
+                  description: "Inventory data is being refreshed...",
+                });
+              }}
+            >
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>

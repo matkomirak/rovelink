@@ -489,47 +489,65 @@ export default function AutomationInventoryDetail() {
                   Blocked by Gate – Not Automatable
                 </CardTitle>
                 <CardDescription>
-                  These assets are blocked due to missing governance data.
-                  They will not appear in any automation inventory.
+                  These assets are blocked due to missing governance data in NetBox.
+                  To enable automation, set the required fields in NetBox directly.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {blockedData.blocked.map((asset) => (
-                    <div
-                      key={asset.asset_id}
-                      className="p-4 rounded-lg border border-orange-500/20 bg-orange-500/5"
-                      data-testid={`blocked-asset-${asset.name}`}
-                    >
-                      <div className="flex items-start justify-between flex-wrap gap-2">
-                        <div>
-                          <div className="font-medium flex items-center gap-2">
-                            <Server className="h-4 w-4 text-muted-foreground" />
-                            {asset.name}
+                  {blockedData.blocked.map((asset) => {
+                    const missingAutomatable = asset.missing.includes("automatable");
+                    const missingTenant = asset.missing.includes("tenant");
+                    const missingRole = asset.missing.includes("role");
+                    
+                    return (
+                      <div
+                        key={asset.asset_id}
+                        className="p-4 rounded-lg border border-orange-500/20 bg-orange-500/5"
+                        data-testid={`blocked-asset-${asset.name}`}
+                      >
+                        <div className="flex items-start justify-between flex-wrap gap-2">
+                          <div>
+                            <div className="font-medium flex items-center gap-2">
+                              <Server className="h-4 w-4 text-muted-foreground" />
+                              {asset.name}
+                            </div>
+                            <div className="text-sm text-muted-foreground mt-1">
+                              Source: {asset.source}
+                            </div>
                           </div>
-                          <div className="text-sm text-muted-foreground mt-1">
-                            Source: {asset.source}
+                          <Badge variant="outline" className="border-orange-500/50 text-orange-500">
+                            Blocked by gate
+                          </Badge>
+                        </div>
+                        <div className="mt-3">
+                          <div className="text-sm font-medium text-muted-foreground mb-1">Missing governance:</div>
+                          <div className="flex flex-wrap gap-1">
+                            {missingTenant && (
+                              <Badge variant="secondary" className="text-xs">
+                                Tenant not assigned
+                              </Badge>
+                            )}
+                            {missingRole && (
+                              <Badge variant="secondary" className="text-xs">
+                                Role not assigned
+                              </Badge>
+                            )}
+                            {missingAutomatable && (
+                              <Badge variant="secondary" className="text-xs bg-orange-500/10 text-orange-600 border-orange-500/30">
+                                Automation not explicitly permitted
+                              </Badge>
+                            )}
                           </div>
                         </div>
-                        <Badge variant="outline" className="border-orange-500/50 text-orange-500">
-                          Blocked by gate
-                        </Badge>
+                        {missingAutomatable && (
+                          <div className="text-xs text-orange-600 mt-2 bg-orange-500/5 p-2 rounded">
+                            Set <code className="bg-orange-500/20 px-1 rounded">automatable = true</code> on this VM in NetBox to allow automation.
+                          </div>
+                        )}
                       </div>
-                      <div className="mt-3">
-                        <div className="text-sm font-medium text-muted-foreground mb-1">Missing governance:</div>
-                        <div className="flex flex-wrap gap-1">
-                          {asset.missing.map((field) => (
-                            <Badge key={field} variant="secondary" className="text-xs">
-                              {field}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-2">
-                        {asset.blocked_reason}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>

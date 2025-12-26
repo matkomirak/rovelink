@@ -83,10 +83,17 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
       missing.push("role");
     }
 
-    // Check automatable tag - MUST come from CMDB only
-    const hasAutomatableTag = hasTag(vm.tags, "automatable");
-    if (!hasAutomatableTag) {
-      missing.push("tag:automatable");
+    // Check automatable custom field (boolean) - MUST come from CMDB only
+    // MANDATORY: This is the ONLY way to grant automation permission
+    // Provider data cannot influence this field
+    const isAutomatable = vm.custom_fields?.automatable === true;
+    if (!isAutomatable) {
+      missing.push("automatable");
+    }
+
+    // Log warning if legacy automatable tag exists (deprecated)
+    if (hasTag(vm.tags, "automatable")) {
+      console.warn(`[DEPRECATED] VM ${vm.name} has legacy 'automatable' tag. This tag is no longer used. Set custom_fields.automatable = true in NetBox instead.`);
     }
 
     const allowed = missing.length === 0;
@@ -94,7 +101,7 @@ export async function runGatePhase(cmdbId: string): Promise<GatePhaseResult> {
     let failureType: "governance" | undefined;
 
     if (allowed) {
-      reason = `VM has all required governance: tenant=${tenantName}, role=${roleName}, tag=automatable`;
+      reason = `VM has all required governance: tenant=${tenantName}, role=${roleName}, automatable=true`;
       allowedCount++;
     } else {
       // GOVERNANCE FAILURE - normal, visible, non-fatal

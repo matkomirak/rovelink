@@ -189,6 +189,15 @@ export class NetBoxAdapter {
         object_types: ['virtualization.virtualmachine'],
         filter_logic: 'loose',
       },
+      {
+        name: 'automatable',
+        label: 'Automatable',
+        type: 'boolean',
+        description: 'Explicit permission for automation to act on this asset. Must be set to true by a human operator.',
+        object_types: ['virtualization.virtualmachine'],
+        filter_logic: 'loose',
+        default: false,
+      },
     ];
 
     const results: string[] = [];

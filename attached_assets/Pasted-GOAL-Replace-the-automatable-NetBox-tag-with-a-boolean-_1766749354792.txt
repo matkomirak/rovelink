@@ -1,0 +1,109 @@
+GOAL
+
+Replace the automatable NetBox tag with a boolean custom field and update all gate logic to rely only on this field.
+
+PART 1 — NetBox Custom Field Definition
+Required NetBox Custom Field
+
+Create (or assume exists) a NetBox custom field on Virtual Machines:
+
+Name: automatable
+
+Type: Boolean
+
+Default: false
+
+Description:
+Explicit permission for automation to act on this asset
+
+PART 2 — Remove automatable Tag Usage Everywhere
+Backend Changes
+
+Remove all logic that checks for an automatable tag
+
+Do NOT create or sync any automatable tags
+
+Do NOT infer automatable from provider data
+
+Any existing automatable tag must be ignored completely.
+
+PART 3 — Update Gate Logic (MANDATORY)
+New Gate Rule
+
+A VM is allowed into automation inventory only if all are true:
+
+NetBox tenant is set
+
+NetBox role is set
+
+NetBox custom field automatable === true
+
+Explicitly Forbidden
+
+Do NOT treat missing field as true
+
+Do NOT treat missing field as false implicitly
+
+Do NOT auto-set this field anywhere
+
+If automatable is missing or false → BLOCK
+
+PART 4 — Pipeline / Sync Behavior
+What the pipeline MUST do
+
+Read the automatable boolean field from NetBox
+
+Use it only for gate evaluation
+
+What the pipeline MUST NOT do
+
+Never write automatable = true
+
+Never change this field automatically
+
+Never map provider tags to this field
+
+PART 5 — UI Changes
+Display Rules
+
+Show Automatable: true / false clearly on the asset
+
+If blocked due to automatable === false, show reason:
+
+Automation not explicitly permitted
+
+Do NOT add
+
+Toggles
+
+Buttons
+
+Inline editing
+
+Editing happens only in NetBox.
+
+PART 6 — Migration / Backward Compatibility (Minimal)
+
+If legacy automatable tags exist:
+
+Ignore them
+
+Do NOT convert them automatically
+
+Optional: log a warning that the tag is deprecated
+
+ACCEPTANCE CRITERIA
+
+No gate logic checks tags for automatable
+
+Gate relies exclusively on boolean custom field
+
+Assets default to not automatable
+
+Automation inventory includes only explicitly permitted assets
+
+Provider data cannot influence automatable state
+
+FINAL CONSTRAINT
+
+If an asset becomes automatable without a human setting automatable = true in NetBox, the implementation is incorrect.

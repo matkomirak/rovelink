@@ -62,7 +62,8 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - **First-Class Phase:** Gate evaluation is an EXPLICIT PHASE that runs BEFORE inventory generation. Inventory generation ONLY reads from gate store, never triggers evaluation.
   - **Provider Governance Blindness:** Providers emit raw observed data only - they have NO knowledge of tenants, automation, or gating concepts.
   - **CMDB Authority:** Governance authority resides EXCLUSIVELY in the CMDB. Provider metadata may only suggest, never confirm intent.
-  - **Gate Requirements:** VMs require three governance fields in NetBox to be allowed for automation: (1) tenant assignment, (2) role assignment, (3) "automatable" tag.
+  - **Gate Requirements:** VMs require three governance fields in NetBox to be allowed for automation: (1) tenant assignment, (2) role assignment, (3) `automatable` boolean custom field set to `true`.
+  - **Automatable Custom Field:** Boolean custom field on VMs that must be explicitly set to `true` by a human operator. Default is `false`. The legacy `automatable` tag is deprecated and ignored.
   - **Stable Asset Identity:** Uses `asset_id` (deterministic hash of source + external ID) as stable internal identity. VM names are display-only, NOT trusted identifiers.
   - **Ephemeral State:** Gate decisions and provider hints are stored in ephemeral in-memory storage (derived state only, can be dropped at any time).
   - **Failure Classification:** 

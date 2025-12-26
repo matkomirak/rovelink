@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useLocation, Link } from "wouter";
+import { useParams, useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Edit, RefreshCw, Server, Users, ChevronRight } from "lucide-react";
+import { ArrowLeft, Edit, RefreshCw, Server, Users, ChevronRight, Download, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
 import { type AutomationInventory } from "@shared/schema";
 import { useState } from "react";
 
@@ -23,6 +23,29 @@ interface InventoryStructure {
   }>;
 }
 
+interface GateStats {
+  allowed: number;
+  blocked: number;
+  total: number;
+  lastEvaluated: string | null;
+}
+
+interface BlockedAsset {
+  asset_id: string;
+  name: string;
+  source: string;
+  missing: string[];
+  blocked_reason: string;
+  last_evaluated: string;
+}
+
+interface BlockedResponse {
+  blocked: BlockedAsset[];
+  count: number;
+  source: string;
+  lastEvaluated: string | null;
+}
+
 export default function AutomationInventoryDetail() {
   const { id } = useParams();
   const [, setLocation] = useLocation();
@@ -36,6 +59,24 @@ export default function AutomationInventoryDetail() {
   const { data: structure, isLoading: structureLoading, error: structureError } = useQuery<InventoryStructure>({
     queryKey: ["/api/inventories", id, "structure"],
   });
+
+  const { data: gateStats } = useQuery<GateStats>({
+    queryKey: ["/api/inventories", id, "gate-stats"],
+    enabled: inventory?.type === "linked",
+  });
+
+  const { data: blockedData } = useQuery<BlockedResponse>({
+    queryKey: ["/api/inventories", id, "blocked"],
+    enabled: inventory?.type === "linked",
+  });
+
+  const handleDownloadAutomation = () => {
+    window.location.href = `/api/inventories/${id}/automation.yml`;
+  };
+
+  const handleDownloadBlocked = () => {
+    window.location.href = `/api/inventories/${id}/blocked.json`;
+  };
 
   if (inventoryLoading || structureLoading) {
     return (
@@ -82,7 +123,7 @@ export default function AutomationInventoryDetail() {
           {parsedError?.hint && (
             <CardContent>
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-md p-4">
-                <p className="text-sm font-medium text-blue-400 mb-2">💡 How to Fix</p>
+                <p className="text-sm font-medium text-blue-400 mb-2">How to Fix</p>
                 <p className="text-sm text-muted-foreground">{parsedError.hint}</p>
                 {parsedError.cmdb_name && (
                   <p className="text-xs text-muted-foreground mt-2">
@@ -103,7 +144,7 @@ export default function AutomationInventoryDetail() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"
@@ -116,7 +157,7 @@ export default function AutomationInventoryDetail() {
           <div>
             <h1 className="text-3xl font-bold" data-testid="text-inventory-name">{inventory.name}</h1>
             <p className="text-muted-foreground">
-              {inventory.type === "linked" ? "Linked to CMDB" : `File-based (${inventory.fileFormat?.toUpperCase()})`}
+              {inventory.type === "linked" ? "Inventory Source: CMDB" : `File-based (${inventory.fileFormat?.toUpperCase()})`}
             </p>
           </div>
         </div>
@@ -140,6 +181,88 @@ export default function AutomationInventoryDetail() {
           )}
         </div>
       </div>
+
+      {inventory.type === "linked" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Card className="border-green-500/30">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-green-500" />
+                <CardTitle>Automation Inventory</CardTitle>
+              </div>
+              <CardDescription>
+                Assets that passed the gate and are safe to automate
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-3xl font-bold text-green-500" data-testid="text-allowed-count">
+                    {gateStats?.allowed ?? inventory.hostsCount ?? 0}
+                  </div>
+                  <div className="text-sm text-muted-foreground">allowed assets</div>
+                </div>
+                <Button
+                  onClick={handleDownloadAutomation}
+                  className="gap-2"
+                  data-testid="button-download-automation"
+                >
+                  <Download className="h-4 w-4" />
+                  Download automation.yml
+                </Button>
+              </div>
+              {gateStats?.lastEvaluated && (
+                <div className="text-xs text-muted-foreground">
+                  Last evaluated: {new Date(gateStats.lastEvaluated).toLocaleString()}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-orange-500/30">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldOff className="h-5 w-5 text-orange-500" />
+                <CardTitle>Blocked Assets</CardTitle>
+              </div>
+              <CardDescription>
+                Assets blocked by gate due to missing governance data
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-3xl font-bold text-orange-500" data-testid="text-blocked-count">
+                    {gateStats?.blocked ?? 0}
+                  </div>
+                  <div className="text-sm text-muted-foreground">blocked assets</div>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadBlocked}
+                  className="gap-2"
+                  data-testid="button-download-blocked"
+                  disabled={!gateStats?.blocked}
+                >
+                  <Download className="h-4 w-4" />
+                  Download blocked.json
+                </Button>
+              </div>
+              {blockedData && blockedData.count > 0 && (
+                <div className="bg-orange-500/10 border border-orange-500/20 rounded-md p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5" />
+                    <div className="text-sm text-muted-foreground">
+                      These assets are blocked due to missing governance data (tenant, role, or automatable tag).
+                      They will not appear in any automation inventory.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         <Card>
@@ -182,6 +305,12 @@ export default function AutomationInventoryDetail() {
             <Server className="h-4 w-4 mr-2" />
             Hosts
           </TabsTrigger>
+          {inventory.type === "linked" && blockedData && blockedData.count > 0 && (
+            <TabsTrigger value="blocked" data-testid="tab-blocked">
+              <ShieldOff className="h-4 w-4 mr-2" />
+              Blocked by Gate ({blockedData.count})
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="groups" className="space-y-4">
@@ -340,7 +469,7 @@ export default function AutomationInventoryDetail() {
                         <div>
                           <div className="font-medium">{host.name}</div>
                           <div className="text-sm text-muted-foreground">
-                            {host.ansible_host || "No IP"} • {host.groups.length}{" "}
+                            {host.ansible_host || "No IP"} - {host.groups.length}{" "}
                             {host.groups.length === 1 ? "group" : "groups"}
                           </div>
                         </div>
@@ -353,6 +482,62 @@ export default function AutomationInventoryDetail() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {inventory.type === "linked" && blockedData && blockedData.count > 0 && (
+          <TabsContent value="blocked" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldOff className="h-5 w-5 text-orange-500" />
+                  Blocked by Gate
+                </CardTitle>
+                <CardDescription>
+                  These assets are blocked due to missing governance data.
+                  They will not appear in any automation inventory.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {blockedData.blocked.map((asset) => (
+                    <div
+                      key={asset.asset_id}
+                      className="p-4 rounded-lg border border-orange-500/20 bg-orange-500/5"
+                      data-testid={`blocked-asset-${asset.name}`}
+                    >
+                      <div className="flex items-start justify-between flex-wrap gap-2">
+                        <div>
+                          <div className="font-medium flex items-center gap-2">
+                            <Server className="h-4 w-4 text-muted-foreground" />
+                            {asset.name}
+                          </div>
+                          <div className="text-sm text-muted-foreground mt-1">
+                            Source: {asset.source}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="border-orange-500/50 text-orange-500">
+                          Blocked by gate
+                        </Badge>
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">Missing governance:</div>
+                        <div className="flex flex-wrap gap-1">
+                          {asset.missing.map((field) => (
+                            <Badge key={field} variant="secondary" className="text-xs">
+                              {field}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-2">
+                        {asset.blocked_reason}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

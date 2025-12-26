@@ -62,8 +62,20 @@ The UI follows a dark-first design principle using the Inter font family for UI 
   - **First-Class Phase:** Gate evaluation is an EXPLICIT PHASE that runs BEFORE inventory generation. Inventory generation ONLY reads from gate store, never triggers evaluation.
   - **Provider Governance Blindness:** Providers emit raw observed data only - they have NO knowledge of tenants, automation, or gating concepts.
   - **CMDB Authority:** Governance authority resides EXCLUSIVELY in the CMDB. Provider metadata may only suggest, never confirm intent.
-  - **Gate Requirements:** VMs require three governance fields in NetBox to be allowed for automation: (1) tenant assignment, (2) role assignment, (3) `automatable` boolean custom field set to `true`.
+  - **Gate Requirements:** VMs require proper governance in NetBox to be allowed for automation:
+    1. Status must be `active` (not offline, planned, staged, decommissioning, etc.)
+    2. Provider state must NOT be `missing` (VM must exist in provider inventory)
+    3. Tenant must be assigned
+    4. Role must be assigned
+    5. `automatable` boolean custom field set to `true`
   - **Automatable Custom Field:** Boolean custom field on VMs that must be explicitly set to `true` by a human operator. Default is `false`. The legacy `automatable` tag is deprecated and ignored.
+  - **Missing CI Handling:** VMs that disappear from provider inventory are NOT deleted. Instead they are:
+    - Marked with status = `offline`
+    - Marked with custom_field `provider_state` = `missing`
+    - Preserved with all governance fields (tenant, role, automatable) intact
+    - Automatically blocked by gate from automation
+    - Can be recovered if VM reappears in provider inventory
+  - **Cluster Safety Check:** Before marking VMs as missing, the sync validates the cluster matches the default Bridge cluster. This prevents multi-provider conflicts where one provider's sync could accidentally mark another provider's VMs as missing.
   - **Stable Asset Identity:** Uses `asset_id` (deterministic hash of source + external ID) as stable internal identity. VM names are display-only, NOT trusted identifiers.
   - **Ephemeral State:** Gate decisions and provider hints are stored in ephemeral in-memory storage (derived state only, can be dropped at any time).
   - **Failure Classification:** 

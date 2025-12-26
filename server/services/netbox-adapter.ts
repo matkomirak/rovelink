@@ -583,6 +583,18 @@ export class NetBoxAdapter {
           };
           hasChanges = true;
         }
+        
+        // BACKFILL: Set gate_provider_id if it's currently empty (for legacy VMs synced before ownership tracking)
+        // This only happens if the VM has no existing owner - we never overwrite existing ownership
+        const existingGateProviderId = existingVm.custom_fields?.gate_provider_id;
+        if (providerId && (!existingGateProviderId || existingGateProviderId === '')) {
+          console.log(`[OWNERSHIP] Backfilling gate_provider_id for VM '${vmData.name}' (ext_id: ${extId}): Setting to '${providerId}'`);
+          deltaPayload.custom_fields = {
+            ...deltaPayload.custom_fields,
+            gate_provider_id: providerId,
+          };
+          hasChanges = true;
+        }
 
         if (hasChanges) {
           await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, deltaPayload);

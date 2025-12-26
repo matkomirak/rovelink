@@ -198,6 +198,15 @@ export class NetBoxAdapter {
         filter_logic: 'loose',
         default: false,
       },
+      {
+        name: 'provider_state',
+        label: 'Provider State',
+        type: 'text',
+        description: 'Last known provider presence state (active or missing). Managed automatically by Bridge sync.',
+        object_types: ['virtualization.virtualmachine'],
+        filter_logic: 'loose',
+        default: 'active',
+      },
     ];
 
     const results: string[] = [];
@@ -424,6 +433,7 @@ export class NetBoxAdapter {
           status: status,
           custom_fields: {
             ext_id: extId,
+            provider_state: 'active', // Always set to active when syncing from provider
           },
         };
 
@@ -500,6 +510,16 @@ export class NetBoxAdapter {
         const newTagIds = tagIds.sort();
         if (JSON.stringify(existingTagIds) !== JSON.stringify(newTagIds) && tagIds.length > 0) {
           deltaPayload.tags = tagIds;
+          hasChanges = true;
+        }
+
+        // Always update provider_state to active when syncing from provider
+        const existingProviderState = existingVm.custom_fields?.provider_state;
+        if (existingProviderState !== 'active') {
+          deltaPayload.custom_fields = {
+            ...deltaPayload.custom_fields,
+            provider_state: 'active',
+          };
           hasChanges = true;
         }
 
@@ -805,6 +825,108 @@ export class NetBoxAdapter {
     } catch (error: any) {
       console.warn(`Failed to get/create tag ${tagName}: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Get all VMs that have been synced by Bridge (have ext_id custom field)
+   * Returns VMs with their ext_id and cluster info for missing CI detection
+   */
+  async getSyncedVms(): Promise<Array<{
+    id: number;
+    name: string;
+    extId: string;
+    clusterId: number | null;
+    clusterName: string | null;
+    providerState: string | null;
+    status: string;
+  }>> {
+    try {
+      const vms: any[] = [];
+      let offset = 0;
+      const limit = 100;
+
+      while (true) {
+        const response = await this.client.get('/virtualization/virtual-machines/', {
+          params: { offset, limit }
+        });
+
+        if (!response.data.results || response.data.results.length === 0) {
+          break;
+        }
+
+        // Only include VMs that have ext_id set (synced by Bridge)
+        const syncedVms = response.data.results.filter(
+          (vm: any) => vm.custom_fields?.ext_id
+        );
+        vms.push(...syncedVms);
+
+        if (!response.data.next) {
+          break;
+        }
+
+        offset += limit;
+      }
+
+      return vms.map((vm: any) => ({
+        id: vm.id,
+        name: vm.name,
+        extId: vm.custom_fields?.ext_id || '',
+        clusterId: vm.cluster?.id || null,
+        clusterName: vm.cluster?.name || null,
+        providerState: vm.custom_fields?.provider_state || null,
+        status: vm.status?.value || 'unknown',
+      }));
+    } catch (error: any) {
+      console.error('Failed to get synced VMs:', error.message);
+      throw new Error(`Failed to get synced VMs: ${error.message}`);
+    }
+  }
+
+  /**
+   * Mark a VM as missing (not present in provider inventory).
+   * 
+   * IMPORTANT: This does NOT delete the VM. It only:
+   * - Sets status = offline
+   * - Sets provider_state = missing
+   * - Preserves all governance fields (tenant, role, automatable)
+   * - Preserves all tags
+   * 
+   * @param vmId - NetBox VM ID
+   * @param vmName - VM name for logging
+   */
+  async markVmAsMissing(vmId: number, vmName: string): Promise<void> {
+    try {
+      await this.client.patch(`/virtualization/virtual-machines/${vmId}/`, {
+        status: 'offline',
+        custom_fields: {
+          provider_state: 'missing',
+        },
+      });
+      console.log(`Marked VM as missing: ${vmName} (ID: ${vmId})`);
+    } catch (error: any) {
+      console.error(`Failed to mark VM as missing: ${vmName}`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the default cluster ID used by Bridge sync.
+   * Used for cluster safety check when marking VMs as missing.
+   */
+  async getDefaultClusterId(): Promise<number | null> {
+    try {
+      const response = await this.client.get('/virtualization/clusters/', {
+        params: { name: 'Bridge-Default' }
+      });
+
+      if (response.data.count > 0) {
+        return response.data.results[0].id;
+      }
+      return null;
+    } catch (error: any) {
+      console.error('Failed to get default cluster ID:', error.message);
+      return null;
     }
   }
 }

@@ -1,0 +1,147 @@
+GOAL
+
+When syncing provider data into the CMDB, handle missing CIs safely by:
+
+Detecting when previously known CIs are no longer reported by the provider
+
+Marking them as offline instead of deleting
+
+Tracking provider presence via a custom field
+
+Ensuring missing/offline CIs are blocked from automation
+
+DEFINITIONS
+
+Provider-seen CI: A CI reported in the current provider inventory
+
+Missing CI: A CI previously synced but not present in current provider inventory
+
+Cluster name: Provider cluster identifier used as an additional safety check
+
+PART 1 — Required NetBox Custom Field
+
+Create (or assume exists) a NetBox custom field on Virtual Machines:
+
+Name: provider_state
+
+Type: Text (or choice if preferred)
+
+Allowed values: active, missing
+
+Description:
+Last known provider presence state
+
+PART 2 — Provider Sync Logic (MANDATORY)
+During each provider → CMDB sync cycle:
+Step 1 — Build provider inventory set
+
+Collect all provider VMs from the current sync
+
+Track them by stable internal asset_id
+
+Step 2 — Process FOUND items
+
+For each CI that exists in provider inventory:
+
+Ensure NetBox VM exists (create/update as usual)
+
+Set:
+
+status = active
+
+custom_field.provider_state = active
+
+This must happen every sync for found items.
+
+Step 3 — Process MISSING items (CRITICAL)
+
+For each CI that exists in NetBox but is NOT found in provider inventory:
+
+Safety check (MANDATORY)
+
+Before taking any action:
+
+Verify that the CI’s cluster name matches the current provider cluster
+
+If cluster does NOT match:
+
+Do nothing
+
+Skip this CI
+
+If cluster matches:
+
+Update NetBox VM:
+
+status = offline
+
+custom_field.provider_state = missing
+
+❌ Do NOT delete the CI
+❌ Do NOT remove tenant, role, or automatable
+❌ Do NOT overwrite tags
+
+PART 3 — Automation Gate Integration
+Gate rule extension
+
+A CI must be BLOCKED from automation if any of the following are true:
+
+status != active
+
+custom_field.provider_state == missing
+
+tenant missing
+
+role missing
+
+automatable != true
+
+PART 4 — Blocked Assets Handling
+
+If a CI is:
+
+status = offline
+
+AND provider_state = missing
+
+Then during inventory generation:
+
+It MUST NOT appear in automation inventory
+
+It MUST appear in Blocked Assets output with reason:
+
+"blocked_reason": "CI not present in provider (provider_state = missing)"
+
+PART 5 — Explicit Prohibitions
+
+Do NOT delete CIs automatically
+
+Do NOT assume missing = decommissioned
+
+Do NOT clear governance fields
+
+Do NOT auto-recover without provider reappearance
+
+Recovery happens automatically only if:
+
+CI reappears in provider inventory
+
+Sync sets status = active
+
+Sync sets provider_state = active
+
+ACCEPTANCE CRITERIA
+
+Missing provider VMs are marked offline, not deleted
+
+provider_state reflects last provider presence
+
+Cluster mismatch prevents accidental state changes
+
+Offline/missing CIs are always blocked from automation
+
+Reappearing VMs are automatically restored to active
+
+FINAL CONSTRAINT
+
+If a CI not present in the provider is still automatable, the implementation is incorrect.

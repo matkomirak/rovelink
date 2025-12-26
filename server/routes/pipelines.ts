@@ -453,6 +453,9 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
         const vms = await collector.listVms();
         await addLog(`Found ${vms.length} VMs to process`);
 
+        // Track seen ext_ids for missing CI detection
+        const seenExtIds = new Set<string>();
+
         await addLog(`Loaded ${mappings.length} mapping rule(s): ${mappings.map(m => `${m.sourceType} -> ${m.targetType}`).join(', ')}`);
         await addLog("Starting sync to target CMDB...");
 
@@ -514,6 +517,10 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
 
             // Upsert to CMDB
             const extId = vm.externalId;
+            
+            // Track this ext_id as seen for missing CI detection
+            seenExtIds.add(extId);
+            
             const result = await (cmdbAdapter as NetBoxAdapter).upsertVm(transformedVm, extId);
 
             // Sync primary IP address if available
@@ -546,6 +553,61 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
           } catch (vmError: any) {
             summary.errors++;
             await addLog(`[${processedCount}/${vms.length}] ERROR: ${vm.name} - ${vmError.message}`);
+          }
+        }
+
+        // MISSING CI DETECTION
+        // After processing found VMs, detect VMs that exist in NetBox but not in provider
+        if (cmdbAdapter instanceof NetBoxAdapter) {
+          await addLog("Checking for missing CIs (VMs no longer in provider)...");
+          
+          try {
+            // Get all VMs previously synced by Bridge
+            const syncedVms = await cmdbAdapter.getSyncedVms();
+            const defaultClusterId = await cmdbAdapter.getDefaultClusterId();
+            
+            let missingCount = 0;
+            let skippedCount = 0;
+            
+            for (const netboxVm of syncedVms) {
+              // Check if this VM was seen in current provider inventory
+              if (!seenExtIds.has(netboxVm.extId)) {
+                // SAFETY CHECK: Only mark as missing if cluster matches
+                // This prevents accidentally marking VMs from other providers/clusters
+                if (defaultClusterId !== null && netboxVm.clusterId !== defaultClusterId) {
+                  // Cluster mismatch - skip this VM (managed by different provider)
+                  skippedCount++;
+                  continue;
+                }
+                
+                // Already marked as missing - skip
+                if (netboxVm.providerState === 'missing' && netboxVm.status === 'offline') {
+                  continue;
+                }
+                
+                // Mark VM as missing (offline)
+                // This does NOT delete the VM or clear governance fields
+                try {
+                  await cmdbAdapter.markVmAsMissing(netboxVm.id, netboxVm.name);
+                  missingCount++;
+                  await addLog(`MISSING: ${netboxVm.name} (not in provider inventory, marked offline)`);
+                } catch (markError: any) {
+                  await addLog(`WARNING: Could not mark ${netboxVm.name} as missing: ${markError.message}`);
+                }
+              }
+            }
+            
+            if (missingCount > 0) {
+              await addLog(`Marked ${missingCount} VM(s) as missing (offline)`);
+            }
+            if (skippedCount > 0) {
+              await addLog(`Skipped ${skippedCount} VM(s) due to cluster mismatch (different provider)`);
+            }
+            if (missingCount === 0 && skippedCount === 0) {
+              await addLog("No missing CIs detected");
+            }
+          } catch (missingError: any) {
+            await addLog(`WARNING: Failed to check for missing CIs: ${missingError.message}`);
           }
         }
 

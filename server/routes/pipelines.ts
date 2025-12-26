@@ -521,7 +521,23 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
             // Track this ext_id as seen for missing CI detection
             seenExtIds.add(extId);
             
-            const result = await (cmdbAdapter as NetBoxAdapter).upsertVm(transformedVm, extId);
+            // Pass providerId for ownership tracking
+            // This ensures gate_provider_id is set on creation and ownership is validated on updates
+            const providerId = providerAccount.id;
+            const clusterName = 'Bridge-Default'; // Default cluster used by Bridge
+            
+            const result = await (cmdbAdapter as NetBoxAdapter).upsertVm(
+              transformedVm, 
+              extId, 
+              providerId, 
+              clusterName
+            );
+            
+            // Check if VM was skipped due to ownership
+            if (result.skipped) {
+              await addLog(`[${processedCount}/${vms.length}] SKIPPED: ${vm.name} - ${result.skipReason}`);
+              continue;
+            }
 
             // Sync primary IP address if available
             const primaryIp = vm.primaryIp4;
@@ -558,25 +574,35 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
 
         // MISSING CI DETECTION
         // After processing found VMs, detect VMs that exist in NetBox but not in provider
+        // CRITICAL: Only mark VMs as missing if they are owned by this provider (gate_provider_id check)
         if (cmdbAdapter instanceof NetBoxAdapter) {
           await addLog("Checking for missing CIs (VMs no longer in provider)...");
           
           try {
             // Get all VMs previously synced by Bridge
             const syncedVms = await cmdbAdapter.getSyncedVms();
-            const defaultClusterId = await cmdbAdapter.getDefaultClusterId();
+            const currentProviderId = providerAccount.id;
+            const currentClusterName = 'Bridge-Default';
             
             let missingCount = 0;
-            let skippedCount = 0;
+            let skippedOwnershipCount = 0;
+            let skippedClusterCount = 0;
             
             for (const netboxVm of syncedVms) {
               // Check if this VM was seen in current provider inventory
               if (!seenExtIds.has(netboxVm.extId)) {
-                // SAFETY CHECK: Only mark as missing if cluster matches
-                // This prevents accidentally marking VMs from other providers/clusters
-                if (defaultClusterId !== null && netboxVm.clusterId !== defaultClusterId) {
-                  // Cluster mismatch - skip this VM (managed by different provider)
-                  skippedCount++;
+                // MANDATORY SAFETY CHECK 1: gate_provider_id must match current provider
+                // If a provider can change the state of a CI it does not own, the implementation is INCORRECT
+                if (netboxVm.gateProviderId && netboxVm.gateProviderId !== currentProviderId) {
+                  // Owned by different provider - DO NOT touch this VM
+                  skippedOwnershipCount++;
+                  continue;
+                }
+                
+                // SAFETY CHECK 2: Cluster name must match
+                if (netboxVm.clusterName && netboxVm.clusterName !== currentClusterName) {
+                  // Cluster mismatch - skip this VM
+                  skippedClusterCount++;
                   continue;
                 }
                 
@@ -586,7 +612,7 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
                 }
                 
                 // Mark VM as missing (offline)
-                // This does NOT delete the VM or clear governance fields
+                // This does NOT delete the VM or clear governance fields (tenant, role, automatable)
                 try {
                   await cmdbAdapter.markVmAsMissing(netboxVm.id, netboxVm.name);
                   missingCount++;
@@ -600,10 +626,13 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
             if (missingCount > 0) {
               await addLog(`Marked ${missingCount} VM(s) as missing (offline)`);
             }
-            if (skippedCount > 0) {
-              await addLog(`Skipped ${skippedCount} VM(s) due to cluster mismatch (different provider)`);
+            if (skippedOwnershipCount > 0) {
+              await addLog(`Skipped ${skippedOwnershipCount} VM(s) owned by different provider`);
             }
-            if (missingCount === 0 && skippedCount === 0) {
+            if (skippedClusterCount > 0) {
+              await addLog(`Skipped ${skippedClusterCount} VM(s) due to cluster mismatch`);
+            }
+            if (missingCount === 0 && skippedOwnershipCount === 0 && skippedClusterCount === 0) {
               await addLog("No missing CIs detected");
             }
           } catch (missingError: any) {

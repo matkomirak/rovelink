@@ -4,8 +4,9 @@ import { automationInventories, cmdbAccounts, type AutomationInventory, type Ins
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
-import { runGatePhase, readAllowedAssets } from "../services/gate-phase";
+import { runGatePhase, readAllowedAssets, readBlockedAssets, getGateSummary } from "../services/gate-phase";
 import { deriveAssetId } from "../services/asset-identity";
+import { gateStore } from "../services/gate-store";
 
 // Auth request type
 interface AuthRequest extends Request {
@@ -828,6 +829,345 @@ function parseInventoryFile(content: string, format: string) {
       hosts: hostsList,
     },
   };
+}
+
+// ================================================================
+// AUTOMATION.YML - Download allowed assets as Ansible inventory
+// ================================================================
+router.get("/:id/automation.yml", async (req, res) => {
+  try {
+    const [inventory] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    if (inventory.type !== "linked" || !inventory.sourceRef) {
+      return res.status(400).json({ 
+        message: "automation.yml is only available for linked inventories" 
+      });
+    }
+
+    // Get CMDB account
+    const [cmdb] = await db
+      .select()
+      .from(cmdbAccounts)
+      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+
+    if (!cmdb) {
+      return res.status(404).json({ message: "Linked CMDB not found" });
+    }
+
+    // Run gate phase (first-class phase)
+    await runGatePhase(cmdb.id);
+
+    // Read ONLY allowed assets from gate store
+    const allowedDecisions = await readAllowedAssets();
+    const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
+
+    // Fetch VMs from NetBox
+    const adapter = new NetBoxAdapter(cmdb.config as any);
+    const vms = await adapter.listAllVms();
+
+    // Filter to allowed VMs only
+    const allowedVms = vms.filter((vm: any) => {
+      const assetId = deriveAssetId(cmdb.id, vm.name);
+      return allowedAssetIds.has(assetId);
+    });
+
+    // INVARIANT CHECK: Verify NO blocked assets in output
+    for (const vm of allowedVms) {
+      const assetId = deriveAssetId(cmdb.id, vm.name);
+      if (!allowedAssetIds.has(assetId)) {
+        throw new Error(`INVARIANT VIOLATION: Blocked VM "${vm.name}" in automation inventory`);
+      }
+    }
+
+    // Build Ansible inventory YAML
+    const hostsSection: Record<string, any> = {};
+    
+    for (const vm of allowedVms) {
+      const assetId = deriveAssetId(cmdb.id, vm.name);
+      const ip = vm.primary_ip4?.address?.split('/')[0] || '';
+      
+      hostsSection[vm.name] = {
+        asset_id: assetId,
+        ansible_host: ip || undefined,
+        role: vm.role?.name || vm.role || undefined,
+        tenant: vm.tenant?.name || vm.tenant || undefined,
+        site: vm.site?.name || undefined,
+        cluster: vm.cluster?.name || undefined,
+        status: vm.status?.value || vm.status || undefined,
+      };
+      
+      // Remove undefined values
+      Object.keys(hostsSection[vm.name]).forEach(key => {
+        if (hostsSection[vm.name][key] === undefined) {
+          delete hostsSection[vm.name][key];
+        }
+      });
+    }
+
+    const inventoryYaml = generateAnsibleInventoryYaml(hostsSection, allowedVms);
+
+    // Set headers for YAML file download
+    res.setHeader('Content-Type', 'text/yaml');
+    res.setHeader('Content-Disposition', `attachment; filename="${inventory.name}_automation.yml"`);
+    res.send(inventoryYaml);
+  } catch (error: any) {
+    console.error("Error generating automation.yml:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ================================================================
+// BLOCKED.JSON - Download blocked assets with reasons
+// ================================================================
+router.get("/:id/blocked.json", async (req, res) => {
+  try {
+    const [inventory] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    if (inventory.type !== "linked" || !inventory.sourceRef) {
+      return res.status(400).json({ 
+        message: "blocked.json is only available for linked inventories" 
+      });
+    }
+
+    // Get CMDB account
+    const [cmdb] = await db
+      .select()
+      .from(cmdbAccounts)
+      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+
+    if (!cmdb) {
+      return res.status(404).json({ message: "Linked CMDB not found" });
+    }
+
+    // Run gate phase (first-class phase)
+    await runGatePhase(cmdb.id);
+
+    // Read ONLY blocked assets from gate store
+    const blockedDecisions = await readBlockedAssets();
+
+    // Format blocked assets according to spec
+    const blockedAssets = blockedDecisions.map(decision => ({
+      asset_id: decision.assetId,
+      name: decision.vmName,
+      source: cmdb.name,
+      missing: decision.missing,
+      blocked_reason: decision.reason || "Missing governance data",
+      last_evaluated: decision.evaluatedAt.toISOString(),
+    }));
+
+    // Set headers for JSON file download
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${inventory.name}_blocked.json"`);
+    res.json(blockedAssets);
+  } catch (error: any) {
+    console.error("Error generating blocked.json:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ================================================================
+// BLOCKED - API endpoint for UI to get blocked assets list
+// ================================================================
+router.get("/:id/blocked", async (req, res) => {
+  try {
+    const [inventory] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    if (inventory.type !== "linked" || !inventory.sourceRef) {
+      return res.json({ 
+        blocked: [],
+        count: 0,
+        message: "Blocked assets only available for linked inventories" 
+      });
+    }
+
+    // Get CMDB account
+    const [cmdb] = await db
+      .select()
+      .from(cmdbAccounts)
+      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+
+    if (!cmdb) {
+      return res.status(404).json({ message: "Linked CMDB not found" });
+    }
+
+    // Check if gate evaluation has been completed
+    if (!gateStore.isEvaluationComplete()) {
+      // Run gate phase if not yet evaluated
+      await runGatePhase(cmdb.id);
+    }
+
+    // Read blocked assets from gate store
+    const blockedDecisions = await readBlockedAssets();
+
+    // Format for UI
+    const blocked = blockedDecisions.map(decision => ({
+      asset_id: decision.assetId,
+      name: decision.vmName,
+      source: cmdb.name,
+      missing: decision.missing,
+      blocked_reason: decision.reason || "Missing governance data",
+      last_evaluated: decision.evaluatedAt.toISOString(),
+    }));
+
+    res.json({
+      blocked,
+      count: blocked.length,
+      source: cmdb.name,
+      lastEvaluated: gateStore.getLastEvaluationTime()?.toISOString() || null,
+    });
+  } catch (error: any) {
+    console.error("Error fetching blocked assets:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ================================================================
+// GATE STATS - Get allowed/blocked counts for an inventory
+// ================================================================
+router.get("/:id/gate-stats", async (req, res) => {
+  try {
+    const [inventory] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, req.params.id));
+
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    if (inventory.type !== "linked" || !inventory.sourceRef) {
+      return res.json({ 
+        allowed: inventory.hostsCount || 0,
+        blocked: 0,
+        message: "Gate stats only available for linked inventories" 
+      });
+    }
+
+    // Get CMDB account
+    const [cmdb] = await db
+      .select()
+      .from(cmdbAccounts)
+      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+
+    if (!cmdb) {
+      return res.status(404).json({ message: "Linked CMDB not found" });
+    }
+
+    // Check if gate evaluation has been completed
+    if (!gateStore.isEvaluationComplete()) {
+      // Run gate phase if not yet evaluated
+      await runGatePhase(cmdb.id);
+    }
+
+    const summary = await getGateSummary();
+
+    res.json({
+      allowed: summary.allowed,
+      blocked: summary.blocked,
+      total: summary.allowed + summary.blocked,
+      lastEvaluated: summary.evaluatedAt?.toISOString() || null,
+    });
+  } catch (error: any) {
+    console.error("Error fetching gate stats:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Helper: Generate Ansible inventory YAML
+function generateAnsibleInventoryYaml(hostsSection: Record<string, any>, vms: any[]): string {
+  // Build groups from VM metadata
+  const groups: Record<string, string[]> = {};
+  
+  for (const vm of vms) {
+    const hostName = vm.name;
+    
+    // Group by tenant
+    if (vm.tenant?.name) {
+      const groupName = `tenant_${vm.tenant.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push(hostName);
+    }
+    
+    // Group by role
+    if (vm.role?.name || typeof vm.role === 'string') {
+      const roleName = vm.role?.name || vm.role;
+      const groupName = `role_${roleName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push(hostName);
+    }
+    
+    // Group by site
+    if (vm.site?.name) {
+      const groupName = `site_${vm.site.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push(hostName);
+    }
+    
+    // Group by tags
+    if (vm.tags && Array.isArray(vm.tags)) {
+      for (const tag of vm.tags) {
+        const tagName = typeof tag === 'string' ? tag : tag.name;
+        if (tagName && tagName.toLowerCase() !== 'automatable') {
+          const groupName = `tag_${tagName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+          if (!groups[groupName]) groups[groupName] = [];
+          groups[groupName].push(hostName);
+        }
+      }
+    }
+  }
+
+  // Build YAML structure
+  let yaml = "# Automation Inventory - ALLOWED ASSETS ONLY\n";
+  yaml += "# Generated by Bridge Gate System\n";
+  yaml += `# Generated at: ${new Date().toISOString()}\n`;
+  yaml += "# \n";
+  yaml += "# IMPORTANT: This inventory contains ONLY gate-allowed assets.\n";
+  yaml += "# Blocked assets are in the separate blocked.json file.\n";
+  yaml += "#\n\n";
+
+  yaml += "all:\n";
+  yaml += "  hosts:\n";
+  
+  for (const [hostname, vars] of Object.entries(hostsSection)) {
+    yaml += `    ${hostname}:\n`;
+    for (const [key, value] of Object.entries(vars)) {
+      if (value !== undefined && value !== null && value !== '') {
+        yaml += `      ${key}: ${JSON.stringify(value)}\n`;
+      }
+    }
+  }
+
+  yaml += "  children:\n";
+  for (const [groupName, hosts] of Object.entries(groups)) {
+    yaml += `    ${groupName}:\n`;
+    yaml += "      hosts:\n";
+    for (const host of hosts) {
+      yaml += `        ${host}: {}\n`;
+    }
+  }
+
+  return yaml;
 }
 
 export default router;

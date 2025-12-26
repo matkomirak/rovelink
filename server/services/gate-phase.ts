@@ -200,6 +200,37 @@ export async function isAssetAllowed(assetId: string): Promise<boolean> {
   return decision?.allowed === true;
 }
 
+/**
+ * Read blocked VMs from gate store.
+ * 
+ * Used for the blocked assets output.
+ * These assets MUST NOT appear in any automation inventory.
+ * 
+ * Throws INVARIANT VIOLATION if gate phase hasn't run.
+ */
+export async function readBlockedAssets(): Promise<GateDecision[]> {
+  if (!gateStore.isEvaluationComplete()) {
+    throw new Error("INVARIANT VIOLATION: Attempted to read gate results before gate phase completed");
+  }
+  return gateStore.getBlockedVms();
+}
+
+/**
+ * Get gate phase summary statistics.
+ * 
+ * Throws INVARIANT VIOLATION if gate phase hasn't run.
+ */
+export async function getGateSummary(): Promise<{ allowed: number; blocked: number; evaluatedAt: Date | null }> {
+  if (!gateStore.isEvaluationComplete()) {
+    throw new Error("INVARIANT VIOLATION: Attempted to read gate results before gate phase completed");
+  }
+  const summary = await gateStore.getSummary();
+  return {
+    ...summary,
+    evaluatedAt: gateStore.getLastEvaluationTime(),
+  };
+}
+
 // Helper functions
 function extractName(value: { name: string; id?: number } | string | null | undefined): string | null {
   if (!value) return null;

@@ -1,0 +1,146 @@
+GOAL
+
+Update the UI and backend so that each inventory source (e.g. CMDB / NetBox) exposes two clearly separated outputs:
+
+Automation Inventory (allowed assets only)
+
+Blocked Assets (non-automatable assets with reasons)
+
+This change is presentation and structuring only.
+Do NOT change gate logic or rules.
+
+DEFINITIONS (USE THESE TERMS)
+
+Inventory Source
+A system providing assets (e.g. NetBox CMDB)
+
+Automation Inventory
+Assets that passed the gate and are safe to automate
+
+Blocked Assets
+Assets that failed the gate and must not be automated
+
+BACKEND CHANGES
+1. Inventory Output Structure
+
+For each inventory source, expose two outputs:
+
+/inventories/{source}/automation.yml
+/inventories/{source}/blocked.json
+
+
+Example:
+
+/inventories/netbox/automation.yml
+/inventories/netbox/blocked.json
+
+2. Automation Inventory (YAML)
+
+Content rules:
+
+Include ONLY gate-allowed assets
+
+Must be valid Ansible inventory
+
+Must NOT include blocked assets in any form
+
+Example (conceptual):
+
+all:
+  hosts:
+    web-01:
+      asset_id: abc123
+      role: web
+      tenant: customer-a
+
+3. Blocked Assets Output (JSON)
+
+Content rules:
+
+Include ONLY gate-blocked assets
+
+Read-only
+
+Never used by automation
+
+Each blocked asset must include:
+
+{
+  "asset_id": "abc456",
+  "name": "db-01",
+  "source": "netbox",
+  "missing": ["tenant", "automatable"],
+  "blocked_reason": "Missing governance data",
+  "last_evaluated": "ISO timestamp"
+}
+
+4. No Mixing Rule (CRITICAL)
+
+Automation inventory MUST NOT contain blocked assets
+
+Blocked assets MUST NOT appear in automation inventory
+
+No “disabled”, “commented”, or “tagged” hosts in automation inventory
+
+If an asset is blocked, it does not exist for automation.
+
+UI CHANGES
+5. Inventory Source View
+
+For each inventory source in the UI, show two explicit sections:
+
+Inventory Source: NetBox
+
+[ Automation Inventory ]
+- Download automation.yml
+- Count of allowed assets
+
+[ Blocked Assets ]
+- Download blocked.json
+- Count of blocked assets
+- Explanation: “These assets are blocked due to missing governance data”
+
+6. Language Rules (UI TEXT)
+
+Use explicit wording:
+
+✅ “Blocked by gate”
+❌ “Disabled”
+❌ “Inactive”
+❌ “Skipped”
+
+Blocked assets are not errors — they are intentional refusals.
+
+NON-GOALS (DO NOT IMPLEMENT)
+
+No UI editing of blocked assets
+
+No approval workflows
+
+No auto-fix suggestions
+
+No provider mapping
+
+No multi-tenancy changes
+
+ACCEPTANCE CRITERIA
+
+The task is complete when:
+
+Each inventory source exposes:
+
+automation inventory (YAML)
+
+blocked assets (JSON)
+
+UI clearly separates allowed vs blocked
+
+Users can download both files
+
+Blocked assets never appear in automation inventory
+
+Gate logic remains unchanged
+
+FINAL CONSTRAINT
+
+If a blocked asset appears in any automation inventory output, the implementation is incorrect.

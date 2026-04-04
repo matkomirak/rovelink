@@ -1,3 +1,4 @@
+import custoraLogo from "@assets/Moderne_Logo_von_Custora_1775338642960.png";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -67,14 +68,12 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <span className="text-xl font-bold">B</span>
-            </div>
-            <div>
-              <CardTitle className="text-2xl">Bridge</CardTitle>
-              <CardDescription>Infrastructure Automation Platform</CardDescription>
-            </div>
+          <div className="overflow-hidden mb-2" style={{ width: 220, height: 73 }}>
+            <img
+              src={custoraLogo}
+              alt="Custora"
+              style={{ position: "relative", width: 459, left: -124, top: -104 }}
+            />
           </div>
         </CardHeader>
         <CardContent>

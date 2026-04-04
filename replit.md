@@ -1,7 +1,7 @@
-# Bridge - Infrastructure Automation Platform
+# Custora - Infrastructure Automation Platform
 
 ## Overview
-Bridge is a full-stack infrastructure automation platform designed to streamline IT operations by providing a centralized UI for managing infrastructure, integrating with NetBox for inventory, and orchestrating simulated Ansible playbook executions. It offers real-time log streaming, reporting, and an extensible provider system for synchronizing VM inventory from various virtualization platforms into NetBox. The platform's core purpose is to enhance operational efficiency, improve visibility into IT assets, and manage data pipelines between diverse sources and CMDBs.
+Custora is a full-stack infrastructure automation platform designed to streamline IT operations by providing a centralized UI for managing infrastructure, integrating with NetBox for inventory, and orchestrating simulated Ansible playbook executions. It offers real-time log streaming, reporting, and an extensible provider system for synchronizing VM inventory from various virtualization platforms into NetBox. The platform's core purpose is to enhance operational efficiency, improve visibility into IT assets, and manage data pipelines between diverse sources and CMDBs.
 
 ## User Preferences
 I prefer that the agent focuses on high-level feature implementation and architectural decisions rather than getting bogged down in minute code details. When proposing changes, please outline the approach and impact first. I appreciate clear, concise communication and a systematic approach to problem-solving. I prefer iterative development, where features are built out step-by-step, allowing for feedback and adjustments along the way. Do not make changes to files or folders without explicit instructions.

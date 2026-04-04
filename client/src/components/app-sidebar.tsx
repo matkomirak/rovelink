@@ -1,3 +1,4 @@
+import custoraLogo from "@assets/Moderne_Logo_von_Custora_1775338642960.png";
 import {
   Calendar,
   Settings,
@@ -104,14 +105,12 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <span className="text-lg font-bold">B</span>
-          </div>
-          <div>
-            <h2 className="text-base font-semibold">Bridge</h2>
-            <p className="text-xs text-muted-foreground">Infrastructure Automation</p>
-          </div>
+        <div className="overflow-hidden" style={{ width: 180, height: 60 }}>
+          <img
+            src={custoraLogo}
+            alt="Custora"
+            style={{ position: "relative", width: 375, left: -101, top: -85 }}
+          />
         </div>
       </SidebarHeader>
       <SidebarContent>

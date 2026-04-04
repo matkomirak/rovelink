@@ -68,13 +68,19 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <div className="overflow-hidden mb-2" style={{ width: 220, height: 73 }}>
-            <img
-              src={custoraLogo}
-              alt="Custora"
-              style={{ position: "relative", width: 459, left: -124, top: -104 }}
-            />
-          </div>
+          <div
+            role="img"
+            aria-label="Custora"
+            className="mb-2"
+            style={{
+              width: 220,
+              height: 73,
+              backgroundImage: `url(${custoraLogo})`,
+              backgroundSize: "459px auto",
+              backgroundPosition: "-124px -104px",
+              backgroundRepeat: "no-repeat",
+            }}
+          />
         </CardHeader>
         <CardContent>
           <Form {...form}>

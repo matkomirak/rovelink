@@ -105,13 +105,19 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="overflow-hidden" style={{ width: 180, height: 60 }}>
-          <img
-            src={custoraLogo}
-            alt="Custora"
-            style={{ position: "relative", width: 375, left: -101, top: -85 }}
-          />
-        </div>
+        <div
+          role="img"
+          aria-label="Custora"
+          style={{
+            width: 180,
+            height: 60,
+            backgroundImage: `url(${custoraLogo})`,
+            backgroundSize: "375px auto",
+            backgroundPosition: "-101px -85px",
+            backgroundRepeat: "no-repeat",
+            flexShrink: 0,
+          }}
+        />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

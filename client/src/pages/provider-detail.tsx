@@ -6,7 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Server, Cpu, HardDrive, MemoryStick, Network, Search, Filter, RefreshCw } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
+  ArrowLeft, Server, Cpu, HardDrive, MemoryStick, Network,
+  Search, Filter, RefreshCw, Tag, Globe, Box, ChevronRight,
+  Monitor, ShieldCheck, Info, Layers
+} from "lucide-react";
 import { useState, useMemo } from "react";
 import type { ProviderAccount } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -38,11 +45,197 @@ interface ProviderVmsResponse {
   vms: NormalizedVM[];
 }
 
+// ─── VM Detail Sheet ──────────────────────────────────────────────────────────
+
+function AttrRow({ label, value }: { label: string; value: React.ReactNode }) {
+  if (value === undefined || value === null || value === "" || value === "—") return null;
+  return (
+    <div className="flex gap-3 py-2 border-b border-border/40 last:border-0">
+      <span className="text-xs text-muted-foreground w-44 shrink-0 pt-0.5">{label}</span>
+      <span className="text-xs flex-1 break-all">{value}</span>
+    </div>
+  );
+}
+
+function Section({ icon: Icon, title, children }: { icon: any; title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 mb-2">
+        <Icon className="w-4 h-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">{title}</h3>
+      </div>
+      <div className="rounded-md border border-border/50 px-3 py-1">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function RawDataView({ raw }: { raw: Record<string, unknown> }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const flattenObject = (obj: Record<string, unknown>, prefix = ""): Array<{ key: string; value: string }> => {
+    const rows: Array<{ key: string; value: string }> = [];
+    for (const [k, v] of Object.entries(obj)) {
+      const fullKey = prefix ? `${prefix}.${k}` : k;
+      if (v !== null && v !== undefined && typeof v === "object" && !Array.isArray(v)) {
+        rows.push(...flattenObject(v as Record<string, unknown>, fullKey));
+      } else {
+        const val = Array.isArray(v) ? v.join(", ") : String(v ?? "");
+        if (val && val !== "undefined" && val !== "null") {
+          rows.push({ key: fullKey, value: val });
+        }
+      }
+    }
+    return rows;
+  };
+
+  const rows = flattenObject(raw);
+  const visible = expanded ? rows : rows.slice(0, 15);
+
+  return (
+    <div className="space-y-1">
+      <div className="rounded-md border border-border/50 px-3 py-1">
+        {visible.map(({ key, value }) => (
+          <div key={key} className="flex gap-3 py-1.5 border-b border-border/30 last:border-0">
+            <span className="text-xs text-muted-foreground font-mono w-52 shrink-0 truncate" title={key}>{key}</span>
+            <span className="text-xs font-mono flex-1 break-all text-foreground/80">{value}</span>
+          </div>
+        ))}
+      </div>
+      {rows.length > 15 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-xs"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Show less" : `Show ${rows.length - 15} more fields`}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function VmDetailSheet({ vm, open, onClose }: { vm: NormalizedVM | null; open: boolean; onClose: () => void }) {
+  if (!vm) return null;
+
+  const getStatusColor = (status?: string) => {
+    switch (status) {
+      case "running": return "bg-green-500/10 text-green-500 border-green-500/20";
+      case "stopped": return "bg-gray-500/10 text-gray-500 border-gray-500/20";
+      case "paused": return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
+      default: return "";
+    }
+  };
+
+  const allIps = [
+    ...(vm.primaryIp4 ? [vm.primaryIp4] : []),
+    ...(vm.ipv4?.filter(ip => ip !== vm.primaryIp4) || []),
+    ...(vm.primaryIp6 ? [vm.primaryIp6] : []),
+    ...(vm.ipv6?.filter(ip => ip !== vm.primaryIp6) || []),
+  ];
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-2xl p-0 flex flex-col"
+        data-testid="sheet-vm-detail"
+      >
+        <SheetHeader className="px-6 py-4 border-b">
+          <SheetTitle className="flex items-center gap-3">
+            <Server className="w-5 h-5 text-muted-foreground shrink-0" />
+            <span className="truncate" data-testid="text-sheet-vm-name">{vm.name}</span>
+            <Badge className={`ml-auto shrink-0 ${getStatusColor(vm.status)}`}>
+              {vm.status || "unknown"}
+            </Badge>
+          </SheetTitle>
+          <p className="text-xs text-muted-foreground font-mono truncate" data-testid="text-sheet-vm-extid">
+            {vm.externalId}
+          </p>
+        </SheetHeader>
+
+        <ScrollArea className="flex-1 px-6 py-4">
+          <div className="space-y-5 pb-6">
+
+            {/* Core Identity */}
+            <Section icon={Info} title="Core Information">
+              <AttrRow label="Name" value={vm.name} />
+              <AttrRow label="External ID" value={<span className="font-mono">{vm.externalId}</span>} />
+              <AttrRow label="Provider" value={vm.provider} />
+              <AttrRow label="Status" value={
+                <Badge className={`text-[10px] ${getStatusColor(vm.status)}`}>{vm.status || "unknown"}</Badge>
+              } />
+              <AttrRow label="Platform" value={vm.platform} />
+              <AttrRow label="Site / Location" value={vm.site} />
+              <AttrRow label="Tenant" value={vm.tenant} />
+              <AttrRow label="Role" value={vm.role} />
+              <AttrRow label="Description" value={vm.description} />
+            </Section>
+
+            {/* Compute */}
+            {(vm.vcpus || vm.memory || vm.disk) && (
+              <Section icon={Cpu} title="Compute">
+                <AttrRow label="vCPUs" value={vm.vcpus ? String(vm.vcpus) : undefined} />
+                <AttrRow label="Memory" value={vm.memory ? `${vm.memory} MB` : undefined} />
+                <AttrRow label="Disk" value={vm.disk ? `${vm.disk} GB` : undefined} />
+              </Section>
+            )}
+
+            {/* Networking */}
+            {allIps.length > 0 && (
+              <Section icon={Network} title="Network">
+                {vm.primaryIp4 && (
+                  <AttrRow label="Primary IPv4" value={<span className="font-mono">{vm.primaryIp4}</span>} />
+                )}
+                {vm.ipv4?.filter(ip => ip !== vm.primaryIp4).map((ip, i) => (
+                  <AttrRow key={i} label={`IPv4 #${i + 2}`} value={<span className="font-mono">{ip}</span>} />
+                ))}
+                {vm.primaryIp6 && (
+                  <AttrRow label="Primary IPv6" value={<span className="font-mono text-[10px]">{vm.primaryIp6}</span>} />
+                )}
+                {vm.ipv6?.filter(ip => ip !== vm.primaryIp6).map((ip, i) => (
+                  <AttrRow key={i} label={`IPv6 #${i + 2}`} value={<span className="font-mono text-[10px]">{ip}</span>} />
+                ))}
+              </Section>
+            )}
+
+            {/* Tags */}
+            {vm.tags && vm.tags.length > 0 && (
+              <Section icon={Tag} title="Tags">
+                <div className="py-2 flex flex-wrap gap-1.5">
+                  {vm.tags.map((tag, i) => (
+                    <Badge key={i} variant="outline" className="text-[10px]" data-testid={`badge-vm-tag-${i}`}>
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              </Section>
+            )}
+
+            {/* Raw Provider Data */}
+            {vm.raw && Object.keys(vm.raw).length > 0 && (
+              <Section icon={Layers} title="All Provider Attributes">
+                <RawDataView raw={vm.raw} />
+              </Section>
+            )}
+
+          </div>
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function ProviderDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchTerm, setSearchTerm] = useState("");
   const [platformFilter, setPlatformFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [selectedVm, setSelectedVm] = useState<NormalizedVM | null>(null);
   const { toast } = useToast();
 
   const { data: provider, isLoading: providerLoading } = useQuery<ProviderAccount>({
@@ -78,16 +271,13 @@ export default function ProviderDetail() {
 
   const filteredVms = useMemo(() => {
     if (!vmsData?.vms) return [];
-    
     return vmsData.vms.filter(vm => {
-      const matchesSearch = searchTerm === "" || 
+      const matchesSearch = searchTerm === "" ||
         vm.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         vm.ipv4?.some(ip => ip.includes(searchTerm)) ||
         vm.externalId.toLowerCase().includes(searchTerm.toLowerCase());
-      
       const matchesPlatform = !platformFilter || vm.platform === platformFilter;
       const matchesStatus = !statusFilter || vm.status === statusFilter;
-      
       return matchesSearch && matchesPlatform && matchesStatus;
     });
   }, [vmsData?.vms, searchTerm, platformFilter, statusFilter]);
@@ -174,6 +364,7 @@ export default function ProviderDetail() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-4">
           <Link href="/providers">
@@ -183,14 +374,14 @@ export default function ProviderDetail() {
           </Link>
           <div>
             <h1 className="text-3xl font-bold" data-testid="text-provider-name">{provider.name}</h1>
-            <p className="text-muted-foreground">
-              <Badge variant="outline" className="mr-2">{provider.kind}</Badge>
+            <div className="text-muted-foreground flex items-center gap-2 flex-wrap mt-1">
+              <Badge variant="outline">{provider.kind}</Badge>
               {provider.enabled ? (
                 <Badge className="bg-green-500/10 text-green-500 border-green-500/20">Enabled</Badge>
               ) : (
                 <Badge variant="secondary">Disabled</Badge>
               )}
-            </p>
+            </div>
           </div>
         </div>
         <Button
@@ -203,6 +394,7 @@ export default function ProviderDetail() {
         </Button>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
@@ -255,13 +447,14 @@ export default function ProviderDetail() {
         </Card>
       </div>
 
+      {/* VM Table */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 flex-wrap">
           <CardTitle className="flex items-center gap-2">
             <Server className="w-5 h-5" />
             Virtual Machines
           </CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -273,19 +466,21 @@ export default function ProviderDetail() {
               />
             </div>
             {platformFilter && (
-              <Badge 
-                variant="secondary" 
+              <Badge
+                variant="secondary"
                 className="cursor-pointer"
                 onClick={() => setPlatformFilter(null)}
+                data-testid="badge-platform-filter"
               >
                 {platformFilter} ×
               </Badge>
             )}
             {statusFilter && (
-              <Badge 
-                variant="secondary" 
+              <Badge
+                variant="secondary"
                 className="cursor-pointer"
                 onClick={() => setStatusFilter(null)}
+                data-testid="badge-status-filter"
               >
                 {statusFilter} ×
               </Badge>
@@ -313,8 +508,8 @@ export default function ProviderDetail() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>External ID</TableHead>
-                  <TableHead 
-                    className="cursor-pointer hover-elevate" 
+                  <TableHead
+                    className="cursor-pointer hover-elevate"
                     onClick={() => setPlatformFilter(platformFilter ? null : platforms[0])}
                   >
                     <div className="flex items-center gap-1">
@@ -322,7 +517,7 @@ export default function ProviderDetail() {
                       <Filter className="w-3 h-3" />
                     </div>
                   </TableHead>
-                  <TableHead 
+                  <TableHead
                     className="cursor-pointer hover-elevate"
                     onClick={() => setStatusFilter(statusFilter ? null : statuses[0])}
                   >
@@ -360,9 +555,21 @@ export default function ProviderDetail() {
               </TableHeader>
               <TableBody>
                 {filteredVms.map((vm) => (
-                  <TableRow key={vm.externalId} data-testid={`row-vm-${vm.externalId}`}>
+                  <TableRow
+                    key={vm.externalId}
+                    data-testid={`row-vm-${vm.externalId}`}
+                    className="cursor-pointer hover-elevate"
+                    onClick={() => setSelectedVm(vm)}
+                  >
                     <TableCell className="font-medium" data-testid={`text-vm-name-${vm.externalId}`}>
-                      {vm.name}
+                      <button
+                        className="flex items-center gap-1.5 text-left hover:text-primary transition-colors group"
+                        data-testid={`button-vm-detail-${vm.externalId}`}
+                        onClick={(e) => { e.stopPropagation(); setSelectedVm(vm); }}
+                      >
+                        {vm.name}
+                        <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity shrink-0" />
+                      </button>
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
                       {vm.externalId.length > 20 ? `${vm.externalId.slice(0, 20)}...` : vm.externalId}
@@ -405,11 +612,18 @@ export default function ProviderDetail() {
           )}
           {filteredVms.length > 0 && (
             <div className="mt-4 text-sm text-muted-foreground">
-              Showing {filteredVms.length} of {vmsData?.vms?.length || 0} VMs
+              Showing {filteredVms.length} of {vmsData?.vms?.length || 0} VMs — click any row to see full details
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* VM Detail Sheet */}
+      <VmDetailSheet
+        vm={selectedVm}
+        open={!!selectedVm}
+        onClose={() => setSelectedVm(null)}
+      />
     </div>
   );
 }

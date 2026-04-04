@@ -293,12 +293,22 @@ const VM_API = "2023-03-01";
 const NET_API = "2023-05-01";
 const PIP_API = "2023-05-01";
 
+// ─── VM size spec shape ───────────────────────────────────────────────────────
+
+interface VmSizeSpec {
+  name: string;
+  numberOfCores: number;
+  memoryInMB: number;
+}
+
 // ─── Azure Collector ──────────────────────────────────────────────────────────
 
 export class AzureCollector implements IProviderCollector {
   private config: AzureConfig;
   private accessToken?: string;
   private tokenExpiry?: Date;
+  // Cache VM size specs per location (keyed by lower-case location → lower-case size name → spec)
+  private vmSizeCache: Map<string, Map<string, VmSizeSpec>> = new Map();
 
   constructor(config: AzureConfig) {
     this.config = config;
@@ -380,7 +390,15 @@ export class AzureCollector implements IProviderCollector {
     const rawVms = await this.fetchRawVms();
     const nicMap = await this.fetchNicMap();
 
-    return rawVms.map((vm) => this.toNormalizedVm(vm, nicMap));
+    // Pre-fetch VM size specs so vCPU/RAM are populated even in the basic list view
+    const uniqueLocations = Array.from(new Set(rawVms.map((v) => v.location).filter(Boolean)));
+    const vmSizeMaps = await Promise.all(uniqueLocations.map((loc) => this.fetchVmSizes(loc)));
+    const globalSizeMap = new Map<string, VmSizeSpec>();
+    for (const sizeMap of vmSizeMaps) {
+      sizeMap.forEach((v, k) => globalSizeMap.set(k, v));
+    }
+
+    return rawVms.map((vm) => this.toNormalizedVm(vm, nicMap, globalSizeMap));
   }
 
   /** Full Azure discovery: VMs + networking resources */
@@ -407,9 +425,18 @@ export class AzureCollector implements IProviderCollector {
       nicMap.set(nic.id.toLowerCase(), nic);
     }
 
+    // Pre-fetch VM size specs for all unique locations so we know vCPU / RAM per size SKU
+    const uniqueLocations = Array.from(new Set(rawVms.map((v) => v.location).filter(Boolean)));
+    const vmSizeMaps = await Promise.all(uniqueLocations.map((loc) => this.fetchVmSizes(loc)));
+    // Merge all size maps into one (size names are globally unique across locations for same SKU)
+    const globalSizeMap = new Map<string, VmSizeSpec>();
+    for (const sizeMap of vmSizeMaps) {
+      sizeMap.forEach((v, k) => globalSizeMap.set(k, v));
+    }
+
     // Normalize VMs with full details (instance view per VM)
     const normalizedVms = await Promise.all(
-      rawVms.map((vm) => this.normalizeVmFull(vm, nicMap))
+      rawVms.map((vm) => this.normalizeVmFull(vm, nicMap, globalSizeMap))
     );
 
     // Normalize VNets (with subnets already embedded)
@@ -464,9 +491,39 @@ export class AzureCollector implements IProviderCollector {
     return map;
   }
 
+  /**
+   * Fetch VM size specs for a given location (cached per collector instance).
+   * Returns a map keyed by lower-case size name → { numberOfCores, memoryInMB }.
+   */
+  private async fetchVmSizes(location: string): Promise<Map<string, VmSizeSpec>> {
+    const key = location.toLowerCase();
+    if (this.vmSizeCache.has(key)) return this.vmSizeCache.get(key)!;
+
+    const url = `${ARM_BASE}/subscriptions/${this.config.subscription_id}/providers/Microsoft.Compute/locations/${location}/vmSizes?api-version=${VM_API}`;
+    try {
+      await this.authenticate();
+      const res = await axios.get<{ value: VmSizeSpec[] }>(url, { headers: this.headers() });
+      const sizeMap = new Map<string, VmSizeSpec>();
+      for (const spec of res.data.value || []) {
+        sizeMap.set(spec.name.toLowerCase(), spec);
+      }
+      this.vmSizeCache.set(key, sizeMap);
+      return sizeMap;
+    } catch {
+      // If the call fails (e.g. missing permission), return an empty map and continue
+      const empty = new Map<string, VmSizeSpec>();
+      this.vmSizeCache.set(key, empty);
+      return empty;
+    }
+  }
+
   // ─── Normalizers ─────────────────────────────────────────────────────────────
 
-  private toNormalizedVm(vm: AzureRawVm, nicMap: Map<string, AzureNicRaw>): NormalizedVm {
+  private toNormalizedVm(
+    vm: AzureRawVm,
+    nicMap: Map<string, AzureNicRaw>,
+    sizeMap?: Map<string, VmSizeSpec>
+  ): NormalizedVm {
     const rg = extractResourceGroup(vm.id);
     let primaryIp4: string | undefined;
     const nicRefs = vm.properties?.networkProfile?.networkInterfaces || [];
@@ -488,6 +545,9 @@ export class AzureCollector implements IProviderCollector {
     const tagArr: string[] = [];
     for (const [k, v] of Object.entries(vm.tags || {})) tagArr.push(`${k}:${v}`);
 
+    const vmSize = vm.properties?.hardwareProfile?.vmSize;
+    const sizeSpec = vmSize && sizeMap ? sizeMap.get(vmSize.toLowerCase()) : undefined;
+
     return {
       externalId: vm.id,
       name: vm.name,
@@ -495,8 +555,10 @@ export class AzureCollector implements IProviderCollector {
       status: "unknown",
       primaryIp4,
       platform,
+      vcpus: sizeSpec?.numberOfCores,
+      memory: sizeSpec ? sizeSpec.memoryInMB : undefined,
       disk: vm.properties?.storageProfile?.osDisk?.diskSizeGB,
-      description: vm.properties?.hardwareProfile?.vmSize,
+      description: vmSize,
       site: vm.location,
       tags: tagArr,
       raw: vm,
@@ -505,7 +567,8 @@ export class AzureCollector implements IProviderCollector {
 
   private async normalizeVmFull(
     vm: AzureRawVm,
-    nicMap: Map<string, AzureNormalizedNic>
+    nicMap: Map<string, AzureNormalizedNic>,
+    sizeMap?: Map<string, VmSizeSpec>
   ): Promise<AzureNormalizedVm> {
     const rg = extractResourceGroup(vm.id);
 
@@ -571,6 +634,12 @@ export class AzureCollector implements IProviderCollector {
     // Helper to get last segment of resource ID
     const idName = (id?: string) => (id ? extractLastSegment(id) : undefined);
 
+    // Look up vCPU and RAM from size catalog
+    const vmSize = vm.properties?.hardwareProfile?.vmSize;
+    const sizeSpec = vmSize && sizeMap ? sizeMap.get(vmSize.toLowerCase()) : undefined;
+    const vcpus = sizeSpec?.numberOfCores;
+    const ramGiB = sizeSpec ? Math.round(sizeSpec.memoryInMB / 1024) : undefined;
+
     return {
       id: vm.id,
       name: vm.name,
@@ -580,7 +649,9 @@ export class AzureCollector implements IProviderCollector {
       status,
       platform,
       computerName: vm.properties?.osProfile?.computerName,
-      vmSize: vm.properties?.hardwareProfile?.vmSize,
+      vmSize,
+      vcpus,
+      ramGiB,
       disk: vm.properties?.storageProfile?.osDisk?.diskSizeGB,
       osDiskName: vm.properties?.storageProfile?.osDisk?.name,
       imagePublisher: imgRef?.publisher,

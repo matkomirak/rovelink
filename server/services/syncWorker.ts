@@ -5,6 +5,7 @@ import { getProviderCollector } from "./providers/registry";
 import { NetBoxAdapter } from "./netbox-adapter";
 import { AzureCollector } from "./providers/azure";
 import { AzureNetBoxSyncService } from "./azure-netbox-sync";
+import { decryptCmdbConfig, decryptProviderConfig } from "./secrets";
 
 /**
  * Transform provider tags by adding provider prefix.
@@ -89,9 +90,12 @@ export class SyncWorker {
         this.log(`=== Phase 1: Provider Validation ===`);
         this.log(`Connecting to provider: ${syncRun.providerAccount.name} (${syncRun.providerAccount.kind})`);
 
+        const decryptedProviderConfig = decryptProviderConfig(
+          syncRun.providerAccount.config as Record<string, any>
+        );
         const collector = getProviderCollector(
           syncRun.providerAccount.kind,
-          syncRun.providerAccount.config
+          decryptedProviderConfig
         );
 
         const testResult = await collector.testConnection();
@@ -127,9 +131,9 @@ export class SyncWorker {
         });
 
         if (netboxCmdb) {
-          const cfg = netboxCmdb.config as any;
-          if (cfg?.url) netboxUrl = cfg.url;
-          if (cfg?.token) netboxToken = cfg.token;
+          const cfg = decryptCmdbConfig(netboxCmdb.config as Record<string, any>);
+          if (cfg?.url) netboxUrl = cfg.url as string;
+          if (cfg?.token) netboxToken = cfg.token as string;
           this.log(`Using NetBox CMDB account: ${netboxCmdb.name}`);
         } else if (netboxUrl) {
           this.log(`Using NetBox from environment configuration`);

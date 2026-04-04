@@ -20,6 +20,7 @@ import { eq } from "drizzle-orm";
 import { NetBoxAdapter } from "./netbox-adapter";
 import { gateStore, GateDecision } from "./gate-store";
 import { deriveAssetId } from "./asset-identity";
+import { decryptCmdbConfig } from "./secrets";
 
 // Default policy - all optional rules disabled
 const DEFAULT_POLICY: EligibilityPolicy = {
@@ -81,8 +82,9 @@ export async function runGatePhase(
     throw new Error(`CMDB account not found: ${cmdbId}`);
   }
 
-  // Fetch VMs from NetBox
-  const adapter = new NetBoxAdapter(cmdb.config as any);
+  // Decrypt CMDB config before use
+  const decryptedCmdbConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
+  const adapter = new NetBoxAdapter(decryptedCmdbConfig as any);
   const vms = await adapter.listAllVms();
 
   // Clear previous decisions

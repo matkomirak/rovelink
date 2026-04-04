@@ -7,6 +7,7 @@ import { storage } from "../storage";
 import { insertPipelineMappingSchema } from "@shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
 import { IdoitAdapter } from "../services/idoit-adapter";
+import { decryptCmdbConfig } from "../services/secrets";
 import { rulesEngine } from "../services/rules-engine";
 import { getSample } from "../services/sample-fixtures";
 
@@ -17,19 +18,20 @@ interface AuthRequest extends Request {
   user?: any;
 }
 
-// Helper to get CMDB adapter instance
+// Helper to get CMDB adapter instance with decrypted secrets
 async function getCmdbAdapter(cmdbAccountId: string) {
   const cmdb = await storage.getCmdbAccount(cmdbAccountId);
   if (!cmdb) {
     throw new Error("CMDB account not found");
   }
 
+  // Decrypt secrets before passing to adapter
+  const config = decryptCmdbConfig(cmdb.config as Record<string, any>);
+
   if (cmdb.kind === "netbox") {
-    const config = cmdb.config as { url: string; token: string };
-    return new NetBoxAdapter(config);
+    return new NetBoxAdapter(config as { url: string; token: string });
   } else if (cmdb.kind === "idoit") {
-    const config = cmdb.config as { url: string; apiKey: string };
-    return new IdoitAdapter(config);
+    return new IdoitAdapter(config as { url: string; apiKey: string });
   } else {
     throw new Error(`Unsupported CMDB kind: ${cmdb.kind}`);
   }

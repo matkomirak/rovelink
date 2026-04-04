@@ -4,6 +4,7 @@ import { automationInventories, cmdbAccounts, type AutomationInventory, type Ins
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
+import { decryptCmdbConfig } from "../services/secrets";
 import { runGatePhase, readAllowedAssets, readBlockedAssets, getGateSummary } from "../services/gate-phase";
 import { deriveAssetId } from "../services/asset-identity";
 import { gateStore } from "../services/gate-store";
@@ -121,8 +122,10 @@ router.post("/", async (req: AuthRequest, res: Response) => {
           return res.status(404).json({ message: "Linked CMDB not found" });
         }
 
+        // Decrypt secrets before passing to adapter
+        const decryptedCmdbCfg = decryptCmdbConfig(cmdb.config as Record<string, any>);
         // Test connection and fetch VMs from NetBox
-        const adapter = new NetBoxAdapter(cmdb.config as any);
+        const adapter = new NetBoxAdapter(decryptedCmdbCfg as any);
         
         // First test the connection
         const testResult = await adapter.test();
@@ -473,8 +476,10 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "Linked CMDB not found" });
     }
 
+    // Decrypt secrets before passing to adapter
+    const decryptedRefreshCfg = decryptCmdbConfig(cmdb.config as Record<string, any>);
     // Fetch VMs from NetBox
-    const adapter = new NetBoxAdapter(cmdb.config as any);
+    const adapter = new NetBoxAdapter(decryptedRefreshCfg as any);
     const vms = await adapter.listAllVms();
 
     // ================================================================

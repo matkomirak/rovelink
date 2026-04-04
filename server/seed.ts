@@ -1,5 +1,7 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import { db } from "./db";
 import { users } from "../shared/schema";
 import { eq } from "drizzle-orm";
@@ -8,6 +10,7 @@ async function seed() {
   console.log("Seeding database...");
 
   const adminUsername = process.env.BOOTSTRAP_ADMIN_USER || "admin";
+  const isProduction = process.env.NODE_ENV === "production";
 
   try {
     const [existingAdmin] = await db
@@ -20,7 +23,6 @@ async function seed() {
       process.exit(0);
     }
 
-    // Use env-provided password or generate a one-time random password
     const providedPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
     const adminPassword = providedPassword || crypto.randomBytes(16).toString("hex");
 
@@ -38,9 +40,24 @@ async function seed() {
     console.log(`Admin user '${admin.username}' created (id: ${admin.id}).`);
 
     if (!providedPassword) {
-      // Only print the password when it's newly generated (first bootstrap)
-      console.log(`One-time password: ${adminPassword}`);
-      console.log("Change this password immediately after first login.");
+      if (isProduction) {
+        // In production write the one-time password to a file instead of stdout
+        // so it doesn't appear in log aggregators.
+        const credFile = path.resolve(process.cwd(), "bootstrap-credentials.txt");
+        const content = [
+          "Bridge bootstrap credentials — delete this file after first login",
+          `Username: ${adminUsername}`,
+          `Password: ${adminPassword}`,
+          `Generated: ${new Date().toISOString()}`,
+        ].join("\n") + "\n";
+        fs.writeFileSync(credFile, content, { mode: 0o600 });
+        console.log(`One-time credentials written to: ${credFile}`);
+        console.log("Delete this file and change the password immediately after first login.");
+      } else {
+        // In development, print to stdout as before (no log aggregators)
+        console.log(`One-time password: ${adminPassword}`);
+        console.log("Change this password immediately after first login.");
+      }
     } else {
       console.log("Password set from BOOTSTRAP_ADMIN_PASSWORD environment variable.");
     }

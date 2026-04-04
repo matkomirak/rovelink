@@ -139,16 +139,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
     try {
-      // AUTH_DISABLE bypass is not permitted in production
+      // AUTH_DISABLE: dev-only bypass. Hard-fails in production.
       if (process.env.AUTH_DISABLE === "true") {
         if (isProduction) {
-          console.error("SECURITY: AUTH_DISABLE is not permitted in production mode. Ignoring bypass.");
-        } else {
-          const stubUser = { id: "stub-admin-id", username: "admin", role: "admin" };
-          const token = jwt.sign({ userId: stubUser.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-          setAuthCookie(res, token);
-          return res.json({ token, user: stubUser });
+          console.error("SECURITY ALERT: AUTH_DISABLE=true detected in production — request rejected.");
+          return res.status(403).json({ message: "AUTH_DISABLE is not permitted in production." });
         }
+        // Development-only stub login
+        const stubUser = { id: "stub-admin-id", username: "admin", role: "admin" };
+        const token = jwt.sign({ userId: stubUser.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        setAuthCookie(res, token);
+        return res.json({ token, user: stubUser });
       }
 
       const { username, password } = insertUserSchema.parse(req.body);
@@ -718,7 +719,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.setSetting("netbox_url", netboxUrl);
       }
       if (netboxToken && netboxToken !== "********") {
-        await storage.setSetting("netbox_token", netboxToken);
+        // Encrypt before persisting to DB
+        const encryptedToken = encryptNetboxToken(netboxToken);
+        await storage.setSetting("netbox_token", encryptedToken);
       }
 
       res.json({ message: "Settings saved" });
@@ -730,12 +733,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/settings/test-connection", authMiddleware, async (req, res) => {
     try {
       const netboxUrl = await storage.getSetting("netbox_url");
-      const netboxToken = await storage.getSetting("netbox_token");
+      const netboxTokenSetting = await storage.getSetting("netbox_token");
       
       const url = netboxUrl?.value || process.env.NETBOX_URL || "";
-      const token = netboxToken?.value || process.env.NETBOX_TOKEN || "";
-      
-      console.log("Test connection - URL from DB:", netboxUrl?.value, "URL used:", url);
+      // Decrypt token from DB before use; fall back to env var (assumed plaintext)
+      const rawStoredToken = netboxTokenSetting?.value || "";
+      const token = rawStoredToken ? decryptNetboxToken(rawStoredToken) : (process.env.NETBOX_TOKEN || "");
       
       if (!url) {
         return res.status(400).json({ message: "NetBox URL is not configured" });

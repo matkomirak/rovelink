@@ -455,12 +455,16 @@ export class NetBoxAdapter {
         const payload: any = {
           name: vmData.name,
           status: status,
-          custom_fields: {
-            ext_id: extId,
-            provider_state: 'active', // Always set to active when syncing from provider
-            // Merge any extra custom fields passed in (e.g. azure_vm_* fields)
-            ...(vmData.custom_fields || {}),
-          },
+          custom_fields: (() => {
+            // Merge extra custom fields (e.g. azure_vm_* fields), stripping any keys
+            // that are managed separately or not registered in NetBox
+            const { ext_id: _a, ext_provider: _b, provider_state: _c, gate_provider_id: _d, ...extra } = vmData.custom_fields || {};
+            return {
+              ext_id: extId,
+              provider_state: 'active',
+              ...extra,
+            };
+          })(),
         };
 
         // For new VMs, set gate_provider_id for ownership tracking
@@ -601,8 +605,9 @@ export class NetBoxAdapter {
         // Always write extra custom fields (e.g. azure_vm_* fields) — these are provider-specific
         // and cannot be diffed cheaply, so we always patch them to keep NetBox current
         const extraCf = { ...(vmData.custom_fields || {}) };
-        // Remove fields already managed above
+        // Remove fields already managed above or not registered as NetBox custom fields
         delete extraCf.ext_id;
+        delete extraCf.ext_provider;
         delete extraCf.provider_state;
         delete extraCf.gate_provider_id;
         if (Object.keys(extraCf).length > 0) {

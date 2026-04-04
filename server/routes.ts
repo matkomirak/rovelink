@@ -10,7 +10,7 @@ import { fakeRunner } from "./services/fake-runner";
 import { notificationService } from "./services/notificationService";
 import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
-import { runProviderSync } from "./services/provider-sync";
+import { runProviderSyncWithWorker } from "./services/syncWorker";
 import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
@@ -835,7 +835,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Start provider sync
-      const runId = await runProviderSync(provider.id);
+      const runId = await runProviderSyncWithWorker(provider.id);
 
       res.json({ runId });
     } catch (error: any) {

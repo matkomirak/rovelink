@@ -1,8 +1,8 @@
 import { db } from "../db";
-import { providerAccounts, syncRuns, externalObjects } from "../../shared/schema";
-import { eq } from "drizzle-orm";
+import { providerAccounts, syncRuns, externalObjects, cmdbAccounts } from "../../shared/schema";
+import { eq, and } from "drizzle-orm";
 import { getProviderCollector } from "./providers/registry";
-import { netboxService } from "./netbox";
+import { NetBoxAdapter } from "./netbox-adapter";
 
 /**
  * Transform provider tags by adding provider prefix.
@@ -20,15 +20,11 @@ import { netboxService } from "./netbox";
  * @returns Prefixed tags safe for NetBox
  */
 function namespaceTags(tags: string[], providerKind: string): string[] {
-  // Normalize provider kind to lowercase for consistent prefixing
   const prefix = providerKind.toLowerCase();
-  
   return tags.map(tag => {
-    // If tag already has a prefix matching this provider, don't double-prefix
     if (tag.startsWith(`${prefix}_`)) {
       return tag;
     }
-    // Add provider prefix: "customer/acme" -> "proxmox_customer/acme"
     return `${prefix}_${tag}`;
   });
 }
@@ -75,8 +71,6 @@ export class SyncWorker {
         })
         .where(eq(syncRuns.id, syncRunId));
 
-      this.log(`Starting sync for provider: ${syncRun.providerAccount.name} (${syncRun.providerAccount.kind})`);
-
       const counts: SyncCounts = {
         created: 0,
         updated: 0,
@@ -87,16 +81,70 @@ export class SyncWorker {
       };
 
       try {
-        // Get provider collector
+        // ─────────────────────────────────────────────────────────────────────
+        // PHASE 1: Validate provider connection
+        // ─────────────────────────────────────────────────────────────────────
+        this.log(`=== Phase 1: Provider Validation ===`);
+        this.log(`Connecting to provider: ${syncRun.providerAccount.name} (${syncRun.providerAccount.kind})`);
+
         const collector = getProviderCollector(
           syncRun.providerAccount.kind,
           syncRun.providerAccount.config
         );
 
-        // List VMs from provider
-        this.log("Fetching VMs from provider...");
+        const testResult = await collector.testConnection();
+        if (!testResult.ok) {
+          throw new Error(`Provider connection failed: ${testResult.error || "Unknown error"}`);
+        }
+
+        this.log(`Provider connection OK${testResult.details ? `: ${testResult.details}` : testResult.version ? ` (version: ${testResult.version})` : ""}`);
+
+        // ─────────────────────────────────────────────────────────────────────
+        // PHASE 2: Collect VMs from provider
+        // ─────────────────────────────────────────────────────────────────────
+        this.log(`=== Phase 2: Collecting VMs from Provider ===`);
         const vms = await collector.listVms();
-        this.log(`Found ${vms.length} VMs`);
+        this.log(`Collected ${vms.length} VMs from provider`);
+
+        // ─────────────────────────────────────────────────────────────────────
+        // PHASE 3: NetBox import
+        // ─────────────────────────────────────────────────────────────────────
+        this.log(`=== Phase 3: NetBox Import ===`);
+
+        // Resolve NetBox config: prefer first enabled NetBox CMDB account in DB,
+        // fall back to environment variables.
+        let netboxUrl = process.env.NETBOX_URL || "";
+        let netboxToken = process.env.NETBOX_TOKEN || "";
+
+        const netboxCmdb = await db.query.cmdbAccounts.findFirst({
+          where: and(
+            eq(cmdbAccounts.kind, "netbox"),
+            eq(cmdbAccounts.enabled, true)
+          ),
+        });
+
+        if (netboxCmdb) {
+          const cfg = netboxCmdb.config as any;
+          if (cfg?.url) netboxUrl = cfg.url;
+          if (cfg?.token) netboxToken = cfg.token;
+          this.log(`Using NetBox CMDB account: ${netboxCmdb.name}`);
+        } else if (netboxUrl) {
+          this.log(`Using NetBox from environment configuration`);
+        } else {
+          throw new Error(
+            "No NetBox CMDB account configured. Please add a NetBox account under CMDBs first."
+          );
+        }
+
+        const netbox = new NetBoxAdapter({ url: netboxUrl, token: netboxToken });
+
+        // Test NetBox connectivity
+        const netboxTest = await netbox.test();
+        if (!netboxTest.ok) {
+          throw new Error(`NetBox connection failed: ${netboxTest.error}`);
+        }
+        this.log(`NetBox connected (version: ${netboxTest.version || "unknown"})`);
+        this.log(`Importing ${vms.length} VMs into NetBox...`);
 
         // Track seen external IDs for cleanup
         const seenExternalIds = new Set<string>();
@@ -104,35 +152,45 @@ export class SyncWorker {
         // Upsert each VM to NetBox
         for (const vm of vms) {
           try {
+            const extId = `${syncRun.providerAccount.kind}:${vm.externalId}`;
             seenExternalIds.add(vm.externalId);
 
             // Transform provider tags with provider prefix
             // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
             const namespacedTags = namespaceTags(vm.tags, syncRun.providerAccount.kind);
 
-            // Upsert VM to NetBox
-            const result = await netboxService.upsertVm({
-              externalId: vm.externalId,
+            // Map NormalizedVm to NetBoxVmData
+            const vmData = {
               name: vm.name,
-              provider: vm.provider,
-              primaryIp4: vm.primaryIp4,
-              tags: namespacedTags,
-              customFields: {
-                ext_id: vm.externalId,
-                ext_provider: vm.provider,
+              status: vm.status === "running" ? "active" : "offline",
+              vcpus: vm.vcpus,
+              memory: vm.memory,
+              disk: vm.disk,
+              platform: vm.platform ? { name: vm.platform } : undefined,
+              tags: namespacedTags.map((t: string) => ({ name: t })),
+              custom_fields: {
+                ext_id: extId,
+                ext_provider: syncRun.providerAccount.kind,
               },
-            });
+              comments: `Synced from ${syncRun.providerAccount.kind} by Bridge`,
+            };
 
             if (!vm.primaryIp4) {
               counts.noIp++;
             }
 
+            // Upsert VM to NetBox (real API call via NetBoxAdapter)
+            const result = await netbox.upsertVm(vmData, extId);
+
             if (result.created) {
               counts.created++;
-              this.log(`Created: ${vm.name} (${vm.externalId})`);
+              this.log(`Created: ${vm.name} (${extId})`);
+            } else if (result.unchanged) {
+              counts.unchanged++;
+              this.log(`Unchanged: ${vm.name}`);
             } else {
               counts.updated++;
-              this.log(`Updated: ${vm.name} (${vm.externalId})`);
+              this.log(`Updated: ${vm.name} (NetBox ID: ${result.id})`);
             }
 
             // Update external_objects tracking
@@ -169,16 +227,14 @@ export class SyncWorker {
           if (!seenExternalIds.has(obj.externalId)) {
             counts.removed++;
             this.log(`VM removed from provider: ${obj.externalId}`);
-            // In real implementation, would mark as deleted or remove from NetBox
           }
         }
 
-        counts.unchanged = Math.max(0, vms.length - counts.created - counts.updated);
+        this.log(`=== Sync Complete ===`);
+        this.log(`Created: ${counts.created}, Updated: ${counts.updated}, Unchanged: ${counts.unchanged}, Removed: ${counts.removed}, Errors: ${counts.errors}`);
 
-        this.log(`Sync completed. Created: ${counts.created}, Updated: ${counts.updated}, Unchanged: ${counts.unchanged}, Removed: ${counts.removed}, Errors: ${counts.errors}`);
-        
         if (counts.noIp > 0) {
-          this.log(`Warning: ${counts.noIp} VMs have no IP address (agent not available)`);
+          this.log(`Warning: ${counts.noIp} VMs have no IP address`);
         }
 
         // Update sync run with success
@@ -215,4 +271,32 @@ export class SyncWorker {
       throw error;
     }
   }
+}
+
+/**
+ * Create a sync run record and execute it in the background using SyncWorker.
+ * Replaces the old runProviderSync which only supported Proxmox.
+ */
+export async function runProviderSyncWithWorker(providerAccountId: string): Promise<string> {
+  // Create sync run record
+  const [run] = await db
+    .insert(syncRuns)
+    .values({
+      providerAccountId,
+      type: "provider-sync",
+      status: "queued",
+    })
+    .returning();
+
+  // Execute sync in background
+  (async () => {
+    const worker = new SyncWorker();
+    try {
+      await worker.executeSyncRun(run.id);
+    } catch (err) {
+      // Errors are already logged and recorded by the worker
+    }
+  })();
+
+  return run.id;
 }

@@ -28,8 +28,8 @@ export interface PreflightResult {
 export class NetBoxService {
   private config: NetBoxConfig;
 
-  constructor() {
-    this.config = {
+  constructor(config?: NetBoxConfig) {
+    this.config = config ?? {
       url: process.env.NETBOX_URL || "",
       token: process.env.NETBOX_TOKEN || "",
     };

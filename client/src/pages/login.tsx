@@ -37,10 +37,8 @@ export default function Login() {
       const response = await apiRequest("POST", isSignup ? "/api/auth/signup" : "/api/auth/login", data);
       return response.json();
     },
-    onSuccess: (data: { token: string }) => {
-      // Store token in localStorage
-      localStorage.setItem("auth_token", data.token);
-      
+    onSuccess: () => {
+      // Token is set as an HttpOnly cookie by the server — no localStorage
       // Invalidate auth query to refetch user data
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
       

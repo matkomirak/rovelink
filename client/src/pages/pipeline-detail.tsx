@@ -246,9 +246,7 @@ export default function PipelineDetail() {
     const pollInterval = setInterval(async () => {
       try {
         const response = await fetch(`/api/pipelines/${id}/runs/${runId}`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-          },
+          credentials: "include",
         });
         const data = await response.json();
         

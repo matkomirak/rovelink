@@ -321,7 +321,7 @@ export default function Providers() {
         subscription_id: config?.subscription_id || "",
         tenant_id: config?.tenant_id || "",
         client_id: config?.client_id || "",
-        client_secret: config?.client_secret || "",
+        client_secret: "",
         resource_groups: config?.resource_groups?.join(",") || "",
       });
     } else {
@@ -332,9 +332,9 @@ export default function Providers() {
         base_url: config?.base_url || "",
         auth_method: config?.auth_method || "password",
         username: config?.username || "",
-        password: config?.password || "",
+        password: "",
         token_id: config?.token_id || "",
-        token_secret: config?.token_secret || "",
+        token_secret: "",
         realm: config?.realm || "pam",
         verify_ssl: config?.verify_ssl !== false,
       });
@@ -756,7 +756,7 @@ export default function Providers() {
                             <FormItem>
                               <FormLabel>Password</FormLabel>
                               <FormControl>
-                                <Input type="password" {...field} data-testid="input-password" />
+                                <Input type="password" placeholder={editingProvider ? "Leave blank to keep existing" : ""} {...field} data-testid="input-password" />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -798,7 +798,7 @@ export default function Providers() {
                             <FormItem>
                               <FormLabel>Token Secret</FormLabel>
                               <FormControl>
-                                <Input type="password" {...field} data-testid="input-token-secret" />
+                                <Input type="password" placeholder={editingProvider ? "Leave blank to keep existing" : ""} {...field} data-testid="input-token-secret" />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -880,7 +880,7 @@ export default function Providers() {
                           <FormItem>
                             <FormLabel>Client Secret</FormLabel>
                             <FormControl>
-                              <Input type="password" placeholder="Service principal secret" {...field} data-testid="input-client-secret" />
+                              <Input type="password" placeholder={editingProvider ? "Leave blank to keep existing" : "Service principal secret"} {...field} data-testid="input-client-secret" />
                             </FormControl>
                             <FormDescription>Service principal secret value</FormDescription>
                             <FormMessage />

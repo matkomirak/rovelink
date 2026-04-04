@@ -146,11 +146,17 @@ export default function CmdbsPage() {
 
   const handleEdit = (cmdb: CmdbAccount) => {
     setEditingCmdb(cmdb);
+    const config = (cmdb.config as any) || {};
     form.reset({
       kind: cmdb.kind as any,
       name: cmdb.name,
       enabled: cmdb.enabled,
-      config: cmdb.config,
+      config: {
+        ...config,
+        token: "",
+        password: "",
+        api_key: "",
+      },
     });
     setIsDialogOpen(true);
   };
@@ -386,9 +392,18 @@ export default function CmdbsPage() {
                     <FormItem>
                       <FormLabel>API Token</FormLabel>
                       <FormControl>
-                        <Input {...field} type="password" placeholder="••••••••" data-testid="input-token" />
+                        <Input
+                          {...field}
+                          type="password"
+                          placeholder={editingCmdb ? "Leave blank to keep existing token" : "Enter API token"}
+                          data-testid="input-token"
+                        />
                       </FormControl>
-                      <FormDescription>Authentication token for API access</FormDescription>
+                      <FormDescription>
+                        {editingCmdb
+                          ? "Token is already set — leave blank to keep it unchanged"
+                          : "Authentication token for API access"}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

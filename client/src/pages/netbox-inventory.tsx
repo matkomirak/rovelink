@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 const sourceFormSchema = insertNetboxInventorySourceSchema.extend({
   name: z.string().min(1, "Name is required"),
   url: z.string().url("Must be a valid URL"),
-  token: z.string().min(1, "Token is required"),
+  token: z.string().optional(),
 });
 
 type SourceForm = z.infer<typeof sourceFormSchema>;
@@ -118,7 +118,7 @@ export default function NetBoxInventories() {
     form.reset({
       name: source.name,
       url: source.url,
-      token: source.token,
+      token: "",
       enabled: source.enabled,
     });
     setIsDialogOpen(true);
@@ -135,19 +135,10 @@ export default function NetBoxInventories() {
     setTestStatus({ ...testStatus, [source.id]: "idle" });
     
     try {
-      const response = await fetch(`${source.url}/api/`, {
-        headers: {
-          "Authorization": `Token ${source.token}`,
-        },
-      });
-      
-      if (response.ok) {
-        setTestStatus({ ...testStatus, [source.id]: "success" });
-        toast({ title: "Connection successful", description: "NetBox API is reachable" });
-      } else {
-        setTestStatus({ ...testStatus, [source.id]: "error" });
-        toast({ variant: "destructive", title: "Connection failed", description: `HTTP ${response.status}` });
-      }
+      const response = await apiRequest("POST", `/api/netbox-sources/${source.id}/test`);
+      const data = await response.json();
+      setTestStatus({ ...testStatus, [source.id]: "success" });
+      toast({ title: "Connection successful", description: data.message || "NetBox API is reachable" });
     } catch (error: any) {
       setTestStatus({ ...testStatus, [source.id]: "error" });
       toast({ variant: "destructive", title: "Connection failed", description: error.message });
@@ -251,9 +242,18 @@ export default function NetBoxInventories() {
                     <FormItem>
                       <FormLabel>API Token</FormLabel>
                       <FormControl>
-                        <Input {...field} type="password" placeholder="••••••••" data-testid="input-token" />
+                        <Input
+                          {...field}
+                          type="password"
+                          placeholder={editingSource ? "Leave blank to keep existing token" : "Enter API token"}
+                          data-testid="input-token"
+                        />
                       </FormControl>
-                      <FormDescription>Read-only token recommended</FormDescription>
+                      <FormDescription>
+                        {editingSource
+                          ? "Token is already set — leave blank to keep it unchanged"
+                          : "Read-only token recommended"}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

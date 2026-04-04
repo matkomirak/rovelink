@@ -1,0 +1,299 @@
+We need to harden the app before adding more providers. Please implement the following security changes. These are required, not optional.
+
+1) Stop returning secrets to the frontend
+Goal
+
+No API response should ever include stored secrets, tokens, passwords, client secrets, or API keys.
+
+Tasks
+Review all API routes that return provider, CMDB, NetBox source, and settings data.
+Remove/redact these fields from all responses:
+provider.config.client_secret
+any password
+any token
+any api_key
+any secret
+netbox_inventory_sources.token
+settings.netbox_token
+Replace secret values in responses with safe metadata only, for example:
+has_client_secret: true
+has_token: true
+Make sure create, update, list, and get-by-id endpoints all follow this rule.
+Confirm frontend edit forms no longer receive existing secret values back from the API.
+Acceptance criteria
+Inspecting API responses in browser devtools must never reveal any real secret value.
+Existing forms still work, but secret fields are blank on edit unless the user enters a new one.
+2) Change frontend edit forms so they do not repopulate secrets
+Goal
+
+Secrets must not be sent back to the browser for “editing.”
+
+Tasks
+Update provider edit forms so secret fields are always blank when loading existing records.
+Show a message like:
+“Secret is already set”
+“Leave blank to keep existing secret”
+On save:
+if the secret field is blank, keep the stored secret unchanged
+if the user enters a new secret, replace the stored one
+Apply this pattern to:
+Azure provider credentials
+CMDB credentials/tokens
+NetBox source tokens
+any future provider secrets
+Acceptance criteria
+Editing a provider/account never exposes the existing secret.
+Leaving the secret blank does not erase it.
+Entering a new secret replaces the old one.
+3) Encrypt secrets at rest
+Goal
+
+Secrets must not be stored plaintext in the database.
+
+Preferred solution
+
+Use a proper secrets manager:
+
+Azure Key Vault if hosting in Azure
+otherwise AWS Secrets Manager / HashiCorp Vault / equivalent
+If external secret manager is not possible immediately
+
+Implement app-level encryption before writing secrets to the database.
+
+Tasks
+Add a dedicated secret-handling service on the backend.
+Encrypt secret fields before storing them.
+Decrypt them only when needed for outbound provider/API calls.
+Use authenticated encryption such as AES-256-GCM.
+Store encryption metadata with each secret, for example:
+ciphertext
+IV/nonce
+auth tag
+key version
+Keep the master encryption key outside the database, in environment/KMS.
+Do not log decrypted values.
+Design for key rotation.
+Scope
+
+Encrypt all sensitive fields, including:
+
+Azure client_secret
+provider passwords
+provider API tokens
+CMDB tokens/passwords
+NetBox tokens
+any future provider secret material
+Acceptance criteria
+Database inspection must not show readable secrets.
+App can still use secrets successfully for provider sync/testing.
+Encryption key is not stored in code or database.
+4) Move all secret-based external requests to the backend
+Goal
+
+The browser must never directly use provider tokens or NetBox tokens.
+
+Tasks
+Remove any frontend code that calls external services using stored secrets.
+Replace it with backend endpoints such as:
+test provider connection
+test NetBox connection
+preview data fetch
+Backend should read and decrypt the secret, perform the external request server-side, and return only safe results.
+Specifically remove direct browser calls that attach the NetBox token in request headers.
+Acceptance criteria
+No provider secret or NetBox token appears in browser network requests.
+All connection tests work through backend-only endpoints.
+5) Redact secrets from logs
+Goal
+
+Secrets must never appear in application logs, request logs, error logs, or debug logs.
+
+Tasks
+Review all logging middleware and error handlers.
+Stop logging full API responses for routes that may contain sensitive data.
+Add a redaction layer for sensitive keys, including:
+secret
+client_secret
+password
+token
+api_key
+authorization
+Ensure caught exceptions do not stringify secret-bearing objects.
+Sanitize logs from outbound API request configs and headers.
+Acceptance criteria
+Searching logs for known test secrets returns nothing.
+Logs remain useful for debugging without exposing credentials.
+6) Remove insecure JWT defaults
+Goal
+
+Authentication must not rely on development fallbacks.
+
+Tasks
+Remove any default JWT secret such as "dev-secret-change-in-production".
+Require JWT_SECRET to be present in production.
+Fail app startup in production if it is missing.
+Add JWT expiration:
+short-lived access token, for example 15 minutes
+optional refresh-token flow if needed
+Ensure token verification checks expiration.
+Acceptance criteria
+Production startup fails without a configured JWT secret.
+Issued tokens expire correctly.
+Expired tokens are rejected.
+7) Stop storing auth tokens in localStorage
+Goal
+
+Reduce token theft risk from XSS.
+
+Tasks
+Move auth from localStorage to secure, HttpOnly cookies if possible.
+Set cookie flags appropriately:
+HttpOnly
+Secure
+SameSite
+Update frontend auth flow to use cookie-based session/token handling.
+Update logout to clear cookies correctly.
+Acceptance criteria
+Auth token is not readable from browser JavaScript.
+App remains functional after reload and logout.
+8) Lock down auth bypass behavior
+Goal
+
+Development shortcuts must never be usable in production.
+
+Tasks
+Remove or hard-disable AUTH_DISABLE in production.
+If kept for local dev, make it impossible to activate outside explicitly marked development mode.
+Add a startup check that refuses to run if:
+production mode is on
+and auth bypass is enabled
+Acceptance criteria
+There is no path to admin access through env misconfiguration in production.
+9) Remove default admin credentials
+Goal
+
+No hardcoded or predictable admin account credentials.
+
+Tasks
+Remove any seed logic that creates admin/admin.
+Replace with one of these:
+require manual admin creation
+create a one-time random bootstrap password
+or require environment-provided bootstrap credentials only in local dev
+Stop printing credentials to stdout/logs.
+If a bootstrap admin is created, force password change on first login.
+Acceptance criteria
+No default predictable admin account exists.
+No credentials are printed to logs or console.
+10) Add login protection and API hardening
+Goal
+
+Reduce brute force and common web attack exposure.
+
+Tasks
+Add rate limiting to login endpoints.
+Add general API rate limiting where appropriate.
+Add security headers middleware such as Helmet.
+Review CORS settings and restrict origins if applicable.
+Set safe body size limits.
+Ensure authorization middleware is applied consistently to all sensitive routes.
+Validate all input with strict schemas on create/update endpoints.
+Acceptance criteria
+Login endpoint rate limits repeated attempts.
+Security headers are present.
+Sensitive routes are protected consistently.
+11) Separate secrets from general config objects
+Goal
+
+Prevent accidental leaks caused by storing mixed config and secrets in one raw JSON blob.
+
+Tasks
+Refactor provider and CMDB storage models so secret fields are stored separately from non-secret config.
+Example:
+non-secret config: subscription ID, tenant ID, endpoint URLs
+secret material: client secret, passwords, tokens
+Store secret references or encrypted secret payloads separately.
+Update service layer so secrets are only loaded when required.
+Acceptance criteria
+Non-secret config can be returned safely without special-case redaction.
+Secret handling is centralized and auditable.
+12) Add a central secret utility and usage rules
+Goal
+
+All secret handling should go through one backend abstraction.
+
+Tasks
+Create a single service/module for:
+encrypting/decrypting secrets
+storing secret references
+redacting secrets for API responses
+rotating keys
+Ban direct secret reads/writes outside this module.
+Update providers and CMDB integrations to use this shared service.
+Add unit tests for secret lifecycle:
+save
+retrieve
+rotate
+redact
+update without replacement when blank
+Acceptance criteria
+Secret logic is not duplicated across routes and provider code.
+Tests cover the full secret-handling flow.
+13) Add security tests
+Goal
+
+Prevent regressions.
+
+Tasks
+
+Add automated tests that verify:
+
+API responses never contain secrets
+editing an object does not return existing secret values
+leaving secret fields blank preserves existing secrets
+secret values are encrypted at rest
+logs do not contain secret values
+direct frontend external calls with stored secrets no longer exist
+JWT requires proper secret in production
+auth bypass cannot run in production
+Acceptance criteria
+CI fails if any secret leaks into response bodies or logs.
+14) Review all current and future providers against the same standard
+Goal
+
+Azure should not be the only secured path.
+
+Tasks
+Apply the same pattern to all current and planned providers:
+Azure
+AWS
+Google
+Proxmox
+VMware
+CMDB integrations
+NetBox integrations
+Create a provider security checklist that must be completed before enabling any new provider.
+Acceptance criteria
+New providers cannot be merged unless they use the centralized secret handling model.
+15) Deliverables expected from this work
+
+Please provide:
+
+a list of changed files
+a short architecture note describing the new secret flow
+migration notes for existing plaintext secrets already in the database
+rollback notes
+a summary of remaining known risks
+test evidence showing secrets are no longer exposed
+
+And I’d add this final note for them:
+
+Priority order
+
+Stop returning secrets in API responses
+Stop using secrets in the browser
+Encrypt secrets at rest
+Redact logs
+Fix auth defaults and token storage
+Remove auth bypass and default admin credentials
+Add hardening and tests

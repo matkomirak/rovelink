@@ -1,32 +1,31 @@
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { db } from "./db";
 import { users } from "../shared/schema";
 import { eq } from "drizzle-orm";
 
 async function seed() {
-  console.log("🌱 Seeding database...");
+  console.log("Seeding database...");
 
-  const adminUsername = "admin";
-  const adminPassword = "admin";
+  const adminUsername = process.env.BOOTSTRAP_ADMIN_USER || "admin";
 
   try {
-    // Check if admin user already exists
     const [existingAdmin] = await db
       .select()
       .from(users)
       .where(eq(users.username, adminUsername));
 
     if (existingAdmin) {
-      console.log(`✅ Admin user '${adminUsername}' already exists`);
-      console.log(`   ID: ${existingAdmin.id}`);
-      console.log(`   Role: ${existingAdmin.role}`);
+      console.log(`Admin user '${adminUsername}' already exists (id: ${existingAdmin.id})`);
       process.exit(0);
     }
 
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    // Use env-provided password or generate a one-time random password
+    const providedPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+    const adminPassword = providedPassword || crypto.randomBytes(16).toString("hex");
 
-    // Create admin user
+    const hashedPassword = await bcrypt.hash(adminPassword, 12);
+
     const [admin] = await db
       .insert(users)
       .values({
@@ -36,21 +35,19 @@ async function seed() {
       })
       .returning();
 
-    console.log(`✅ Admin user created successfully!`);
-    console.log(`   Username: ${admin.username}`);
-    console.log(`   Password: ${adminPassword}`);
-    console.log(`   Role: ${admin.role}`);
-    console.log(`   ID: ${admin.id}`);
-    console.log("");
-    console.log(`🔐 You can now login with:`);
-    console.log(`   Username: admin`);
-    console.log(`   Password: admin`);
-    console.log("");
-    console.log(`⚠️  Remember to change the password after first login!`);
+    console.log(`Admin user '${admin.username}' created (id: ${admin.id}).`);
+
+    if (!providedPassword) {
+      // Only print the password when it's newly generated (first bootstrap)
+      console.log(`One-time password: ${adminPassword}`);
+      console.log("Change this password immediately after first login.");
+    } else {
+      console.log("Password set from BOOTSTRAP_ADMIN_PASSWORD environment variable.");
+    }
 
     process.exit(0);
   } catch (error) {
-    console.error("❌ Error seeding database:", error);
+    console.error("Error seeding database:", error);
     process.exit(1);
   }
 }

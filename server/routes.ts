@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { netboxService } from "./services/netbox";
 import { fakeRunner } from "./services/fake-runner";
@@ -14,6 +15,17 @@ import { runProviderSyncWithWorker } from "./services/syncWorker";
 import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
+import {
+  sanitizeProviderForResponse,
+  sanitizeCmdbForResponse,
+  sanitizeNetboxSourceForResponse,
+  encryptProviderConfig,
+  decryptProviderConfig,
+  encryptCmdbConfig,
+  decryptCmdbConfig,
+  encryptNetboxToken,
+  decryptNetboxToken,
+} from "./services/secrets";
 
 // Import modular BDP routes
 import pipelineRoutes from "./routes/pipelines";
@@ -22,7 +34,25 @@ import providerDiscoveryRoutes from "./routes/provider-discovery";
 import automationInventoryRoutes from "./routes/automation-inventories";
 import gateRoutes from "./routes/gate";
 
+// ─── JWT setup ────────────────────────────────────────────────────────────────
+const isProduction = process.env.NODE_ENV === "production";
+
+if (isProduction && !process.env.JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is required in production. Refusing to start.");
+  process.exit(1);
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
+const JWT_EXPIRES_IN = "24h";
+
+// ─── Rate limiter for login ───────────────────────────────────────────────────
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many login attempts, please try again later" },
+});
 
 // Auth middleware
 interface AuthRequest extends Request {
@@ -31,12 +61,19 @@ interface AuthRequest extends Request {
 }
 
 async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+  // Extract token from Authorization header or HttpOnly cookie
+  let token: string | undefined;
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
+  if (authHeader?.startsWith("Bearer ")) {
+    token = authHeader.substring(7);
+  } else if (req.cookies?.auth_token) {
+    token = req.cookies.auth_token;
+  }
+
+  if (!token) {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
-  const token = authHeader.substring(7);
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
     req.userId = decoded.userId;
@@ -65,8 +102,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/inventories", authMiddleware, automationInventoryRoutes);
   app.use("/api/gate", gateRoutes);
 
-  // Auth routes
-  app.post("/api/auth/signup", async (req, res) => {
+  // ─── Auth routes ────────────────────────────────────────────────────────────
+
+  function setAuthCookie(res: Response, token: string) {
+    res.cookie("auth_token", token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "strict",
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+  }
+
+  app.post("/api/auth/signup", loginRateLimiter, async (req, res) => {
     try {
       const { username, password } = insertUserSchema.parse(req.body);
       
@@ -75,31 +122,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Username already exists" });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashedPassword = await bcrypt.hash(password, 12);
       const user = await storage.createUser({
         username,
         password: hashedPassword,
-        role: "viewer", // Default role
+        role: "viewer",
       });
 
-      const token = jwt.sign({ userId: user.id }, JWT_SECRET);
+      const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      setAuthCookie(res, token);
       res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Signup failed" });
     }
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
     try {
-      // If AUTH_DISABLE is true, skip authentication
+      // AUTH_DISABLE bypass is not permitted in production
       if (process.env.AUTH_DISABLE === "true") {
-        const stubUser = {
-          id: "stub-admin-id",
-          username: "admin",
-          role: "admin"
-        };
-        const token = jwt.sign({ userId: stubUser.id }, JWT_SECRET);
-        return res.json({ token, user: stubUser });
+        if (isProduction) {
+          console.error("SECURITY: AUTH_DISABLE is not permitted in production mode. Ignoring bypass.");
+        } else {
+          const stubUser = { id: "stub-admin-id", username: "admin", role: "admin" };
+          const token = jwt.sign({ userId: stubUser.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+          setAuthCookie(res, token);
+          return res.json({ token, user: stubUser });
+        }
       }
 
       const { username, password } = insertUserSchema.parse(req.body);
@@ -114,23 +163,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      const token = jwt.sign({ userId: user.id }, JWT_SECRET);
+      const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      setAuthCookie(res, token);
       res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Login failed" });
     }
   });
 
-  app.get("/api/auth/me", authMiddleware, async (req: AuthRequest, res) => {
-    // If AUTH_DISABLE is true, return stub user
-    if (process.env.AUTH_DISABLE === "true") {
-      return res.json({
-        id: "stub-admin-id",
-        username: "admin",
-        role: "admin"
-      });
-    }
+  app.post("/api/auth/logout", (_req, res) => {
+    res.clearCookie("auth_token", { httpOnly: true, sameSite: "strict" });
+    res.json({ message: "Logged out" });
+  });
 
+  app.get("/api/auth/me", authMiddleware, async (req: AuthRequest, res) => {
     if (!req.user) {
       return res.status(401).json({ message: "Not authenticated" });
     }
@@ -746,11 +792,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Provider routes
+  // ─── Provider routes ─────────────────────────────────────────────────────────
   app.get("/api/providers", authMiddleware, async (req, res) => {
     try {
       const providers = await storage.getProviders();
-      res.json(providers);
+      res.json(providers.map(sanitizeProviderForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get providers" });
     }
@@ -762,7 +808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
-      res.json(provider);
+      res.json(sanitizeProviderForResponse(provider));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get provider" });
     }
@@ -777,7 +823,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { getProviderCollector } = await import("./services/providers/registry");
-      const collector = getProviderCollector(provider.kind, provider.config);
+      const decryptedConfig = decryptProviderConfig(provider.config as Record<string, any>);
+      const collector = getProviderCollector(provider.kind, decryptedConfig);
       const vms = await collector.listVms();
       
       res.json({ 
@@ -791,8 +838,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/providers", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
-      const provider = await storage.createProvider(req.body);
-      res.json(provider);
+      const body = { ...req.body };
+      if (body.config && typeof body.config === "object") {
+        body.config = encryptProviderConfig(body.config);
+      }
+      const provider = await storage.createProvider(body);
+      res.json(sanitizeProviderForResponse(provider));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to create provider" });
     }
@@ -800,11 +851,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/providers/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
-      const provider = await storage.updateProvider(req.params.id, req.body);
+      const body = { ...req.body };
+      if (body.config && typeof body.config === "object") {
+        // Merge with existing encrypted config so blank secret fields don't wipe stored secrets
+        const existing = await storage.getProvider(req.params.id);
+        if (existing) {
+          const existingConfig = existing.config as Record<string, any>;
+          const incoming = body.config as Record<string, any>;
+          const merged: Record<string, any> = { ...existingConfig };
+          for (const [k, v] of Object.entries(incoming)) {
+            if (v !== "" && v !== null && v !== undefined) {
+              merged[k] = v;
+            }
+          }
+          body.config = encryptProviderConfig(merged);
+        } else {
+          body.config = encryptProviderConfig(body.config);
+        }
+      }
+      const provider = await storage.updateProvider(req.params.id, body);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
-      res.json(provider);
+      res.json(sanitizeProviderForResponse(provider));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to update provider" });
     }
@@ -818,7 +887,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { getProviderCollector } = await import("./services/providers/registry");
-      const collector = getProviderCollector(provider.kind, provider.config);
+      const decryptedConfig = decryptProviderConfig(provider.config as Record<string, any>);
+      const collector = getProviderCollector(provider.kind, decryptedConfig);
       const result = await collector.testConnection();
       
       res.json(result);
@@ -853,11 +923,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // CMDB routes
+  // ─── CMDB routes ─────────────────────────────────────────────────────────────
   app.get("/api/cmdbs", authMiddleware, async (req, res) => {
     try {
       const cmdbs = await storage.getCmdbAccounts();
-      res.json(cmdbs);
+      res.json(cmdbs.map(sanitizeCmdbForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get CMDBs" });
     }
@@ -866,8 +936,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/cmdbs", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const data = insertCmdbAccountSchema.parse(req.body);
-      const cmdb = await storage.createCmdbAccount(data);
-      res.json(cmdb);
+      const body = { ...data };
+      if (body.config && typeof body.config === "object") {
+        body.config = encryptCmdbConfig(body.config as Record<string, any>);
+      }
+      const cmdb = await storage.createCmdbAccount(body);
+      res.json(sanitizeCmdbForResponse(cmdb));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to create CMDB account" });
     }
@@ -875,11 +949,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
-      const cmdb = await storage.updateCmdbAccount(req.params.id, req.body);
+      const body = { ...req.body };
+      if (body.config && typeof body.config === "object") {
+        // Preserve existing encrypted secrets when blank fields submitted
+        const existing = await storage.getCmdbAccount(req.params.id);
+        if (existing) {
+          const existingConfig = (existing.config as Record<string, any>) || {};
+          const incoming = body.config as Record<string, any>;
+          const merged: Record<string, any> = { ...existingConfig };
+          for (const [k, v] of Object.entries(incoming)) {
+            if (v !== "" && v !== null && v !== undefined) {
+              merged[k] = v;
+            }
+          }
+          body.config = encryptCmdbConfig(merged);
+        } else {
+          body.config = encryptCmdbConfig(body.config);
+        }
+      }
+      const cmdb = await storage.updateCmdbAccount(req.params.id, body);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
-      res.json(cmdb);
+      res.json(sanitizeCmdbForResponse(cmdb));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to update CMDB account" });
     }
@@ -901,12 +993,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "CMDB account not found" });
       }
 
-      // Test connection based on CMDB kind
       if (cmdb.kind === "netbox") {
-        const adapter = new NetBoxAdapter(cmdb.config as any);
+        const decryptedConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
+        const adapter = new NetBoxAdapter(decryptedConfig as any);
         const result = await adapter.test();
         
-        // Only update lastValidatedAt if connection was successful
         if (result.ok) {
           await storage.updateCmdbAccount(req.params.id, {
             lastValidatedAt: new Date(),
@@ -1026,8 +1117,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "NetBox source is disabled" });
       }
 
-      // Fetch VMs from NetBox
-      const vms = await netboxService.getVirtualMachines(source.url, source.token);
+      // Fetch VMs from NetBox (decrypt token before use)
+      const decryptedToken = decryptNetboxToken(source.token);
+      const vms = await netboxService.getVirtualMachines(source.url, decryptedToken);
       
       // Clear existing VMs from this source
       await db.delete(netboxVms).where(eq(netboxVms.sourceId, sourceId));
@@ -1083,11 +1175,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // NetBox Inventory Source routes
+  // ─── NetBox Inventory Source routes ─────────────────────────────────────────
   app.get("/api/netbox-sources", authMiddleware, async (req, res) => {
     try {
       const sources = await storage.getNetboxInventorySources();
-      res.json(sources);
+      res.json(sources.map(sanitizeNetboxSourceForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get NetBox inventory sources" });
     }
@@ -1099,7 +1191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!source) {
         return res.status(404).json({ message: "NetBox inventory source not found" });
       }
-      res.json(source);
+      res.json(sanitizeNetboxSourceForResponse(source));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get NetBox inventory source" });
     }
@@ -1108,8 +1200,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/netbox-sources", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const insertSource = insertNetboxInventorySourceSchema.parse(req.body);
+      if (insertSource.token) {
+        insertSource.token = encryptNetboxToken(insertSource.token);
+      }
       const source = await storage.createNetboxInventorySource(insertSource);
-      res.status(201).json(source);
+      res.status(201).json(sanitizeNetboxSourceForResponse(source));
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Failed to create NetBox inventory source" });
     }
@@ -1117,11 +1212,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/netbox-sources/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
-      const source = await storage.updateNetboxInventorySource(req.params.id, req.body);
+      const body = { ...req.body };
+      // If token is blank, keep the existing one; if provided, encrypt it
+      if (body.token === "" || body.token === null || body.token === undefined) {
+        delete body.token;
+      } else if (body.token) {
+        body.token = encryptNetboxToken(body.token);
+      }
+      const source = await storage.updateNetboxInventorySource(req.params.id, body);
       if (!source) {
         return res.status(404).json({ message: "NetBox inventory source not found" });
       }
-      res.json(source);
+      res.json(sanitizeNetboxSourceForResponse(source));
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Failed to update NetBox inventory source" });
     }
@@ -1133,6 +1235,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete NetBox inventory source" });
+    }
+  });
+
+  // Backend-only NetBox source connection test (replaces browser-side direct call)
+  app.post("/api/netbox-sources/:id/test", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+    try {
+      const source = await storage.getNetboxInventorySource(req.params.id);
+      if (!source) {
+        return res.status(404).json({ message: "NetBox inventory source not found" });
+      }
+      const token = decryptNetboxToken(source.token);
+      const connected = await netboxService.testConnection(source.url, token);
+      if (connected) {
+        res.json({ ok: true, message: "Connection successful" });
+      } else {
+        res.status(502).json({ ok: false, message: "Connection failed — NetBox did not respond correctly" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ ok: false, message: error.message || "Connection test failed" });
     }
   });
 

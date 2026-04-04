@@ -7,12 +7,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft, Server, Cpu, HardDrive, MemoryStick, Network,
-  Search, Filter, RefreshCw, Tag, Globe, Box, ChevronRight,
-  Monitor, ShieldCheck, Info, Layers
+  Search, Filter, RefreshCw, Tag, ChevronRight,
+  Info, Layers
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { ProviderAccount } from "@shared/schema";
@@ -156,7 +154,7 @@ function VmDetailSheet({ vm, open, onClose }: { vm: NormalizedVM | null; open: b
           </p>
         </SheetHeader>
 
-        <ScrollArea className="flex-1 px-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           <div className="space-y-5 pb-6">
 
             {/* Core Identity */}
@@ -222,7 +220,7 @@ function VmDetailSheet({ vm, open, onClose }: { vm: NormalizedVM | null; open: b
             )}
 
           </div>
-        </ScrollArea>
+        </div>
       </SheetContent>
     </Sheet>
   );

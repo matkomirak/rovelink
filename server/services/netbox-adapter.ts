@@ -458,6 +458,8 @@ export class NetBoxAdapter {
           custom_fields: {
             ext_id: extId,
             provider_state: 'active', // Always set to active when syncing from provider
+            // Merge any extra custom fields passed in (e.g. azure_vm_* fields)
+            ...(vmData.custom_fields || {}),
           },
         };
 
@@ -592,6 +594,21 @@ export class NetBoxAdapter {
           deltaPayload.custom_fields = {
             ...deltaPayload.custom_fields,
             gate_provider_id: providerId,
+          };
+          hasChanges = true;
+        }
+
+        // Always write extra custom fields (e.g. azure_vm_* fields) — these are provider-specific
+        // and cannot be diffed cheaply, so we always patch them to keep NetBox current
+        const extraCf = { ...(vmData.custom_fields || {}) };
+        // Remove fields already managed above
+        delete extraCf.ext_id;
+        delete extraCf.provider_state;
+        delete extraCf.gate_provider_id;
+        if (Object.keys(extraCf).length > 0) {
+          deltaPayload.custom_fields = {
+            ...deltaPayload.custom_fields,
+            ...extraCf,
           };
           hasChanges = true;
         }

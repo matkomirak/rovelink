@@ -384,7 +384,7 @@ export class AzureNetBoxSyncService {
     const tags: any[] = [];
     if (isPublic) {
       const publicTagId = await this.ensureTag("azure-public-ip");
-      tags.push(publicTagId);
+      tags.push({ id: publicTagId });
     }
 
     const payload: any = {
@@ -427,6 +427,7 @@ export class AzureNetBoxSyncService {
     // Import each VNet address space as a Prefix
     for (const cidr of vnet.addressSpaces) {
       try {
+        const vnetTagId = await this.ensureTag("azure-vnet");
         const result = await this.upsertPrefix(cidr, {
           description: `Azure VNet: ${vnet.name} (${vnet.resourceGroup})`,
           is_pool: false,
@@ -436,7 +437,7 @@ export class AzureNetBoxSyncService {
             azure_vnet_resource_group: vnet.resourceGroup,
             azure_vnet_location: vnet.location,
           },
-          tags: [await this.ensureTag("azure-vnet")],
+          tags: [{ id: vnetTagId }],
         });
         if (result.created) counts.prefixes.created++;
         else if (result.unchanged) counts.prefixes.unchanged++;
@@ -466,6 +467,7 @@ export class AzureNetBoxSyncService {
 
     for (const cidr of cidrs) {
       try {
+        const subnetTagId = await this.ensureTag("azure-subnet");
         const result = await this.upsertPrefix(cidr, {
           description: `Azure Subnet: ${subnet.name} in ${vnet.name} (${subnet.resourceGroup})`,
           is_pool: true,
@@ -475,7 +477,7 @@ export class AzureNetBoxSyncService {
             azure_subnet_resource_group: subnet.resourceGroup,
             azure_vnet_name: vnet.name,
           },
-          tags: [await this.ensureTag("azure-subnet")],
+          tags: [{ id: subnetTagId }],
         });
         if (result.created) counts.prefixes.created++;
         else if (result.unchanged) counts.prefixes.unchanged++;
@@ -493,7 +495,7 @@ export class AzureNetBoxSyncService {
       description?: string;
       is_pool?: boolean;
       custom_fields?: Record<string, any>;
-      tags?: number[];
+      tags?: Array<{ id: number }>;
     }
   ): Promise<{ created: boolean; unchanged: boolean; id: number }> {
     const client = (this.netbox as any).client;

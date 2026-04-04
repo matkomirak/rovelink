@@ -1,12 +1,14 @@
 import { ProviderFactory } from "./types";
 import { createProxmoxCollector } from "./proxmox";
 import { createFakeCollector } from "./fake";
+import { createAzureCollector } from "./azure";
 
 // Provider registry mapping kind to factory function
 const providerRegistry: Record<string, ProviderFactory> = {
   proxmox: createProxmoxCollector,
   fake: createFakeCollector,
-  // Future: azure, vmware, etc.
+  azure: createAzureCollector,
+  // Future: vmware, etc.
 };
 
 export function getProviderCollector(kind: string, config: any) {

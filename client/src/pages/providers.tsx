@@ -27,6 +27,12 @@ const providerFormSchema = insertProviderAccountSchema.extend({
   token_secret: z.string().optional(),
   realm: z.string().optional(),
   verify_ssl: z.boolean().optional(),
+  // Azure provider fields
+  subscription_id: z.string().optional(),
+  tenant_id: z.string().optional(),
+  client_id: z.string().optional(),
+  client_secret: z.string().optional(),
+  resource_groups: z.string().optional(),
   // Fake provider fields
   variant: z.enum(["proxmox", "vsphere", "azure", "aws"]).optional(),
   seed: z.number().optional(),
@@ -91,7 +97,7 @@ export default function Providers() {
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { base_url, auth_method, username, password, token_id, token_secret, realm, verify_ssl, variant, seed, vms, tenants, sites, clusters, nodes, linux_pct, tags_customer, tags_wave, tags_role, nics_min, nics_max, ips_min, ips_max, ipv4_cidrs, missing_ip_pct, ...providerData } = data;
+      const { base_url, auth_method, username, password, token_id, token_secret, realm, verify_ssl, subscription_id, tenant_id, client_id, client_secret, resource_groups, variant, seed, vms, tenants, sites, clusters, nodes, linux_pct, tags_customer, tags_wave, tags_role, nics_min, nics_max, ips_min, ips_max, ipv4_cidrs, missing_ip_pct, ...providerData } = data;
       
       let config: any = {};
       
@@ -123,6 +129,16 @@ export default function Providers() {
         
         if (ips_min !== undefined || ips_max !== undefined) {
           config.ips_per_nic = { min: ips_min || 1, max: ips_max || 1 };
+        }
+      } else if (data.kind === "azure") {
+        config = {
+          subscription_id,
+          tenant_id,
+          client_id,
+          client_secret,
+        };
+        if (resource_groups) {
+          config.resource_groups = resource_groups.split(",").map((s: string) => s.trim()).filter(Boolean);
         }
       } else {
         config = {
@@ -213,15 +229,23 @@ export default function Providers() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const { base_url, auth_method, username, password, token_id, token_secret, realm, verify_ssl, ...providerData } = data;
-      const config: any = { base_url, auth_method, realm, verify_ssl };
-      if (auth_method === "password") {
-        config.username = username;
-        config.password = password;
+      const { base_url, auth_method, username, password, token_id, token_secret, realm, verify_ssl, subscription_id, tenant_id, client_id, client_secret, resource_groups, ...providerData } = data;
+      let config: any = {};
+      if (data.kind === "azure") {
+        config = { subscription_id, tenant_id, client_id, client_secret };
+        if (resource_groups) {
+          config.resource_groups = resource_groups.split(",").map((s: string) => s.trim()).filter(Boolean);
+        }
       } else {
-        config.username = username;
-        config.token_id = token_id;
-        config.token_secret = token_secret;
+        config = { base_url, auth_method, realm, verify_ssl };
+        if (auth_method === "password") {
+          config.username = username;
+          config.password = password;
+        } else {
+          config.username = username;
+          config.token_id = token_id;
+          config.token_secret = token_secret;
+        }
       }
       return apiRequest("PATCH", `/api/providers/${id}`, { ...providerData, config });
     },
@@ -288,6 +312,17 @@ export default function Providers() {
         ips_min: config?.ips_per_nic?.min || 1,
         ips_max: config?.ips_per_nic?.max || 1,
         ipv4_cidrs: config?.ipv4_cidrs?.join(",") || "",
+      });
+    } else if (provider.kind === "azure") {
+      form.reset({
+        name: provider.name,
+        kind: provider.kind,
+        enabled: provider.enabled,
+        subscription_id: config?.subscription_id || "",
+        tenant_id: config?.tenant_id || "",
+        client_id: config?.client_id || "",
+        client_secret: config?.client_secret || "",
+        resource_groups: config?.resource_groups?.join(",") || "",
       });
     } else {
       form.reset({
@@ -377,8 +412,8 @@ export default function Providers() {
                         <SelectContent>
                           <SelectItem value="proxmox">Proxmox</SelectItem>
                           <SelectItem value="fake">Fake (Generator)</SelectItem>
+                          <SelectItem value="azure">Azure</SelectItem>
                           <SelectItem value="vmware" disabled>VMware (Coming Soon)</SelectItem>
-                          <SelectItem value="azure" disabled>Azure (Coming Soon)</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -784,6 +819,87 @@ export default function Providers() {
                           <FormControl>
                             <Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-verify-ssl" />
                           </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                )}
+
+                {(selectedKind === "azure" || form.watch("kind") === "azure") && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="subscription_id"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Subscription ID</FormLabel>
+                          <FormControl>
+                            <Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" {...field} data-testid="input-subscription-id" />
+                          </FormControl>
+                          <FormDescription>Your Azure subscription ID</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="tenant_id"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tenant ID</FormLabel>
+                          <FormControl>
+                            <Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" {...field} data-testid="input-tenant-id" />
+                          </FormControl>
+                          <FormDescription>Your Azure Active Directory tenant ID</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="client_id"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Client ID</FormLabel>
+                            <FormControl>
+                              <Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" {...field} data-testid="input-client-id" />
+                            </FormControl>
+                            <FormDescription>Service principal application ID</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="client_secret"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Client Secret</FormLabel>
+                            <FormControl>
+                              <Input type="password" placeholder="Service principal secret" {...field} data-testid="input-client-secret" />
+                            </FormControl>
+                            <FormDescription>Service principal secret value</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <FormField
+                      control={form.control}
+                      name="resource_groups"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Resource Groups (optional)</FormLabel>
+                          <FormControl>
+                            <Input placeholder="rg-prod,rg-staging" {...field} data-testid="input-resource-groups" />
+                          </FormControl>
+                          <FormDescription>Comma-separated list of resource groups to scope. Leave blank to sync all.</FormDescription>
+                          <FormMessage />
                         </FormItem>
                       )}
                     />

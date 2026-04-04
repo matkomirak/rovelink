@@ -3,6 +3,8 @@ import { providerAccounts, syncRuns, externalObjects, cmdbAccounts } from "../..
 import { eq, and } from "drizzle-orm";
 import { getProviderCollector } from "./providers/registry";
 import { NetBoxAdapter } from "./netbox-adapter";
+import { AzureCollector } from "./providers/azure";
+import { AzureNetBoxSyncService } from "./azure-netbox-sync";
 
 /**
  * Transform provider tags by adding provider prefix.
@@ -102,7 +104,7 @@ export class SyncWorker {
         // ─────────────────────────────────────────────────────────────────────
         // PHASE 2: Collect VMs from provider
         // ─────────────────────────────────────────────────────────────────────
-        this.log(`=== Phase 2: Collecting VMs from Provider ===`);
+        this.log(`=== Phase 2: Collecting from Provider ===`);
         const vms = await collector.listVms();
         this.log(`Collected ${vms.length} VMs from provider`);
 
@@ -110,6 +112,7 @@ export class SyncWorker {
         // PHASE 3: NetBox import
         // ─────────────────────────────────────────────────────────────────────
         this.log(`=== Phase 3: NetBox Import ===`);
+        const isAzure = syncRun.providerAccount.kind === "azure";
 
         // Resolve NetBox config: prefer first enabled NetBox CMDB account in DB,
         // fall back to environment variables.
@@ -144,89 +147,136 @@ export class SyncWorker {
           throw new Error(`NetBox connection failed: ${netboxTest.error}`);
         }
         this.log(`NetBox connected (version: ${netboxTest.version || "unknown"})`);
-        this.log(`Importing ${vms.length} VMs into NetBox...`);
 
-        // Track seen external IDs for cleanup
-        const seenExternalIds = new Set<string>();
+        // ─── Azure: full discovery path ──────────────────────────────────────
+        if (isAzure && collector instanceof AzureCollector) {
+          this.log(`Azure provider detected — running full subscription discovery...`);
+          this.log(`Collecting VMs, VNets, Subnets, NICs, and Public IPs...`);
 
-        // Upsert each VM to NetBox
-        for (const vm of vms) {
-          try {
-            const extId = `${syncRun.providerAccount.kind}:${vm.externalId}`;
-            seenExternalIds.add(vm.externalId);
+          const discovery = await collector.discoverAll();
+          this.log(`Discovery complete: ${discovery.vms.length} VMs, ${discovery.vnets.length} VNets, ${discovery.nics.length} NICs, ${discovery.publicIps.length} Public IPs`);
 
-            // Transform provider tags with provider prefix
-            // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
-            const namespacedTags = namespaceTags(vm.tags, syncRun.providerAccount.kind);
+          const azureSync = new AzureNetBoxSyncService(netbox);
+          const azureCounts = await azureSync.importAll(discovery);
 
-            // Map NormalizedVm to NetBoxVmData
-            const vmData = {
-              name: vm.name,
-              status: vm.status === "running" ? "active" : "offline",
-              vcpus: vm.vcpus,
-              memory: vm.memory,
-              disk: vm.disk,
-              platform: vm.platform ? { name: vm.platform } : undefined,
-              tags: namespacedTags.map((t: string) => ({ name: t })),
-              custom_fields: {
-                ext_id: extId,
-                ext_provider: syncRun.providerAccount.kind,
-              },
-              comments: `Synced from ${syncRun.providerAccount.kind} by Bridge`,
-            };
+          // Merge Azure counts into standard counts
+          counts.created += azureCounts.vms.created + azureCounts.prefixes.created + azureCounts.interfaces.created + azureCounts.ips.created;
+          counts.updated += azureCounts.vms.updated + azureCounts.prefixes.updated + azureCounts.interfaces.updated + azureCounts.ips.updated;
+          counts.unchanged += azureCounts.vms.unchanged + azureCounts.prefixes.unchanged;
+          counts.errors += azureCounts.vms.errors + azureCounts.prefixes.errors + azureCounts.interfaces.errors + azureCounts.ips.errors;
 
-            if (!vm.primaryIp4) {
-              counts.noIp++;
+          // Append Azure sync logs
+          for (const l of azureSync.getLogs()) {
+            this.logs.push(l);
+          }
+
+          this.log(`=== Azure Sync Summary ===`);
+          this.log(`VMs: created=${azureCounts.vms.created} updated=${azureCounts.vms.updated} unchanged=${azureCounts.vms.unchanged} errors=${azureCounts.vms.errors}`);
+          this.log(`Interfaces: created=${azureCounts.interfaces.created} updated=${azureCounts.interfaces.updated} errors=${azureCounts.interfaces.errors}`);
+          this.log(`IP Addresses: created=${azureCounts.ips.created} updated=${azureCounts.ips.updated} errors=${azureCounts.ips.errors}`);
+          this.log(`Prefixes: created=${azureCounts.prefixes.created} updated=${azureCounts.prefixes.updated} unchanged=${azureCounts.prefixes.unchanged} errors=${azureCounts.prefixes.errors}`);
+
+          // Update external_objects tracking for VMs
+          for (const vm of discovery.vms) {
+            try {
+              await db
+                .insert(externalObjects)
+                .values({
+                  providerAccountId: syncRun.providerAccountId,
+                  providerKind: "azure",
+                  externalId: vm.id,
+                  netboxType: "virtualization.virtual_machines",
+                  netboxId: 0,
+                  cachedPayload: { name: vm.name, location: vm.location, resourceGroup: vm.resourceGroup },
+                })
+                .onConflictDoUpdate({
+                  target: [externalObjects.providerAccountId, externalObjects.externalId],
+                  set: {
+                    cachedPayload: { name: vm.name, location: vm.location, resourceGroup: vm.resourceGroup },
+                    lastSyncedAt: new Date(),
+                  },
+                });
+            } catch {
+              // Non-fatal tracking failure
             }
+          }
+        } else {
+          // ─── Standard (Proxmox / Fake / vSphere) import path ────────────────
+          this.log(`Importing ${vms.length} VMs into NetBox...`);
 
-            // Upsert VM to NetBox (real API call via NetBoxAdapter)
-            const result = await netbox.upsertVm(vmData, extId);
+          const seenExternalIds = new Set<string>();
 
-            if (result.created) {
-              counts.created++;
-              this.log(`Created: ${vm.name} (${extId})`);
-            } else if (result.unchanged) {
-              counts.unchanged++;
-              this.log(`Unchanged: ${vm.name}`);
-            } else {
-              counts.updated++;
-              this.log(`Updated: ${vm.name} (NetBox ID: ${result.id})`);
-            }
+          for (const vm of vms) {
+            try {
+              const extId = `${syncRun.providerAccount.kind}:${vm.externalId}`;
+              seenExternalIds.add(vm.externalId);
 
-            // Update external_objects tracking
-            await db
-              .insert(externalObjects)
-              .values({
-                providerAccountId: syncRun.providerAccountId,
-                providerKind: syncRun.providerAccount.kind,
-                externalId: vm.externalId,
-                netboxType: "virtualization.virtual_machines",
-                netboxId: result.id,
-                cachedPayload: vm.raw || {},
-              })
-              .onConflictDoUpdate({
-                target: [externalObjects.providerAccountId, externalObjects.externalId],
-                set: {
+              // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
+              const namespacedTags = namespaceTags(vm.tags, syncRun.providerAccount.kind);
+
+              const vmData = {
+                name: vm.name,
+                status: vm.status === "running" ? "active" : "offline",
+                vcpus: vm.vcpus,
+                memory: vm.memory,
+                disk: vm.disk,
+                platform: vm.platform ? { name: vm.platform } : undefined,
+                tags: namespacedTags.map((t: string) => ({ name: t })),
+                custom_fields: {
+                  ext_id: extId,
+                  ext_provider: syncRun.providerAccount.kind,
+                },
+                comments: `Synced from ${syncRun.providerAccount.kind} by Bridge`,
+              };
+
+              if (!vm.primaryIp4) counts.noIp++;
+
+              const result = await netbox.upsertVm(vmData, extId);
+
+              if (result.created) {
+                counts.created++;
+                this.log(`Created: ${vm.name} (${extId})`);
+              } else if (result.unchanged) {
+                counts.unchanged++;
+                this.log(`Unchanged: ${vm.name}`);
+              } else {
+                counts.updated++;
+                this.log(`Updated: ${vm.name} (NetBox ID: ${result.id})`);
+              }
+
+              await db
+                .insert(externalObjects)
+                .values({
+                  providerAccountId: syncRun.providerAccountId,
+                  providerKind: syncRun.providerAccount.kind,
+                  externalId: vm.externalId,
+                  netboxType: "virtualization.virtual_machines",
                   netboxId: result.id,
                   cachedPayload: vm.raw || {},
-                  lastSyncedAt: new Date(),
-                },
-              });
-          } catch (error: any) {
-            counts.errors++;
-            this.log(`Error upserting VM ${vm.name}: ${error.message}`);
+                })
+                .onConflictDoUpdate({
+                  target: [externalObjects.providerAccountId, externalObjects.externalId],
+                  set: {
+                    netboxId: result.id,
+                    cachedPayload: vm.raw || {},
+                    lastSyncedAt: new Date(),
+                  },
+                });
+            } catch (error: any) {
+              counts.errors++;
+              this.log(`Error upserting VM ${vm.name}: ${error.message}`);
+            }
           }
-        }
 
-        // Check for removed VMs (in external_objects but not in current sync)
-        const existingObjects = await db.query.externalObjects.findMany({
-          where: eq(externalObjects.providerAccountId, syncRun.providerAccountId),
-        });
-
-        for (const obj of existingObjects) {
-          if (!seenExternalIds.has(obj.externalId)) {
-            counts.removed++;
-            this.log(`VM removed from provider: ${obj.externalId}`);
+          // Check for removed VMs
+          const existingObjects = await db.query.externalObjects.findMany({
+            where: eq(externalObjects.providerAccountId, syncRun.providerAccountId),
+          });
+          for (const obj of existingObjects) {
+            if (!seenExternalIds.has(obj.externalId)) {
+              counts.removed++;
+              this.log(`VM removed from provider: ${obj.externalId}`);
+            }
           }
         }
 

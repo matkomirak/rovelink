@@ -22,49 +22,292 @@ interface AzureTokenResponse {
   expires_in: number;
 }
 
-interface AzureVm {
+// ─── Raw Azure API shapes ────────────────────────────────────────────────────
+
+interface AzureRawVm {
   id: string;
   name: string;
   location: string;
+  zones?: string[];
+  tags?: Record<string, string>;
   properties?: {
     provisioningState?: string;
-    powerState?: string;
     hardwareProfile?: { vmSize?: string };
     storageProfile?: {
-      osDisk?: { osType?: string; diskSizeGB?: number };
+      osDisk?: { osType?: string; diskSizeGB?: number; name?: string };
+      imageReference?: {
+        publisher?: string;
+        offer?: string;
+        sku?: string;
+        exactVersion?: string;
+      };
     };
-    osProfile?: { computerName?: string };
+    osProfile?: {
+      computerName?: string;
+      adminUsername?: string;
+    };
     networkProfile?: {
-      networkInterfaces?: Array<{ id: string }>;
+      networkInterfaces?: Array<{ id: string; properties?: { primary?: boolean } }>;
+    };
+    securityProfile?: {
+      securityType?: string;
+      uefiSettings?: {
+        secureBootEnabled?: boolean;
+        vTpmEnabled?: boolean;
+      };
+    };
+    additionalCapabilities?: {
+      hibernationEnabled?: boolean;
+    };
+    availabilitySet?: { id?: string };
+    virtualMachineScaleSet?: { id?: string };
+    proximityPlacementGroup?: { id?: string };
+    capacityReservation?: { capacityReservationGroup?: { id?: string } };
+    hostGroup?: { id?: string };
+    host?: { id?: string };
+    evictionPolicy?: string;
+    priority?: string; // Spot / Regular
+    diagnosticsProfile?: {
+      bootDiagnostics?: { enabled?: boolean };
+    };
+    storageProfile2?: {
+      dataDisks?: any[];
+      diskControllerType?: string;
     };
   };
-  tags?: Record<string, string>;
 }
 
 interface AzureVmInstanceView {
   statuses?: Array<{ code: string; displayStatus?: string }>;
+  vmAgent?: { extensionHandlers?: Array<{ type: string; status?: { displayStatus?: string } }> };
+  extensions?: Array<{ name?: string; type?: string }>;
+  hyperVGeneration?: string;
+  hyperVArchitecture?: string;
 }
 
-interface AzureNic {
+interface AzureNicRaw {
+  id: string;
+  name: string;
+  location?: string;
+  tags?: Record<string, string>;
   properties?: {
+    macAddress?: string;
+    virtualMachine?: { id?: string };
     ipConfigurations?: Array<{
+      name?: string;
       properties?: {
         privateIPAddress?: string;
+        privateIPAddressVersion?: string;
+        subnet?: { id?: string };
         publicIPAddress?: { id?: string };
+        primary?: boolean;
       };
     }>;
   };
 }
 
+interface AzurePublicIpRaw {
+  id: string;
+  name: string;
+  location?: string;
+  tags?: Record<string, string>;
+  properties?: {
+    ipAddress?: string;
+    publicIPAddressVersion?: string;
+    dnsSettings?: { fqdn?: string; domainNameLabel?: string };
+    ipConfiguration?: { id?: string };
+  };
+}
+
+interface AzureVNetRaw {
+  id: string;
+  name: string;
+  location?: string;
+  tags?: Record<string, string>;
+  properties?: {
+    addressSpace?: { addressPrefixes?: string[] };
+    subnets?: AzureSubnetRaw[];
+  };
+}
+
+interface AzureSubnetRaw {
+  id: string;
+  name: string;
+  properties?: {
+    addressPrefix?: string;
+    addressPrefixes?: string[];
+    networkSecurityGroup?: { id?: string };
+    routeTable?: { id?: string };
+  };
+}
+
+// ─── Normalized discovery shapes ─────────────────────────────────────────────
+
+export interface AzureNormalizedVm {
+  // Core identity
+  id: string;
+  name: string;
+  location: string;
+  resourceGroup: string;
+  subscriptionId: string;
+
+  // Power state
+  status: "running" | "stopped" | "unknown";
+
+  // OS
+  platform?: "linux" | "windows";
+  computerName?: string;
+
+  // Hardware
+  vmSize?: string;
+  vcpus?: number;
+  ramGiB?: number;
+  disk?: number;
+
+  // Storage
+  osDiskName?: string;
+  diskControllerType?: string;
+  dataDisksCount?: number;
+  imagePublisher?: string;
+  imageOffer?: string;
+  imagePlan?: string;
+
+  // Networking
+  primaryIp4?: string;
+  primaryIp6?: string;
+  nics: AzureNormalizedNic[];
+  dnsName?: string;
+
+  // Security
+  securityType?: string;
+  secureBoot?: boolean;
+  vtpm?: boolean;
+  integrityMonitoring?: boolean;
+
+  // Availability / placement
+  availabilityZone?: string;
+  availabilitySet?: string;
+  scaleSet?: string;
+  proximityPlacementGroup?: string;
+  capacityReservationGroup?: string;
+  hostGroup?: string;
+  host?: string;
+
+  // Spot
+  spot?: boolean;
+  spotEvictionPolicy?: string;
+
+  // VM generation/arch (from instance view)
+  generation?: string;
+  architecture?: string;
+
+  // Hibernation
+  hibernation?: string;
+
+  // Extensions
+  extensions?: string[];
+
+  // Auto-shutdown
+  autoShutdown?: string;
+  scheduledShutdown?: string;
+
+  // Encryption
+  encryptionAtHost?: boolean;
+  diskEncryption?: string;
+  ephemeralOsDisk?: string;
+
+  // Tags
+  tags: Record<string, string>;
+
+  // Raw for debugging
+  raw?: any;
+}
+
+export interface AzureNormalizedNic {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  macAddress?: string;
+  vmId?: string;
+  vmName?: string;
+  privateIps: string[]; // CIDR or plain
+  publicIps: string[];
+  subnetName?: string;
+  virtualNetworkName?: string;
+  primary?: boolean;
+}
+
+export interface AzureNormalizedPublicIp {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  location?: string;
+  ipAddress?: string;
+  ipVersion?: string;
+  fqdn?: string;
+  associatedNicId?: string;
+  tags?: Record<string, string>;
+}
+
+export interface AzureNormalizedVNet {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  location?: string;
+  addressSpaces: string[];
+  subnets: AzureNormalizedSubnet[];
+  tags?: Record<string, string>;
+}
+
+export interface AzureNormalizedSubnet {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  virtualNetworkName: string;
+  addressPrefix?: string;
+  addressPrefixes?: string[];
+}
+
+export interface AzureDiscoveryResult {
+  vms: AzureNormalizedVm[];
+  nics: AzureNormalizedNic[];
+  publicIps: AzureNormalizedPublicIp[];
+  vnets: AzureNormalizedVNet[];
+  subscriptionId: string;
+}
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+function extractResourceGroup(id: string): string {
+  const parts = id.split("/");
+  const idx = parts.findIndex((p) => p.toLowerCase() === "resourcegroups");
+  return idx >= 0 ? parts[idx + 1] : "";
+}
+
+function extractLastSegment(id: string): string {
+  return id.split("/").pop() || id;
+}
+
+const ARM_BASE = "https://management.azure.com";
+const VM_API = "2023-03-01";
+const NET_API = "2023-05-01";
+const PIP_API = "2023-05-01";
+
+// ─── Azure Collector ──────────────────────────────────────────────────────────
+
 export class AzureCollector implements IProviderCollector {
   private config: AzureConfig;
   private accessToken?: string;
+  private tokenExpiry?: Date;
 
   constructor(config: AzureConfig) {
     this.config = config;
   }
 
   private async authenticate(): Promise<void> {
+    if (this.accessToken && this.tokenExpiry && this.tokenExpiry > new Date()) {
+      return;
+    }
     const url = `https://login.microsoftonline.com/${this.config.tenant_id}/oauth2/v2.0/token`;
     const params = new URLSearchParams({
       grant_type: "client_credentials",
@@ -72,29 +315,51 @@ export class AzureCollector implements IProviderCollector {
       client_secret: this.config.client_secret,
       scope: "https://management.azure.com/.default",
     });
-
     const response = await axios.post<AzureTokenResponse>(url, params.toString(), {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
-
     this.accessToken = response.data.access_token;
+    const expiresIn = response.data.expires_in || 3600;
+    this.tokenExpiry = new Date(Date.now() + (expiresIn - 60) * 1000);
   }
 
-  private authHeaders() {
+  private headers() {
     return { Authorization: `Bearer ${this.accessToken}` };
   }
+
+  private async getAll<T>(url: string): Promise<T[]> {
+    type Page = { value: T[]; nextLink?: string };
+    const results: T[] = [];
+    let nextLink: string | undefined = url;
+    while (nextLink) {
+      const res: { data: Page } = await axios.get<Page>(nextLink, {
+        headers: this.headers(),
+      });
+      results.push(...(res.data.value || []));
+      nextLink = res.data.nextLink;
+    }
+    return results;
+  }
+
+  private async getOne<T>(url: string): Promise<T | null> {
+    try {
+      const res = await axios.get<T>(url, { headers: this.headers() });
+      return res.data;
+    } catch {
+      return null;
+    }
+  }
+
+  // ─── IProviderCollector interface ───────────────────────────────────────────
 
   async testConnection(): Promise<TestConnectionResult> {
     try {
       await this.authenticate();
-
-      // Try to list subscriptions to confirm access
-      const response = await axios.get(
-        `https://management.azure.com/subscriptions/${this.config.subscription_id}?api-version=2022-12-01`,
-        { headers: this.authHeaders() }
+      const res = await axios.get(
+        `${ARM_BASE}/subscriptions/${this.config.subscription_id}?api-version=2022-12-01`,
+        { headers: this.headers() }
       );
-
-      const sub = response.data;
+      const sub = res.data;
       return {
         ok: true,
         details: `Connected to subscription: ${sub.displayName || this.config.subscription_id} (${sub.state || "Enabled"})`,
@@ -109,124 +374,344 @@ export class AzureCollector implements IProviderCollector {
     }
   }
 
+  /** Basic VM list for the IProviderCollector interface (used by gate, inventory) */
   async listVms(): Promise<NormalizedVm[]> {
     await this.authenticate();
+    const rawVms = await this.fetchRawVms();
+    const nicMap = await this.fetchNicMap();
 
-    const baseUrl = "https://management.azure.com";
-    const apiVersion = "2023-03-01";
-    const results: NormalizedVm[] = [];
-
-    // Build list of resource group scopes or use subscription-wide
-    let vmListUrl: string;
-    if (this.config.resource_groups && this.config.resource_groups.length > 0) {
-      // Collect from each resource group individually
-      for (const rg of this.config.resource_groups) {
-        const rgUrl = `${baseUrl}/subscriptions/${this.config.subscription_id}/resourceGroups/${rg}/providers/Microsoft.Compute/virtualMachines?api-version=${apiVersion}`;
-        const vms = await this.fetchAllVms(rgUrl);
-        results.push(...vms);
-      }
-      return results;
-    } else {
-      vmListUrl = `${baseUrl}/subscriptions/${this.config.subscription_id}/providers/Microsoft.Compute/virtualMachines?api-version=${apiVersion}`;
-      return await this.fetchAllVms(vmListUrl);
-    }
+    return rawVms.map((vm) => this.toNormalizedVm(vm, nicMap));
   }
 
-  private async fetchAllVms(url: string): Promise<NormalizedVm[]> {
-    const baseUrl = "https://management.azure.com";
-    const apiVersion = "2023-03-01";
-    const results: NormalizedVm[] = [];
-    let nextLink: string | undefined = url;
+  /** Full Azure discovery: VMs + networking resources */
+  async discoverAll(): Promise<AzureDiscoveryResult> {
+    await this.authenticate();
 
-    while (nextLink) {
-      const response = await axios.get<{ value: AzureVm[]; nextLink?: string }>(
-        nextLink,
-        { headers: this.authHeaders() }
-      );
-      const vms: AzureVm[] = response.data.value || [];
-      nextLink = response.data.nextLink;
+    const [rawVms, rawNics, rawPublicIps, rawVnets] = await Promise.all([
+      this.fetchRawVms(),
+      this.fetchRawNics(),
+      this.fetchRawPublicIps(),
+      this.fetchRawVNets(),
+    ]);
 
-      for (const vm of vms) {
-        const normalized = await this.normalizeVm(vm, baseUrl, apiVersion);
-        results.push(normalized);
-      }
+    // Build public IP map (id → normalized)
+    const publicIpMap = new Map<string, AzureNormalizedPublicIp>();
+    for (const pip of rawPublicIps) {
+      publicIpMap.set(pip.id.toLowerCase(), this.normalizePublicIp(pip));
     }
 
-    return results;
-  }
-
-  private async normalizeVm(vm: AzureVm, baseUrl: string, apiVersion: string): Promise<NormalizedVm> {
-    // Get power state via instance view
-    let status = "unknown";
-    try {
-      const ivUrl = `${baseUrl}${vm.id}/instanceView?api-version=${apiVersion}`;
-      const ivResp = await axios.get<AzureVmInstanceView>(ivUrl, {
-        headers: this.authHeaders(),
-      });
-      const statuses = ivResp.data.statuses || [];
-      const powerStatus = statuses.find((s) => s.code?.startsWith("PowerState/"));
-      if (powerStatus) {
-        const code = powerStatus.code.replace("PowerState/", "").toLowerCase();
-        status = code === "running" ? "running" : "stopped";
-      }
-    } catch {
-      // Best effort - keep unknown
+    // Normalize NICs (resolve public IPs)
+    const normalizedNics = rawNics.map((nic) => this.normalizeNic(nic, publicIpMap));
+    const nicMap = new Map<string, AzureNormalizedNic>();
+    for (const nic of normalizedNics) {
+      nicMap.set(nic.id.toLowerCase(), nic);
     }
 
-    // Get primary IP from NIC
-    let primaryIp4: string | undefined;
-    const nicRefs = vm.properties?.networkProfile?.networkInterfaces || [];
-    if (nicRefs.length > 0) {
-      try {
-        const nicId = nicRefs[0].id;
-        const nicUrl = `${baseUrl}${nicId}?api-version=2023-05-01`;
-        const nicResp = await axios.get<AzureNic>(nicUrl, {
-          headers: this.authHeaders(),
-        });
-        const ipConfigs = nicResp.data.properties?.ipConfigurations || [];
-        if (ipConfigs.length > 0) {
-          primaryIp4 = ipConfigs[0].properties?.privateIPAddress;
-        }
-      } catch {
-        // Best effort
-      }
-    }
+    // Normalize VMs with full details (instance view per VM)
+    const normalizedVms = await Promise.all(
+      rawVms.map((vm) => this.normalizeVmFull(vm, nicMap))
+    );
 
-    // OS type
-    const osType = vm.properties?.storageProfile?.osDisk?.osType?.toLowerCase();
-    let platform: string | undefined;
-    if (osType === "linux") platform = "linux";
-    else if (osType === "windows") platform = "windows";
-
-    // Disk size
-    const diskGb = vm.properties?.storageProfile?.osDisk?.diskSizeGB;
-
-    // Resource group from VM id: /subscriptions/.../resourceGroups/RG_NAME/...
-    const idParts = (vm.id || "").split("/");
-    const rgIdx = idParts.findIndex((p) => p.toLowerCase() === "resourcegroups");
-    const resourceGroup = rgIdx >= 0 ? idParts[rgIdx + 1] : undefined;
-
-    // Tags as array of "key:value" strings
-    const tags: string[] = [];
-    if (vm.tags) {
-      for (const [k, v] of Object.entries(vm.tags)) {
-        tags.push(`${k}:${v}`);
-      }
-    }
+    // Normalize VNets (with subnets already embedded)
+    const normalizedVnets = rawVnets.map((vnet) => this.normalizeVNet(vnet));
 
     return {
-      externalId: vm.id || vm.name,
+      vms: normalizedVms,
+      nics: normalizedNics,
+      publicIps: Array.from(publicIpMap.values()),
+      vnets: normalizedVnets,
+      subscriptionId: this.config.subscription_id,
+    };
+  }
+
+  // ─── Raw fetchers ────────────────────────────────────────────────────────────
+
+  private async fetchRawVms(): Promise<AzureRawVm[]> {
+    const rgs = this.config.resource_groups;
+    if (rgs && rgs.length > 0) {
+      const results: AzureRawVm[] = [];
+      for (const rg of rgs) {
+        const url = `${ARM_BASE}/subscriptions/${this.config.subscription_id}/resourceGroups/${rg}/providers/Microsoft.Compute/virtualMachines?api-version=${VM_API}`;
+        results.push(...await this.getAll<AzureRawVm>(url));
+      }
+      return results;
+    }
+    const url = `${ARM_BASE}/subscriptions/${this.config.subscription_id}/providers/Microsoft.Compute/virtualMachines?api-version=${VM_API}`;
+    return this.getAll<AzureRawVm>(url);
+  }
+
+  private async fetchRawNics(): Promise<AzureNicRaw[]> {
+    const url = `${ARM_BASE}/subscriptions/${this.config.subscription_id}/providers/Microsoft.Network/networkInterfaces?api-version=${NET_API}`;
+    return this.getAll<AzureNicRaw>(url);
+  }
+
+  private async fetchRawPublicIps(): Promise<AzurePublicIpRaw[]> {
+    const url = `${ARM_BASE}/subscriptions/${this.config.subscription_id}/providers/Microsoft.Network/publicIPAddresses?api-version=${PIP_API}`;
+    return this.getAll<AzurePublicIpRaw>(url);
+  }
+
+  private async fetchRawVNets(): Promise<AzureVNetRaw[]> {
+    const url = `${ARM_BASE}/subscriptions/${this.config.subscription_id}/providers/Microsoft.Network/virtualNetworks?api-version=${NET_API}`;
+    return this.getAll<AzureVNetRaw>(url);
+  }
+
+  private async fetchNicMap(): Promise<Map<string, AzureNicRaw>> {
+    const nics = await this.fetchRawNics();
+    const map = new Map<string, AzureNicRaw>();
+    for (const nic of nics) {
+      map.set(nic.id.toLowerCase(), nic);
+    }
+    return map;
+  }
+
+  // ─── Normalizers ─────────────────────────────────────────────────────────────
+
+  private toNormalizedVm(vm: AzureRawVm, nicMap: Map<string, AzureNicRaw>): NormalizedVm {
+    const rg = extractResourceGroup(vm.id);
+    let primaryIp4: string | undefined;
+    const nicRefs = vm.properties?.networkProfile?.networkInterfaces || [];
+    for (const ref of nicRefs) {
+      const nic = nicMap.get(ref.id?.toLowerCase() || "");
+      if (nic) {
+        const ipCfgs = nic.properties?.ipConfigurations || [];
+        for (const cfg of ipCfgs) {
+          if (cfg.properties?.privateIPAddress) {
+            primaryIp4 = cfg.properties.privateIPAddress;
+            break;
+          }
+        }
+        if (primaryIp4) break;
+      }
+    }
+    const osType = vm.properties?.storageProfile?.osDisk?.osType?.toLowerCase();
+    const platform = osType === "linux" ? "linux" : osType === "windows" ? "windows" : undefined;
+    const tagArr: string[] = [];
+    for (const [k, v] of Object.entries(vm.tags || {})) tagArr.push(`${k}:${v}`);
+
+    return {
+      externalId: vm.id,
       name: vm.name,
       provider: "azure",
-      status,
+      status: "unknown",
       primaryIp4,
       platform,
-      disk: diskGb,
+      disk: vm.properties?.storageProfile?.osDisk?.diskSizeGB,
       description: vm.properties?.hardwareProfile?.vmSize,
       site: vm.location,
-      tags,
+      tags: tagArr,
       raw: vm,
     };
+  }
+
+  private async normalizeVmFull(
+    vm: AzureRawVm,
+    nicMap: Map<string, AzureNormalizedNic>
+  ): Promise<AzureNormalizedVm> {
+    const rg = extractResourceGroup(vm.id);
+
+    // Instance view (power state, generation, extensions)
+    let status: "running" | "stopped" | "unknown" = "unknown";
+    let generation: string | undefined;
+    let architecture: string | undefined;
+    let extensions: string[] = [];
+
+    const iv = await this.getOne<AzureVmInstanceView>(
+      `${ARM_BASE}${vm.id}/instanceView?api-version=${VM_API}`
+    );
+    if (iv) {
+      const ps = (iv.statuses || []).find((s) => s.code?.startsWith("PowerState/"));
+      if (ps) {
+        const code = ps.code.replace("PowerState/", "").toLowerCase();
+        status = code === "running" ? "running" : "stopped";
+      }
+      if (iv.hyperVGeneration) generation = iv.hyperVGeneration;
+      if ((iv as any).hyperVArchitecture || (iv as any).architecture) {
+        architecture = (iv as any).hyperVArchitecture || (iv as any).architecture;
+      }
+      extensions = (iv.extensions || []).map((e) => e.type || e.name || "").filter(Boolean);
+    }
+
+    // NICs
+    const nicRefs = vm.properties?.networkProfile?.networkInterfaces || [];
+    const nics: AzureNormalizedNic[] = [];
+    let primaryIp4: string | undefined;
+
+    for (const ref of nicRefs) {
+      const nic = nicMap.get(ref.id?.toLowerCase() || "");
+      if (nic) {
+        const nicWithVm = { ...nic, vmId: vm.id, vmName: vm.name };
+        nics.push(nicWithVm);
+        if (!primaryIp4 && nic.privateIps.length > 0) {
+          primaryIp4 = nic.privateIps[0].split("/")[0];
+        }
+      }
+    }
+
+    // OS platform
+    const osType = vm.properties?.storageProfile?.osDisk?.osType?.toLowerCase();
+    const platform =
+      osType === "linux" ? "linux" : osType === "windows" ? "windows" : undefined;
+
+    // Image
+    const imgRef = vm.properties?.storageProfile?.imageReference;
+
+    // Disk controller (buried in additionalCapabilities in some versions)
+    const storProps = vm.properties as any;
+
+    // Security
+    const secProf = vm.properties?.securityProfile;
+
+    // Availability zone
+    const zone = vm.zones?.[0];
+
+    // Spot
+    const priority = vm.properties?.priority;
+    const isSpot = priority?.toLowerCase() === "spot";
+
+    // Helper to get last segment of resource ID
+    const idName = (id?: string) => (id ? extractLastSegment(id) : undefined);
+
+    return {
+      id: vm.id,
+      name: vm.name,
+      location: vm.location,
+      resourceGroup: rg,
+      subscriptionId: this.config.subscription_id,
+      status,
+      platform,
+      computerName: vm.properties?.osProfile?.computerName,
+      vmSize: vm.properties?.hardwareProfile?.vmSize,
+      disk: vm.properties?.storageProfile?.osDisk?.diskSizeGB,
+      osDiskName: vm.properties?.storageProfile?.osDisk?.name,
+      imagePublisher: imgRef?.publisher,
+      imageOffer: imgRef?.offer,
+      imagePlan: imgRef?.sku,
+      diskControllerType: storProps?.storageProfile?.diskControllerType,
+      dataDisksCount: (storProps?.storageProfile?.dataDisks || []).length,
+      primaryIp4,
+      nics,
+      securityType: secProf?.securityType,
+      secureBoot: secProf?.uefiSettings?.secureBootEnabled,
+      vtpm: secProf?.uefiSettings?.vTpmEnabled,
+      availabilityZone: zone,
+      availabilitySet: idName(vm.properties?.availabilitySet?.id),
+      scaleSet: idName(vm.properties?.virtualMachineScaleSet?.id),
+      proximityPlacementGroup: idName(vm.properties?.proximityPlacementGroup?.id),
+      capacityReservationGroup: idName(
+        vm.properties?.capacityReservation?.capacityReservationGroup?.id
+      ),
+      hostGroup: idName(vm.properties?.hostGroup?.id),
+      host: idName(vm.properties?.host?.id),
+      spot: isSpot,
+      spotEvictionPolicy: vm.properties?.evictionPolicy,
+      generation,
+      architecture,
+      hibernation: (vm.properties?.additionalCapabilities?.hibernationEnabled)
+        ? "Enabled"
+        : "Disabled",
+      extensions,
+      tags: vm.tags || {},
+      raw: vm,
+    };
+  }
+
+  private normalizeNic(
+    nic: AzureNicRaw,
+    publicIpMap: Map<string, AzureNormalizedPublicIp>
+  ): AzureNormalizedNic {
+    const rg = extractResourceGroup(nic.id);
+    const privateIps: string[] = [];
+    const publicIps: string[] = [];
+    let subnetName: string | undefined;
+    let vnetName: string | undefined;
+
+    for (const cfg of nic.properties?.ipConfigurations || []) {
+      const p = cfg.properties;
+      if (p?.privateIPAddress) {
+        privateIps.push(p.privateIPAddress);
+      }
+      if (p?.publicIPAddress?.id) {
+        const pip = publicIpMap.get(p.publicIPAddress.id.toLowerCase());
+        if (pip?.ipAddress) {
+          publicIps.push(pip.ipAddress);
+        }
+      }
+      if (p?.subnet?.id) {
+        const parts = p.subnet.id.split("/");
+        const snIdx = parts.findIndex((x) => x.toLowerCase() === "subnets");
+        if (snIdx >= 0) subnetName = parts[snIdx + 1];
+        const vnIdx = parts.findIndex((x) => x.toLowerCase() === "virtualnetworks");
+        if (vnIdx >= 0) vnetName = parts[vnIdx + 1];
+      }
+    }
+
+    const vmId = nic.properties?.virtualMachine?.id;
+
+    return {
+      id: nic.id,
+      name: nic.name,
+      resourceGroup: rg,
+      macAddress: nic.properties?.macAddress,
+      vmId,
+      vmName: vmId ? extractLastSegment(vmId) : undefined,
+      privateIps,
+      publicIps,
+      subnetName,
+      virtualNetworkName: vnetName,
+    };
+  }
+
+  private normalizePublicIp(pip: AzurePublicIpRaw): AzureNormalizedPublicIp {
+    const rg = extractResourceGroup(pip.id);
+    return {
+      id: pip.id,
+      name: pip.name,
+      resourceGroup: rg,
+      location: pip.location,
+      ipAddress: pip.properties?.ipAddress,
+      ipVersion: pip.properties?.publicIPAddressVersion,
+      fqdn: pip.properties?.dnsSettings?.fqdn,
+      associatedNicId: pip.properties?.ipConfiguration?.id
+        ? pip.properties.ipConfiguration.id.split("/ipConfigurations/")[0]
+        : undefined,
+      tags: pip.tags,
+    };
+  }
+
+  private normalizeVNet(vnet: AzureVNetRaw): AzureNormalizedVNet {
+    const rg = extractResourceGroup(vnet.id);
+    const subnets: AzureNormalizedSubnet[] = (
+      vnet.properties?.subnets || []
+    ).map((sn) => ({
+      id: sn.id,
+      name: sn.name,
+      resourceGroup: rg,
+      virtualNetworkName: vnet.name,
+      addressPrefix: sn.properties?.addressPrefix,
+      addressPrefixes: sn.properties?.addressPrefixes,
+    }));
+
+    return {
+      id: vnet.id,
+      name: vnet.name,
+      resourceGroup: rg,
+      location: vnet.location,
+      addressSpaces: vnet.properties?.addressSpace?.addressPrefixes || [],
+      subnets,
+      tags: vnet.tags,
+    };
+  }
+
+  /** Object types this provider supports for discovery */
+  getObjectTypes(): string[] {
+    return ["Vm", "VirtualNetwork", "Subnet", "NetworkInterface", "PublicIp"];
+  }
+
+  /** Get samples of a specific object type */
+  async getSamples(objectType: string, limit: number = 20): Promise<any[]> {
+    // Returns static samples (used for pipeline mapping preview without real credentials)
+    const { getSamples } = await import("../sample-fixtures");
+    return getSamples("azure", objectType, limit).map((s) => s.normalized);
   }
 }
 

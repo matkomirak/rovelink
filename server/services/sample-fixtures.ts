@@ -305,11 +305,201 @@ export const fakeVmSamples: NormalizedSample[] = [
   }
 ];
 
+// Azure VirtualNetwork samples
+export const azureVNetSamples: NormalizedSample[] = [
+  {
+    sampleId: "azure-sample:VirtualNetwork:vnet-001",
+    providerKind: "azure",
+    objectType: "VirtualNetwork",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/prod-vnet",
+      name: "prod-vnet",
+      location: "westeurope",
+      resourceGroup: "rg-prod",
+      addressSpaces: ["10.0.0.0/16"],
+      subnets: [
+        { id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/prod-vnet/subnets/default", name: "default", resourceGroup: "rg-prod", virtualNetworkName: "prod-vnet", addressPrefix: "10.0.0.0/24" },
+        { id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/prod-vnet/subnets/aks-subnet", name: "aks-subnet", resourceGroup: "rg-prod", virtualNetworkName: "prod-vnet", addressPrefix: "10.0.1.0/24" },
+      ],
+      tags: { environment: "production", team: "platform" }
+    }
+  },
+  {
+    sampleId: "azure-sample:VirtualNetwork:vnet-002",
+    providerKind: "azure",
+    objectType: "VirtualNetwork",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-staging/providers/Microsoft.Network/virtualNetworks/staging-vnet",
+      name: "staging-vnet",
+      location: "eastus",
+      resourceGroup: "rg-staging",
+      addressSpaces: ["172.16.0.0/20"],
+      subnets: [
+        { id: "/subscriptions/sub-123/resourceGroups/rg-staging/providers/Microsoft.Network/virtualNetworks/staging-vnet/subnets/default", name: "default", resourceGroup: "rg-staging", virtualNetworkName: "staging-vnet", addressPrefix: "172.16.0.0/24" },
+      ],
+      tags: { environment: "staging" }
+    }
+  }
+];
+
+// Azure Subnet samples
+export const azureSubnetSamples: NormalizedSample[] = [
+  {
+    sampleId: "azure-sample:Subnet:subnet-001",
+    providerKind: "azure",
+    objectType: "Subnet",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/prod-vnet/subnets/default",
+      name: "default",
+      resourceGroup: "rg-prod",
+      virtualNetworkName: "prod-vnet",
+      addressPrefix: "10.0.0.0/24"
+    }
+  },
+  {
+    sampleId: "azure-sample:Subnet:subnet-002",
+    providerKind: "azure",
+    objectType: "Subnet",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/prod-vnet/subnets/aks-subnet",
+      name: "aks-subnet",
+      resourceGroup: "rg-prod",
+      virtualNetworkName: "prod-vnet",
+      addressPrefix: "10.0.1.0/24"
+    }
+  }
+];
+
+// Azure NetworkInterface samples
+export const azureNicSamples: NormalizedSample[] = [
+  {
+    sampleId: "azure-sample:NetworkInterface:nic-001",
+    providerKind: "azure",
+    objectType: "NetworkInterface",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/prod-webapp-001-nic",
+      name: "prod-webapp-001-nic",
+      resourceGroup: "rg-prod",
+      macAddress: "00:0D:3A:12:34:56",
+      vmId: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/prod-webapp-001",
+      vmName: "prod-webapp-001",
+      privateIps: ["10.0.0.100"],
+      publicIps: ["20.50.100.1"],
+      subnetName: "default",
+      virtualNetworkName: "prod-vnet"
+    }
+  },
+  {
+    sampleId: "azure-sample:NetworkInterface:nic-002",
+    providerKind: "azure",
+    objectType: "NetworkInterface",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/prod-sql-001-nic",
+      name: "prod-sql-001-nic",
+      resourceGroup: "rg-prod",
+      macAddress: "00:0D:3A:12:34:57",
+      vmId: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/prod-sql-001",
+      vmName: "prod-sql-001",
+      privateIps: ["10.0.0.101"],
+      publicIps: [],
+      subnetName: "default",
+      virtualNetworkName: "prod-vnet"
+    }
+  }
+];
+
+// Azure PublicIp samples
+export const azurePublicIpSamples: NormalizedSample[] = [
+  {
+    sampleId: "azure-sample:PublicIp:pip-001",
+    providerKind: "azure",
+    objectType: "PublicIp",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/publicIPAddresses/prod-webapp-pip",
+      name: "prod-webapp-pip",
+      resourceGroup: "rg-prod",
+      location: "westeurope",
+      ipAddress: "20.50.100.1",
+      ipVersion: "IPv4",
+      fqdn: "prod-webapp-001.westeurope.cloudapp.azure.com",
+      associatedNicId: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/prod-webapp-001-nic",
+      tags: { environment: "production" }
+    }
+  },
+  {
+    sampleId: "azure-sample:PublicIp:pip-002",
+    providerKind: "azure",
+    objectType: "PublicIp",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-staging/providers/Microsoft.Network/publicIPAddresses/staging-lb-pip",
+      name: "staging-lb-pip",
+      resourceGroup: "rg-staging",
+      location: "eastus",
+      ipAddress: "40.121.50.33",
+      ipVersion: "IPv4",
+      fqdn: "",
+      associatedNicId: undefined,
+      tags: { environment: "staging" }
+    }
+  }
+];
+
+// Azure Vm samples (new format matching AzureNormalizedVm)
+export const azureVmNormalizedSamples: NormalizedSample[] = [
+  {
+    sampleId: "azure-sample:Vm:vm-001",
+    providerKind: "azure",
+    objectType: "Vm",
+    normalized: {
+      id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/somemachine1",
+      name: "somemachine1",
+      location: "westeurope",
+      resourceGroup: "rg-prod",
+      subscriptionId: "sub-123",
+      status: "running",
+      platform: "linux",
+      computerName: "somemachine1",
+      vmSize: "Standard_D2s_v3",
+      vcpus: 2,
+      ramGiB: 8,
+      disk: 30,
+      osDiskName: "somemachine1_OsDisk_1_xxx",
+      imagePublisher: "canonical",
+      imageOffer: "ubuntu-24_04-lts",
+      imagePlan: "ubuntu-pro",
+      diskControllerType: "SCSI",
+      dataDisksCount: 0,
+      primaryIp4: "10.0.0.4",
+      nics: [
+        { id: "/subscriptions/sub-123/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/somemachine1737_z1", name: "somemachine1737_z1", resourceGroup: "rg-prod", macAddress: "00:0D:3A:AB:CD:EF", privateIps: ["10.0.0.4"], publicIps: ["20.11.32.123"], subnetName: "default", virtualNetworkName: "somemachine1-vnet" }
+      ],
+      securityType: "Trusted launch",
+      secureBoot: true,
+      vtpm: true,
+      integrityMonitoring: false,
+      availabilityZone: "1",
+      spot: false,
+      generation: "V2",
+      architecture: "x64",
+      hibernation: "Disabled",
+      extensions: [],
+      encryptionAtHost: false,
+      dataDisksCount2: 0,
+      tags: { customer: "Alpha" }
+    }
+  }
+];
+
 // Combined registry for easy lookup
 export const sampleRegistry: Record<string, NormalizedSample[]> = {
   "proxmox:Vm": proxmoxVmSamples,
   "vmware:VM": vcenterVmSamples,
   "azure:Compute.VirtualMachine": azureVmSamples,
+  "azure:Vm": azureVmNormalizedSamples,
+  "azure:VirtualNetwork": azureVNetSamples,
+  "azure:Subnet": azureSubnetSamples,
+  "azure:NetworkInterface": azureNicSamples,
+  "azure:PublicIp": azurePublicIpSamples,
   "fake:Vm": fakeVmSamples,
 };
 

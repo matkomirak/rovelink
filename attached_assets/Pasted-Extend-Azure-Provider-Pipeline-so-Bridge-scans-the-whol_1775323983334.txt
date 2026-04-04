@@ -1,0 +1,515 @@
+Extend Azure Provider + Pipeline so Bridge scans the whole Azure subscription and imports not only VMs, but also Azure networking/infrastructure into NetBox
+Goal
+
+I want Azure discovery to go beyond just virtual machines.
+Bridge must scan the whole Azure subscription and import:
+
+Virtual Machines
+Virtual Networks
+Subnets
+Network Interfaces
+Private IP addresses
+Public IP addresses
+Availability Zones info
+Resource Groups metadata where useful
+Any VM-related Azure-specific attributes
+Main rule
+
+If an attribute already maps to a native NetBox field, use the native NetBox field.
+If an Azure-specific VM attribute has no native NetBox field, create/store it as a NetBox custom field with prefix:
+
+azure_vm_*
+
+Example:
+
+VM name → native NetBox VM name
+Azure security type → azure_vm_security_type
+VM generation → azure_vm_generation
+1) Scope of Azure import into NetBox
+Import these Azure object types
+
+At minimum:
+
+Compute
+Azure Virtual Machines
+Networking
+Virtual Networks
+Subnets
+Network Interfaces
+Private IP addresses
+Public IP addresses
+Optional metadata attachment
+Resource Group name
+Availability Zone
+VM size
+Image metadata
+Security/trusted launch properties
+2) NetBox target model mapping
+
+Use NetBox native objects wherever possible.
+
+Virtual Machine
+
+Target:
+
+virtualization.VirtualMachine
+VM Interfaces
+
+Target:
+
+virtualization.VMInterface
+IP Addresses
+
+Target:
+
+ipam.IPAddress
+Virtual Networks / Subnets
+
+Use NetBox native IPAM/networking constructs:
+
+Virtual network
+
+Prefer one of these two approaches:
+
+create Prefix objects representing VNet CIDRs
+optionally tag them as Azure VNet and attach metadata via custom fields
+Subnet
+create Prefix for each subnet CIDR
+associate it with site/tenant if relevant
+store Azure identifiers in custom fields
+Public IP
+create NetBox IPAddress objects for public IPs
+tag them as public / azure
+associate with VM interface if appropriate
+3) Core Azure VM → NetBox field mapping rules
+Native NetBox fields to use
+
+Use native fields where possible:
+
+Azure VM name → VirtualMachine.name
+Operating system → platform
+VM status / power state → status
+Primary private IP → primary_ip4
+Tenant/customer tags if available → tenant
+Site if derived from mapping → site
+VM interfaces → NetBox VM interfaces
+NIC MAC addresses → interface MAC
+Private/public IPs → IP address objects
+Azure-specific fields to store as custom fields
+
+If there is no clean native NetBox equivalent, store as custom fields prefixed with azure_vm_.
+
+4) Azure VM attributes that must be imported
+
+For every Azure VM, import all of these if available.
+
+Identity / core
+Computer name → native VM name if same, else azure_vm_computer_name
+Operating system → native platform if possible
+VM generation → azure_vm_generation
+VM architecture → azure_vm_architecture
+Hibernation → azure_vm_hibernation
+Host group → azure_vm_host_group
+Host → azure_vm_host
+Proximity placement group → azure_vm_proximity_placement_group
+Colocation status → azure_vm_colocation_status
+Capacity reservation group → azure_vm_capacity_reservation_group
+Disk controller type → azure_vm_disk_controller_type
+Spot / availability / scaling
+Azure Spot → azure_vm_spot
+Azure Spot eviction policy → azure_vm_spot_eviction_policy
+Availability zone → native/custom:
+if not modeled natively, azure_vm_availability_zone
+Extended zone → azure_vm_extended_zone
+Availability set → azure_vm_availability_set
+Scale Set → azure_vm_scale_set
+Security
+Security type → azure_vm_security_type
+Enable secure boot → azure_vm_secure_boot
+Enable vTPM → azure_vm_vtpm
+Integrity monitoring → azure_vm_integrity_monitoring
+Health / extensions / applications
+Health monitoring → azure_vm_health_monitoring
+Extensions → azure_vm_extensions
+Applications → azure_vm_applications
+Networking
+Public IP address → native IP object
+Public IP address IPv6 → native IP object
+Private IP address → native IP object
+Private IP address IPv6 → native IP object
+Network interface name(s) → native VMInterface names
+Virtual network/subnet → native Prefix / relationship
+DNS name → azure_vm_dns_name
+Size / compute
+VM size → azure_vm_size
+vCPUs → vcpus if native field exists, otherwise azure_vm_vcpus
+RAM → native memory field if supported, otherwise azure_vm_ram_gib
+Source image details
+Source image publisher → azure_vm_image_publisher
+Source image offer → azure_vm_image_offer
+Source image plan → azure_vm_image_plan
+Disk
+OS disk name → azure_vm_os_disk_name
+Encryption at host → azure_vm_encryption_at_host
+Azure disk encryption → azure_vm_disk_encryption
+Ephemeral OS disk → azure_vm_ephemeral_os_disk
+Data disks count → azure_vm_data_disks_count
+Shutdown
+Auto-shutdown → azure_vm_auto_shutdown
+Scheduled shutdown → azure_vm_scheduled_shutdown
+5) NetBox custom field creation rules
+
+When Azure provider sync runs, Bridge must ensure required NetBox custom fields exist.
+
+Naming convention
+
+All Azure VM custom fields must be prefixed:
+
+azure_vm_*
+
+Examples:
+
+azure_vm_generation
+azure_vm_architecture
+azure_vm_security_type
+azure_vm_image_publisher
+Field type expectations
+
+Use appropriate NetBox custom field types:
+
+boolean for enabled/disabled
+text for strings
+integer for counts
+select only if stable enums are worth it; text is acceptable for MVP
+Idempotency
+If custom field already exists, reuse it
+Do not recreate or duplicate
+If field is missing, create it automatically during housekeeping or provider sync
+6) Azure networking import requirements
+Virtual Networks
+
+For each Azure VNet:
+
+discover name
+resource group
+address spaces
+location
+subscription id
+tags
+NetBox representation
+create Prefix objects for each VNet CIDR
+create Azure-specific custom fields or tags:
+azure_vnet_name
+azure_vnet_id
+azure_vnet_resource_group
+azure_vnet_location
+
+If better, also create a dedicated object metadata pattern through tags/custom fields rather than separate model.
+
+Subnets
+
+For each subnet:
+
+name
+CIDR
+parent VNet
+resource group
+route/network security group references if easy
+NetBox representation
+Prefix object for subnet CIDR
+attach metadata:
+azure_subnet_name
+azure_subnet_id
+azure_subnet_vnet_name
+azure_subnet_resource_group
+Network Interfaces
+
+For each NIC:
+
+NIC name
+MAC address
+attached VM
+private IP configs
+public IP refs if present
+subnet reference
+NetBox representation
+VMInterface on VM
+name = Azure NIC name
+MAC = native field
+associate IPs to interface
+Private IPs
+create NetBox IPAddress objects
+associate to VMInterface
+mark first primary private IP as VM primary_ip4
+Public IPs
+create NetBox IPAddress objects
+mark/tag as public + azure
+associate to interface where possible
+7) Azure sample / pipeline model expansion
+
+Currently Azure discovery was only VM-focused. Expand the source model to cover:
+
+Vm
+VirtualNetwork
+Subnet
+NetworkInterface
+PublicIp
+Discovery endpoint
+
+GET /api/providers/:id/object-types
+
+For Azure return:
+
+["Vm", "VirtualNetwork", "Subnet", "NetworkInterface", "PublicIp"]
+Samples endpoint
+
+GET /api/providers/:id/samples?type=Vm&limit=20
+must work for all above types.
+
+Examples:
+
+type=Vm
+type=VirtualNetwork
+type=Subnet
+type=NetworkInterface
+type=PublicIp
+8) Azure → NetBox pipeline presets needed
+
+Create/import presets for these Azure object mappings:
+
+Compute
+Azure.Compute.VirtualMachine -> NetBox.VirtualMachine
+Azure.NetworkInterface -> NetBox.VMInterface
+Azure.PrivateIp -> NetBox.IPAddress
+Azure.PublicIp -> NetBox.IPAddress
+Networking
+Azure.VirtualNetwork -> NetBox.Prefix
+Azure.Subnet -> NetBox.Prefix
+
+Use native NetBox objects where possible and custom fields for Azure-specific metadata.
+
+9) Azure collector enhancements
+
+Update azure-collector.ts to scan more than VMs.
+
+Collector must retrieve
+Compute
+all VMs in subscription
+Network
+all VNets
+all Subnets
+all NICs
+all Public IP resources
+Correlation
+
+Collector must correlate:
+
+VM → NICs
+NIC → private IP configs
+NIC → subnet
+NIC → public IP references
+subnet → VNet
+VNet → address spaces
+10) Suggested normalized object shapes
+VM sample
+{
+  "vm": {
+    "id": "...",
+    "name": "somemachine1",
+    "location": "westeurope",
+    "resourceGroup": "rg-prod",
+    "instanceView": { "powerState": "PowerState/running" },
+    "storageProfile": {
+      "osDisk": { "osType": "Linux", "name": "somemachine1_OsDisk_1_xxx" },
+      "imageReference": {
+        "publisher": "canonical",
+        "offer": "ubuntu-24_04-lts",
+        "sku": "ubuntu-pro"
+      }
+    },
+    "hardwareProfile": { "vmSize": "Standard D2s v3" },
+    "tags": { "customer": "Alpha" },
+    "networkProfile": {
+      "networkInterfaces": [{ "name": "somemachine1737_z1", "macAddress": "..." }]
+    },
+    "nicIpConfigs": [{ "privateIpAddress": "10.0.0.4/24" }],
+    "publicIps": ["20.11.32.123/32"],
+    "azureDetails": {
+      "generation": "V2",
+      "architecture": "x64",
+      "hibernation": "Disabled",
+      "diskControllerType": "SCSI",
+      "availabilityZone": "1",
+      "securityType": "Trusted launch",
+      "secureBoot": true,
+      "vtpm": true,
+      "integrityMonitoring": false,
+      "dnsName": "",
+      "vcpus": 2,
+      "ramGiB": 8,
+      "imagePublisher": "canonical",
+      "imageOffer": "ubuntu-24_04-lts",
+      "imagePlan": "ubuntu-pro",
+      "osDiskName": "somemachine1_OsDisk_1_0837f10897ba47ad91ff7c525104bd4e",
+      "encryptionAtHost": false,
+      "diskEncryption": "Not enabled",
+      "ephemeralOsDisk": "N/A",
+      "dataDisksCount": 0,
+      "autoShutdown": "Not enabled",
+      "scheduledShutdown": "-"
+    }
+  }
+}
+Virtual Network sample
+{
+  "virtualNetwork": {
+    "id": "...",
+    "name": "somemachine1-vnet",
+    "location": "westeurope",
+    "resourceGroup": "rg-prod",
+    "addressSpaces": ["10.0.0.0/16"],
+    "tags": {}
+  }
+}
+Subnet sample
+{
+  "subnet": {
+    "id": "...",
+    "name": "default",
+    "resourceGroup": "rg-prod",
+    "virtualNetworkName": "somemachine1-vnet",
+    "addressPrefix": "10.0.0.0/24"
+  }
+}
+NIC sample
+{
+  "networkInterface": {
+    "id": "...",
+    "name": "somemachine1737_z1",
+    "resourceGroup": "rg-prod",
+    "macAddress": "...",
+    "vmName": "somemachine1",
+    "privateIps": ["10.0.0.4/24"],
+    "publicIps": ["20.11.32.123/32"],
+    "subnetName": "default",
+    "virtualNetworkName": "somemachine1-vnet"
+  }
+}
+11) NetBox custom fields for Azure networking
+
+In addition to VM custom fields, create network-related custom fields where needed:
+
+Prefix custom fields
+azure_vnet_name
+azure_vnet_id
+azure_vnet_resource_group
+azure_vnet_location
+azure_subnet_name
+azure_subnet_id
+azure_subnet_resource_group
+Interface custom fields
+azure_nic_id
+azure_nic_resource_group
+IP address custom fields
+azure_public_ip_id
+azure_ip_resource_group
+12) Sync behavior expectations
+VM sync
+
+For each VM:
+
+create/update VirtualMachine
+create/update VMInterfaces
+create/update private/public IPs
+assign primary IP
+create all needed azure_vm_* custom fields and populate them
+VNet/Subnet sync
+create/update Prefixes for VNets and subnets
+populate Azure-related prefix metadata
+Idempotency
+
+Re-running sync must:
+
+update changed fields
+not create duplicates
+preserve matching by stable Azure IDs stored in custom fields, for example:
+azure_vm_id
+azure_nic_id
+azure_vnet_id
+azure_subnet_id
+13) UI tasks
+Provider UI
+
+Azure provider must remain selectable and functional.
+
+Pipeline UI
+
+User should be able to choose Azure source object types beyond VM:
+
+Vm
+VirtualNetwork
+Subnet
+NetworkInterface
+PublicIp
+Mapping UI
+
+Support mapping these objects into NetBox targets.
+
+Dry-run UI
+
+Dry-run output should show:
+
+how many VMs will be created/updated
+how many prefixes/networks will be created/updated
+interface/IP changes
+custom fields added
+14) Acceptance criteria
+
+I consider this feature done when:
+
+Azure provider
+connects successfully
+scans the subscription
+VM import
+all Azure VM attributes listed above are imported
+native NetBox fields are used where possible
+missing native attributes are stored as azure_vm_* custom fields
+Network import
+VNets and subnets are created in NetBox as Prefixes
+NICs are created as VM interfaces
+private/public IPs are created and linked
+primary IP is assigned to VM
+Pipelines
+Azure object types are available in pipelines
+dry-run works
+sync works
+Idempotency
+second sync does not duplicate objects
+15) Suggested implementation order
+Extend Azure collector to return VM + network resources
+Add NetBox custom field ensure logic for:
+azure_vm_*
+azure_vnet_*
+azure_subnet_*
+azure_nic_*
+Add Azure object types to provider discovery
+Add Azure → NetBox mapping presets
+Implement sync for:
+VMs
+interfaces
+IPs
+VNets/subnets as prefixes
+Extend dry-run diff
+Polish UI and error handling
+16) Important modeling rule
+
+For Azure-specific data:
+
+if there is a clear native NetBox field → use it
+otherwise store as custom field with Azure prefix
+
+For VM-specific extra attributes:
+
+always use prefix azure_vm_
+
+This is important because I want the full Azure VM detail preserved in NetBox, not only the generic VM core fields.

@@ -628,11 +628,220 @@ const azureToIdoitVserver: PresetRule = {
   }
 };
 
+// Azure.NetworkInterface → NetBox.VMInterface
+const azureNicToNetboxInterface: PresetRule = {
+  id: "azure→netbox.nic",
+  label: "Azure.NetworkInterface → NetBox.VMInterface",
+  sourceProvider: "azure",
+  sourceType: "NetworkInterface",
+  targetCmdb: "netbox",
+  targetType: "VMInterface",
+  rules: {
+    target: "NetBox.VMInterface",
+    matchBy: ["custom_fields.azure_nic_id"],
+    fields: [
+      {
+        source: "id",
+        target: "custom_fields.azure_nic_id",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "name",
+        target: "name",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "macAddress",
+        target: "mac_address",
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "resourceGroup",
+        target: "custom_fields.azure_nic_resource_group",
+        conflictPolicy: "provider-wins"
+      }
+    ],
+    conflicts: {
+      defaultPolicy: "provider-wins",
+      fieldPolicies: {}
+    }
+  }
+};
+
+// Azure.PrivateIp → NetBox.IPAddress
+const azurePrivateIpToNetboxIp: PresetRule = {
+  id: "azure→netbox.private-ip",
+  label: "Azure.PrivateIp → NetBox.IPAddress",
+  sourceProvider: "azure",
+  sourceType: "NetworkInterface",
+  targetCmdb: "netbox",
+  targetType: "IPAddress",
+  rules: {
+    target: "NetBox.IPAddress",
+    matchBy: ["address"],
+    fields: [
+      {
+        source: "privateIps[0]",
+        target: "address",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "resourceGroup",
+        target: "custom_fields.azure_ip_resource_group",
+        conflictPolicy: "provider-wins"
+      }
+    ],
+    conflicts: {
+      defaultPolicy: "provider-wins",
+      fieldPolicies: {}
+    }
+  }
+};
+
+// Azure.PublicIp → NetBox.IPAddress
+const azurePublicIpToNetboxIp: PresetRule = {
+  id: "azure→netbox.public-ip",
+  label: "Azure.PublicIp → NetBox.IPAddress",
+  sourceProvider: "azure",
+  sourceType: "PublicIp",
+  targetCmdb: "netbox",
+  targetType: "IPAddress",
+  rules: {
+    target: "NetBox.IPAddress",
+    matchBy: ["custom_fields.azure_public_ip_id"],
+    fields: [
+      {
+        source: "id",
+        target: "custom_fields.azure_public_ip_id",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "ipAddress",
+        target: "address",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "resourceGroup",
+        target: "custom_fields.azure_ip_resource_group",
+        conflictPolicy: "provider-wins"
+      }
+    ],
+    conflicts: {
+      defaultPolicy: "provider-wins",
+      fieldPolicies: {}
+    }
+  }
+};
+
+// Azure.VirtualNetwork → NetBox.Prefix
+const azureVNetToNetboxPrefix: PresetRule = {
+  id: "azure→netbox.vnet",
+  label: "Azure.VirtualNetwork → NetBox.Prefix",
+  sourceProvider: "azure",
+  sourceType: "VirtualNetwork",
+  targetCmdb: "netbox",
+  targetType: "Prefix",
+  rules: {
+    target: "NetBox.Prefix",
+    matchBy: ["custom_fields.azure_vnet_id"],
+    fields: [
+      {
+        source: "id",
+        target: "custom_fields.azure_vnet_id",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "name",
+        target: "custom_fields.azure_vnet_name",
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "addressSpaces[0]",
+        target: "prefix",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "resourceGroup",
+        target: "custom_fields.azure_vnet_resource_group",
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "location",
+        target: "custom_fields.azure_vnet_location",
+        conflictPolicy: "provider-wins"
+      }
+    ],
+    conflicts: {
+      defaultPolicy: "provider-wins",
+      fieldPolicies: {}
+    }
+  }
+};
+
+// Azure.Subnet → NetBox.Prefix
+const azureSubnetToNetboxPrefix: PresetRule = {
+  id: "azure→netbox.subnet",
+  label: "Azure.Subnet → NetBox.Prefix",
+  sourceProvider: "azure",
+  sourceType: "Subnet",
+  targetCmdb: "netbox",
+  targetType: "Prefix",
+  rules: {
+    target: "NetBox.Prefix",
+    matchBy: ["custom_fields.azure_subnet_id"],
+    fields: [
+      {
+        source: "id",
+        target: "custom_fields.azure_subnet_id",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "name",
+        target: "custom_fields.azure_subnet_name",
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "addressPrefix",
+        target: "prefix",
+        required: true,
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "resourceGroup",
+        target: "custom_fields.azure_subnet_resource_group",
+        conflictPolicy: "provider-wins"
+      },
+      {
+        source: "virtualNetworkName",
+        target: "custom_fields.azure_vnet_name",
+        conflictPolicy: "provider-wins"
+      }
+    ],
+    conflicts: {
+      defaultPolicy: "provider-wins",
+      fieldPolicies: {}
+    }
+  }
+};
+
 // Registry of all presets
 export const presetRegistry: PresetRule[] = [
   proxmoxToNetboxVm,
   vcenterToNetboxVm,
   azureToNetboxVm,
+  azureNicToNetboxInterface,
+  azurePrivateIpToNetboxIp,
+  azurePublicIpToNetboxIp,
+  azureVNetToNetboxPrefix,
+  azureSubnetToNetboxPrefix,
   proxmoxToIdoitVserver,
   vcenterToIdoitVserver,
   azureToIdoitVserver,

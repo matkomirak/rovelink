@@ -441,11 +441,13 @@ export class NetBoxAdapter {
       }
 
       // Map status to NetBox-valid values
+      // NetBox accepts: active, offline, staged, failed, decommissioning, planned
       const statusMap: Record<string, string> = {
         'running': 'active',
         'stopped': 'offline',
         'paused': 'offline',
         'suspended': 'offline',
+        'unknown': 'offline', // Safety net: Azure listVms may return "unknown" power state
       };
       const rawStatus = String(vmData.status || 'active').toLowerCase();
       const status = statusMap[rawStatus] || rawStatus;
@@ -541,7 +543,7 @@ export class NetBoxAdapter {
         // Build delta payload - only include changed fields
         const deltaPayload: any = {};
         let hasChanges = false;
-        
+
         // Compare and add only changed fields
         if (existingVm.name !== vmData.name) {
           deltaPayload.name = vmData.name;

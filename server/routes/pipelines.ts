@@ -523,7 +523,9 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
             }
 
             // Upsert to CMDB
-            const extId = vm.externalId;
+            // Prefix ext_id with provider kind to match the format used by provider-sync.ts
+            // e.g. "azure:/subscriptions/..." - this MUST match what getSyncedVms returns from NetBox
+            const extId = `${providerAccount.kind}:${vm.externalId}`;
             
             // Track this ext_id as seen for missing CI detection
             seenExtIds.add(extId);

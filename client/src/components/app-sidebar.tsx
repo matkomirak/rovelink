@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/Moderne_Logo_von_Custora_1775338642960.png";
+import custoraLogo from "@assets/Gemini_Generated_Image_gayfp1gayfp1gayf_(1)_1775382087956.png";
 import {
   Calendar,
   Settings,
@@ -105,18 +105,10 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div
-          role="img"
-          aria-label="Custora"
-          style={{
-            width: 180,
-            height: 60,
-            backgroundImage: `url(${custoraLogo})`,
-            backgroundSize: "375px auto",
-            backgroundPosition: "-101px -85px",
-            backgroundRepeat: "no-repeat",
-            flexShrink: 0,
-          }}
+        <img
+          src={custoraLogo}
+          alt="Custora"
+          style={{ width: 160, height: "auto", display: "block" }}
         />
       </SidebarHeader>
       <SidebarContent>

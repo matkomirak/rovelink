@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/Moderne_Logo_von_Custora_1775338642960.png";
+import custoraLogo from "@assets/Gemini_Generated_Image_gayfp1gayfp1gayf_(1)_1775382087956.png";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -68,18 +68,11 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <div
-            role="img"
-            aria-label="Custora"
+          <img
+            src={custoraLogo}
+            alt="Custora"
             className="mb-2"
-            style={{
-              width: 220,
-              height: 73,
-              backgroundImage: `url(${custoraLogo})`,
-              backgroundSize: "459px auto",
-              backgroundPosition: "-124px -104px",
-              backgroundRepeat: "no-repeat",
-            }}
+            style={{ width: 280, height: "auto", display: "block" }}
           />
         </CardHeader>
         <CardContent>

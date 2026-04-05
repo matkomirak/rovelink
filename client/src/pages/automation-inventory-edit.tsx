@@ -1,6 +1,7 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
+import { useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,16 +50,18 @@ export default function AutomationInventoryEdit() {
     },
   });
 
-  if (inventory && !linkedForm.formState.isDirty && inventory.type === "linked") {
-    linkedForm.reset({ name: inventory.name });
-  }
-  if (inventory && !fileForm.formState.isDirty && inventory.type === "file") {
-    fileForm.reset({
-      name: inventory.name,
-      fileFormat: (inventory.fileFormat as "yaml" | "json" | "ini") || "yaml",
-      fileContent: inventory.fileContent || "",
-    });
-  }
+  useEffect(() => {
+    if (!inventory) return;
+    if (inventory.type === "linked") {
+      linkedForm.reset({ name: inventory.name });
+    } else if (inventory.type === "file") {
+      fileForm.reset({
+        name: inventory.name,
+        fileFormat: (inventory.fileFormat as "yaml" | "json" | "ini") || "yaml",
+        fileContent: inventory.fileContent || "",
+      });
+    }
+  }, [inventory]);
 
   const updateMutation = useMutation({
     mutationFn: async (data: Record<string, any>) => {

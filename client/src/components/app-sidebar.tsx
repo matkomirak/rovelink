@@ -105,11 +105,13 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <img
-          src={custoraLogo}
-          alt="Custora"
-          style={{ width: 160, height: "auto", display: "block" }}
-        />
+        <div className="rounded-md bg-white/10 px-3 py-2 inline-block">
+          <img
+            src={custoraLogo}
+            alt="Custora"
+            style={{ width: 148, height: "auto", display: "block" }}
+          />
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

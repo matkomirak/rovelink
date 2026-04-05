@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/ChatGPT_Image_Apr_5,_2026,_12_09_44_PM_1775383801772.png";
+import custoraLogo from "@assets/logo_1775392789311.png";
 import {
   Calendar,
   Settings,

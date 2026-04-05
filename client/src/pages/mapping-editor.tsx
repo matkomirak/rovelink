@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -151,6 +151,19 @@ export default function MappingEditor() {
     },
   });
 
+  // Initialize rules from fetched mapping data
+  useEffect(() => {
+    if (mapping?.rules) {
+      setRules({
+        target: mapping.rules.target ?? "",
+        fields: Array.isArray(mapping.rules.fields) ? mapping.rules.fields : [],
+        matchBy: mapping.rules.matchBy,
+        conflicts: mapping.rules.conflicts,
+        lookupTables: mapping.rules.lookupTables,
+      });
+    }
+  }, [mapping]);
+
   if (isLoading) {
     return (
       <div className="container mx-auto p-6 space-y-6">
@@ -162,11 +175,6 @@ export default function MappingEditor() {
 
   if (!mapping) {
     return <div className="text-center py-12">Mapping not found</div>;
-  }
-
-  // Initialize rules from mapping
-  if (mapping.rules && rules.fields.length === 0) {
-    setRules(mapping.rules);
   }
 
   const samples = samplesData?.items || [];

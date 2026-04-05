@@ -1,36 +1,19 @@
 import { db } from "../db";
-import { providerAccounts, syncRuns, externalObjects, cmdbAccounts } from "../../shared/schema";
-import { eq, and } from "drizzle-orm";
+import { providerAccounts, syncRuns, externalObjects } from "../../shared/schema";
+import { eq } from "drizzle-orm";
 import { getProviderCollector } from "./providers/registry";
-import { NetBoxAdapter } from "./netbox-adapter";
 import { AzureCollector } from "./providers/azure";
-import { AzureNetBoxSyncService } from "./azure-netbox-sync";
-import { decryptCmdbConfig, decryptProviderConfig } from "./secrets";
+import { decryptProviderConfig } from "./secrets";
 
 /**
- * Transform provider tags by adding provider prefix.
- * 
- * NON-NEGOTIABLE RULE: Provider tags MUST NOT be written to NetBox verbatim.
- * All provider-originated tags must be prefixed with the provider name.
- * 
- * Example transformations:
- * - "customer/acme" -> "proxmox_customer/acme"
- * - "role/web" -> "vsphere_role/web"
- * - "wave/1" -> "azure_wave/1"
- * 
- * @param tags - Original tags from provider
- * @param providerKind - Provider type (e.g., "proxmox", "vsphere", "azure", "fake")
- * @returns Prefixed tags safe for NetBox
+ * ARCHITECTURE NOTE
+ * -----------------
+ * Provider sync  = collect and cache source inventory inside Custora (external_objects).
+ *                  It does NOT write to any CMDB or NetBox.
+ *
+ * Pipeline sync  = move approved/transformed source data from Custora into the target CMDB.
+ *                  It is the ONLY supported path for CMDB writes (server/routes/pipelines.ts).
  */
-function namespaceTags(tags: string[], providerKind: string): string[] {
-  const prefix = providerKind.toLowerCase();
-  return tags.map(tag => {
-    if (tag.startsWith(`${prefix}_`)) {
-      return tag;
-    }
-    return `${prefix}_${tag}`;
-  });
-}
 
 interface SyncCounts {
   created: number;
@@ -106,147 +89,103 @@ export class SyncWorker {
         this.log(`Provider connection OK${testResult.details ? `: ${testResult.details}` : testResult.version ? ` (version: ${testResult.version})` : ""}`);
 
         // ─────────────────────────────────────────────────────────────────────
-        // PHASE 2: Collect VMs from provider
+        // PHASE 2: Collect inventory from provider
         // ─────────────────────────────────────────────────────────────────────
         this.log(`=== Phase 2: Collecting from Provider ===`);
         const vms = await collector.listVms();
         this.log(`Collected ${vms.length} VMs from provider`);
 
         // ─────────────────────────────────────────────────────────────────────
-        // PHASE 3: NetBox import
+        // PHASE 3: Custora Cache Update
+        // Provider data is stored only in Custora (external_objects).
+        // No data is written to NetBox or any CMDB here.
+        // Use pipeline sync (/api/pipelines/:id/sync) to push data into a CMDB.
         // ─────────────────────────────────────────────────────────────────────
-        this.log(`=== Phase 3: NetBox Import ===`);
+        this.log(`=== Phase 3: Custora Cache Update ===`);
         const isAzure = syncRun.providerAccount.kind === "azure";
 
-        // Resolve NetBox config: prefer first enabled NetBox CMDB account in DB,
-        // fall back to environment variables.
-        let netboxUrl = process.env.NETBOX_URL || "";
-        let netboxToken = process.env.NETBOX_TOKEN || "";
-
-        const netboxCmdb = await db.query.cmdbAccounts.findFirst({
-          where: and(
-            eq(cmdbAccounts.kind, "netbox"),
-            eq(cmdbAccounts.enabled, true)
-          ),
-        });
-
-        if (netboxCmdb) {
-          const cfg = decryptCmdbConfig(netboxCmdb.config as Record<string, any>);
-          if (cfg?.url) netboxUrl = cfg.url as string;
-          if (cfg?.token) netboxToken = cfg.token as string;
-          this.log(`Using NetBox CMDB account: ${netboxCmdb.name}`);
-        } else if (netboxUrl) {
-          this.log(`Using NetBox from environment configuration`);
-        } else {
-          throw new Error(
-            "No NetBox CMDB account configured. Please add a NetBox account under CMDBs first."
-          );
-        }
-
-        const netbox = new NetBoxAdapter({ url: netboxUrl, token: netboxToken });
-
-        // Test NetBox connectivity
-        const netboxTest = await netbox.test();
-        if (!netboxTest.ok) {
-          throw new Error(`NetBox connection failed: ${netboxTest.error}`);
-        }
-        this.log(`NetBox connected (version: ${netboxTest.version || "unknown"})`);
-
-        // ─── Azure: full discovery path ──────────────────────────────────────
         if (isAzure && collector instanceof AzureCollector) {
+          // ─── Azure: run full discovery and cache results in Custora ──────────
           this.log(`Azure provider detected — running full subscription discovery...`);
           this.log(`Collecting VMs, VNets, Subnets, NICs, and Public IPs...`);
 
           const discovery = await collector.discoverAll();
           this.log(`Discovery complete: ${discovery.vms.length} VMs, ${discovery.vnets.length} VNets, ${discovery.nics.length} NICs, ${discovery.publicIps.length} Public IPs`);
 
-          const azureSync = new AzureNetBoxSyncService(netbox);
-          const azureCounts = await azureSync.importAll(discovery);
+          this.log(`Caching ${discovery.vms.length} Azure VMs in Custora...`);
 
-          // Merge Azure counts into standard counts
-          counts.created += azureCounts.vms.created + azureCounts.prefixes.created + azureCounts.interfaces.created + azureCounts.ips.created;
-          counts.updated += azureCounts.vms.updated + azureCounts.prefixes.updated + azureCounts.interfaces.updated + azureCounts.ips.updated;
-          counts.unchanged += azureCounts.vms.unchanged + azureCounts.prefixes.unchanged;
-          counts.errors += azureCounts.vms.errors + azureCounts.prefixes.errors + azureCounts.interfaces.errors + azureCounts.ips.errors;
+          const seenExternalIds = new Set<string>();
 
-          // Append Azure sync logs
-          for (const l of azureSync.getLogs()) {
-            this.logs.push(l);
-          }
-
-          this.log(`=== Azure Sync Summary ===`);
-          this.log(`VMs: created=${azureCounts.vms.created} updated=${azureCounts.vms.updated} unchanged=${azureCounts.vms.unchanged} errors=${azureCounts.vms.errors}`);
-          this.log(`Interfaces: created=${azureCounts.interfaces.created} updated=${azureCounts.interfaces.updated} errors=${azureCounts.interfaces.errors}`);
-          this.log(`IP Addresses: created=${azureCounts.ips.created} updated=${azureCounts.ips.updated} errors=${azureCounts.ips.errors}`);
-          this.log(`Prefixes: created=${azureCounts.prefixes.created} updated=${azureCounts.prefixes.updated} unchanged=${azureCounts.prefixes.unchanged} errors=${azureCounts.prefixes.errors}`);
-
-          // Update external_objects tracking for VMs
           for (const vm of discovery.vms) {
             try {
+              seenExternalIds.add(vm.id);
+
+              const existing = await db.query.externalObjects.findFirst({
+                where: eq(externalObjects.externalId, vm.id),
+              });
+
+              const payload = {
+                name: vm.name,
+                location: vm.location,
+                resourceGroup: vm.resourceGroup,
+                vmSize: (vm as any).vmSize,
+              };
+
               await db
                 .insert(externalObjects)
                 .values({
                   providerAccountId: syncRun.providerAccountId,
                   providerKind: "azure",
                   externalId: vm.id,
-                  netboxType: "virtualization.virtual_machines",
-                  netboxId: 0,
-                  cachedPayload: { name: vm.name, location: vm.location, resourceGroup: vm.resourceGroup },
+                  cachedPayload: payload,
                 })
                 .onConflictDoUpdate({
                   target: [externalObjects.providerAccountId, externalObjects.externalId],
                   set: {
-                    cachedPayload: { name: vm.name, location: vm.location, resourceGroup: vm.resourceGroup },
+                    cachedPayload: payload,
                     lastSyncedAt: new Date(),
                   },
                 });
-            } catch {
-              // Non-fatal tracking failure
+
+              if (existing) {
+                counts.updated++;
+              } else {
+                counts.created++;
+                this.log(`Cached: ${vm.name}`);
+              }
+            } catch (error: any) {
+              counts.errors++;
+              this.log(`Error caching Azure VM ${vm.name}: ${error.message}`);
             }
           }
+
+          // Detect removed Azure VMs (in Custora cache but no longer in provider)
+          const existingObjects = await db.query.externalObjects.findMany({
+            where: eq(externalObjects.providerAccountId, syncRun.providerAccountId),
+          });
+          for (const obj of existingObjects) {
+            if (!seenExternalIds.has(obj.externalId)) {
+              counts.removed++;
+              this.log(`VM removed from provider (no longer seen): ${obj.externalId}`);
+            }
+          }
+
+          this.log(`Azure cache summary: cached=${discovery.vms.length} VNets=${discovery.vnets.length} NICs=${discovery.nics.length} PublicIPs=${discovery.publicIps.length}`);
         } else {
-          // ─── Standard (Proxmox / Fake / vSphere) import path ────────────────
-          this.log(`Importing ${vms.length} VMs into NetBox...`);
+          // ─── Standard providers (Proxmox / Fake / vSphere) ───────────────────
+          this.log(`Caching ${vms.length} provider objects in Custora...`);
 
           const seenExternalIds = new Set<string>();
 
           for (const vm of vms) {
             try {
-              const extId = `${syncRun.providerAccount.kind}:${vm.externalId}`;
               seenExternalIds.add(vm.externalId);
-
-              // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
-              const namespacedTags = namespaceTags(vm.tags, syncRun.providerAccount.kind);
-
-              const vmData = {
-                name: vm.name,
-                status: vm.status === "running" ? "active" : "offline",
-                vcpus: vm.vcpus,
-                memory: vm.memory,
-                disk: vm.disk,
-                platform: vm.platform ? { name: vm.platform } : undefined,
-                tags: namespacedTags.map((t: string) => ({ name: t })),
-                custom_fields: {
-                  ext_id: extId,
-                  ext_provider: syncRun.providerAccount.kind,
-                },
-                comments: `Synced from ${syncRun.providerAccount.kind} by Bridge`,
-              };
 
               if (!vm.primaryIp4) counts.noIp++;
 
-              const result = await netbox.upsertVm(vmData, extId);
-
-              if (result.created) {
-                counts.created++;
-                this.log(`Created: ${vm.name} (${extId})`);
-              } else if (result.unchanged) {
-                counts.unchanged++;
-                this.log(`Unchanged: ${vm.name}`);
-              } else {
-                counts.updated++;
-                this.log(`Updated: ${vm.name} (NetBox ID: ${result.id})`);
-              }
+              const existing = await db.query.externalObjects.findFirst({
+                where: eq(externalObjects.externalId, vm.externalId),
+              });
 
               await db
                 .insert(externalObjects)
@@ -254,41 +193,62 @@ export class SyncWorker {
                   providerAccountId: syncRun.providerAccountId,
                   providerKind: syncRun.providerAccount.kind,
                   externalId: vm.externalId,
-                  netboxType: "virtualization.virtual_machines",
-                  netboxId: result.id,
-                  cachedPayload: vm.raw || {},
+                  cachedPayload: vm.raw || {
+                    name: vm.name,
+                    status: vm.status,
+                    vcpus: vm.vcpus,
+                    memory: vm.memory,
+                    disk: vm.disk,
+                    primaryIp4: vm.primaryIp4,
+                    tags: vm.tags,
+                  },
                 })
                 .onConflictDoUpdate({
                   target: [externalObjects.providerAccountId, externalObjects.externalId],
                   set: {
-                    netboxId: result.id,
-                    cachedPayload: vm.raw || {},
+                    cachedPayload: vm.raw || {
+                      name: vm.name,
+                      status: vm.status,
+                      vcpus: vm.vcpus,
+                      memory: vm.memory,
+                      disk: vm.disk,
+                      primaryIp4: vm.primaryIp4,
+                      tags: vm.tags,
+                    },
                     lastSyncedAt: new Date(),
                   },
                 });
+
+              if (existing) {
+                counts.updated++;
+              } else {
+                counts.created++;
+                this.log(`Cached: ${vm.name} (${vm.externalId})`);
+              }
             } catch (error: any) {
               counts.errors++;
-              this.log(`Error upserting VM ${vm.name}: ${error.message}`);
+              this.log(`Error caching VM ${vm.name}: ${error.message}`);
             }
           }
 
-          // Check for removed VMs
+          // Detect removed VMs (in Custora cache but no longer in provider)
           const existingObjects = await db.query.externalObjects.findMany({
             where: eq(externalObjects.providerAccountId, syncRun.providerAccountId),
           });
           for (const obj of existingObjects) {
             if (!seenExternalIds.has(obj.externalId)) {
               counts.removed++;
-              this.log(`VM removed from provider: ${obj.externalId}`);
+              this.log(`VM removed from provider (no longer seen): ${obj.externalId}`);
             }
           }
         }
 
+        this.log(`Provider sync completed without CMDB write`);
         this.log(`=== Sync Complete ===`);
-        this.log(`Created: ${counts.created}, Updated: ${counts.updated}, Unchanged: ${counts.unchanged}, Removed: ${counts.removed}, Errors: ${counts.errors}`);
+        this.log(`Cached: ${counts.created + counts.updated}, Removed: ${counts.removed}, Errors: ${counts.errors}`);
 
         if (counts.noIp > 0) {
-          this.log(`Warning: ${counts.noIp} VMs have no IP address`);
+          this.log(`Note: ${counts.noIp} VMs have no primary IP address`);
         }
 
         // Update sync run with success
@@ -305,7 +265,6 @@ export class SyncWorker {
         counts.errors++;
         this.log(`Sync failed: ${error.message}`);
 
-        // Update sync run with failure
         await db
           .update(syncRuns)
           .set({
@@ -329,10 +288,11 @@ export class SyncWorker {
 
 /**
  * Create a sync run record and execute it in the background using SyncWorker.
- * Replaces the old runProviderSync which only supported Proxmox.
+ *
+ * This only caches provider inventory in Custora.
+ * To push provider data into a CMDB, use pipeline sync instead.
  */
 export async function runProviderSyncWithWorker(providerAccountId: string): Promise<string> {
-  // Create sync run record
   const [run] = await db
     .insert(syncRuns)
     .values({
@@ -342,13 +302,13 @@ export async function runProviderSyncWithWorker(providerAccountId: string): Prom
     })
     .returning();
 
-  // Execute sync in background
+  // Execute sync in background — errors are logged and recorded by the worker
   (async () => {
     const worker = new SyncWorker();
     try {
       await worker.executeSyncRun(run.id);
     } catch (err) {
-      // Errors are already logged and recorded by the worker
+      // Errors already logged and persisted by the worker
     }
   })();
 

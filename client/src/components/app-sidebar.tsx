@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/Gemini_Generated_Image_gayfp1gayfp1gayf_(1)_1775382087956.png";
+import custoraLogo from "@assets/Gemini_Generated_Image_gkxsjrgkxsjrgkxs_(1)_1775382394384.png";
 import {
   Calendar,
   Settings,

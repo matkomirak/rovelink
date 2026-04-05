@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/Gemini_Generated_Image_gkxsjrgkxsjrgkxs_(1)_1775382394384.png";
+import custoraLogo from "@assets/ChatGPT_Image_Apr_5,_2026,_12_09_44_PM_1775383801772.png";
 import {
   Calendar,
   Settings,
@@ -104,14 +104,12 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="rounded-md bg-white/10 px-3 py-2 inline-block">
-          <img
-            src={custoraLogo}
-            alt="Custora"
-            style={{ width: 148, height: "auto", display: "block" }}
-          />
-        </div>
+      <SidebarHeader className="border-b border-sidebar-border p-0 overflow-hidden">
+        <img
+          src={custoraLogo}
+          alt="Custora"
+          style={{ width: "100%", height: "auto", display: "block" }}
+        />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

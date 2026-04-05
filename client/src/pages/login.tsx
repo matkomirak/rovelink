@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/Gemini_Generated_Image_gkxsjrgkxsjrgkxs_(1)_1775382394384.png";
+import custoraLogo from "@assets/ChatGPT_Image_Apr_5,_2026,_12_09_44_PM_1775383801772.png";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -67,15 +67,14 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
-        <CardHeader>
+        <div className="rounded-t-lg overflow-hidden">
           <img
             src={custoraLogo}
             alt="Custora"
-            className="mb-2"
-            style={{ width: 280, height: "auto", display: "block" }}
+            style={{ width: "100%", height: "auto", display: "block" }}
           />
-        </CardHeader>
-        <CardContent>
+        </div>
+        <CardContent className="pt-6">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField

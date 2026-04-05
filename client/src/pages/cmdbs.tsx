@@ -15,7 +15,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link } from "wouter";
-import { Plus, TestTube, Settings, Loader2, InfoIcon, Trash2 } from "lucide-react";
+import { Plus, TestTube, Settings, Loader2, InfoIcon, Trash2, RefreshCw, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,7 +43,7 @@ const cmdbFormSchema = z.object({
   enabled: z.boolean().default(true),
   config: z.object({
     url: z.string().url("Invalid URL"),
-    token: z.string().min(1, "Token is required"),
+    token: z.string(),
   }),
 });
 
@@ -53,6 +53,7 @@ export default function CmdbsPage() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCmdb, setEditingCmdb] = useState<CmdbAccount | null>(null);
+  const [tokenEditing, setTokenEditing] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -79,6 +80,7 @@ export default function CmdbsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/cmdbs"] });
       setIsDialogOpen(false);
       setEditingCmdb(null);
+      setTokenEditing(false);
       toast({ title: "CMDB account updated successfully" });
     },
     onError: (error: any) => {
@@ -133,38 +135,45 @@ export default function CmdbsPage() {
 
   const handleAdd = () => {
     setEditingCmdb(null);
+    setTokenEditing(true);
     form.reset({
       kind: "netbox",
       name: "",
       enabled: true,
-      config: {
-        url: "",
-        token: "",
-      },
+      config: { url: "", token: "" },
     });
     setIsDialogOpen(true);
   };
 
   const handleEdit = (cmdb: CmdbAccount) => {
     setEditingCmdb(cmdb);
+    setTokenEditing(false);
     const config = (cmdb.config as any) || {};
     form.reset({
       kind: cmdb.kind as any,
       name: cmdb.name,
       enabled: cmdb.enabled,
-      config: {
-        ...config,
-        token: "",
-        password: "",
-        api_key: "",
-      },
+      config: { url: config.url || "", token: "" },
     });
     setIsDialogOpen(true);
   };
 
   const onSubmit = (data: CmdbFormData) => {
+    const needsToken = !editingCmdb || tokenEditing;
+    if (needsToken && !data.config.token) {
+      form.setError("config.token", { message: "Token is required" });
+      return;
+    }
     if (editingCmdb) {
-      updateMutation.mutate({ id: editingCmdb.id, data });
+      const payload: any = {
+        name: data.name,
+        enabled: data.enabled,
+        config: { url: data.config.url },
+      };
+      if (tokenEditing && data.config.token) {
+        payload.config.token = data.config.token;
+      }
+      updateMutation.mutate({ id: editingCmdb.id, data: payload });
     } else {
       createMutation.mutate(data);
     }
@@ -398,18 +407,65 @@ export default function CmdbsPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>API Token</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type="password"
-                          placeholder={editingCmdb ? "Leave blank to keep existing token" : "Enter API token"}
-                          data-testid="input-token"
-                        />
-                      </FormControl>
+                      {editingCmdb && !tokenEditing ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value="••••••••••••••••••••"
+                            readOnly
+                            disabled
+                            className="font-mono tracking-widest flex-1"
+                            data-testid="input-token-masked"
+                          />
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="outline"
+                            onClick={() => {
+                              setTokenEditing(true);
+                              field.onChange("");
+                            }}
+                            title="Replace token"
+                            data-testid="button-edit-token"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <FormControl>
+                            <Input
+                              {...field}
+                              type="password"
+                              autoFocus={tokenEditing && !!editingCmdb}
+                              placeholder="Enter new API token"
+                              className="flex-1"
+                              data-testid="input-token"
+                            />
+                          </FormControl>
+                          {editingCmdb && tokenEditing && (
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => {
+                                setTokenEditing(false);
+                                field.onChange("");
+                                form.clearErrors("config.token");
+                              }}
+                              title="Cancel token change"
+                              data-testid="button-cancel-token"
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
                       <FormDescription>
-                        {editingCmdb
-                          ? "Token is already set — leave blank to keep it unchanged"
-                          : "Authentication token for API access"}
+                        {editingCmdb && !tokenEditing
+                          ? "Token is saved. Click the refresh button to replace it."
+                          : editingCmdb
+                          ? "Enter a new token to replace the existing one."
+                          : "Authentication token for API access."}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -418,7 +474,7 @@ export default function CmdbsPage() {
               </div>
 
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                <Button type="button" variant="outline" onClick={() => { setIsDialogOpen(false); setTokenEditing(false); }}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit">

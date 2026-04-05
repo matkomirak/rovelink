@@ -74,7 +74,8 @@ export interface IStorage {
   getProvider(id: string): Promise<ProviderAccount | undefined>;
   createProvider(provider: InsertProviderAccount): Promise<ProviderAccount>;
   updateProvider(id: string, data: Partial<ProviderAccount>): Promise<ProviderAccount | undefined>;
-  
+  deleteProvider(id: string): Promise<void>;
+
   // Sync Run operations
   createSyncRun(run: InsertSyncRun): Promise<SyncRun>;
   getSyncRun(id: string): Promise<SyncRun | undefined>;
@@ -382,6 +383,10 @@ export class DatabaseStorage implements IStorage {
       .where(eq(providerAccounts.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async deleteProvider(id: string): Promise<void> {
+    await db.delete(providerAccounts).where(eq(providerAccounts.id, id));
   }
 
   // Sync Run operations

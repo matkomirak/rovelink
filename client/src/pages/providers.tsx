@@ -261,8 +261,11 @@ export default function Providers() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/providers/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/providers"] });
       toast({ title: "Provider deleted successfully" });
+      window.location.reload();
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to delete provider", description: error.message, variant: "destructive" });
     },
   });
 

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { PlayCircle, CheckCircle2, XCircle, Clock, FileText, GitCompare, Archive, ArchiveRestore, Filter, Database, Server, Workflow } from "lucide-react";
+import { PlayCircle, CheckCircle2, XCircle, Clock, FileText, GitCompare, Archive, ArchiveRestore, Filter, Database, Server, Workflow, RefreshCw } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -42,7 +42,7 @@ export default function Runs() {
   if (startDate) queryParams.append("startDate", startDate);
   if (endDate) queryParams.append("endDate", endDate);
   
-  const { data: runs, isLoading } = useQuery<UnifiedRun[]>({
+  const { data: runs, isLoading, refetch, isFetching } = useQuery<UnifiedRun[]>({
     queryKey: ["/api/runs", queryParams.toString()],
   });
 
@@ -169,12 +169,24 @@ export default function Runs() {
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">All Runs</h1>
           <p className="text-sm text-muted-foreground">View and monitor all automation runs (pipelines, providers, playbooks)</p>
         </div>
-        {runs && runs.length >= 2 && (
-          <Button onClick={() => setLocation("/compare")} data-testid="button-compare-runs">
-            <GitCompare className="h-4 w-4 mr-2" />
-            Compare Runs
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            title="Refresh all runs"
+            data-testid="button-refresh-runs"
+          >
+            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
           </Button>
-        )}
+          {runs && runs.length >= 2 && (
+            <Button onClick={() => setLocation("/compare")} data-testid="button-compare-runs">
+              <GitCompare className="h-4 w-4 mr-2" />
+              Compare Runs
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card>

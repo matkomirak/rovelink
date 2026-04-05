@@ -916,6 +916,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/providers/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const existing = await storage.getProvider(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+      await storage.deleteProvider(req.params.id);
+      res.json({ message: "Provider deleted successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to delete provider" });
+    }
+  });
+
   app.get("/api/providers/:id/runs", authMiddleware, async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;

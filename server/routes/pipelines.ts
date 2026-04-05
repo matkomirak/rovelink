@@ -494,10 +494,14 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
             // NON-NEGOTIABLE: Provider tags MUST be prefixed before writing to NetBox
             const namespacedTags = namespaceTags(vm.tags || [], providerAccount.kind);
 
-                // Apply mapping rules to transform the VM using normalized fields
+            // Apply mapping rules to transform the VM using normalized fields
+            // Translate provider status → valid NetBox status values
+            // NetBox accepts: active, offline, staged, failed, decommissioning, planned
+            const netboxStatus = vm.status === 'running' ? 'active' : vm.status === 'stopped' ? 'offline' : 'offline';
+
             const transformedVm: any = {
               name: vm.name,
-              status: vm.status || 'active',
+              status: netboxStatus,
               vcpus: vm.vcpus || 1,
               memory: vm.memory || null,
               disk: vm.disk || null,

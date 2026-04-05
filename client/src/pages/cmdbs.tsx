@@ -15,7 +15,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link } from "wouter";
-import { Plus, TestTube, Settings, Loader2, InfoIcon, Trash2, RefreshCw, X } from "lucide-react";
+import { Plus, TestTube, Settings, Loader2, InfoIcon, Trash2, RefreshCw, X, CaseSensitive } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,6 +56,23 @@ export default function CmdbsPage() {
   const [tokenEditing, setTokenEditing] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [renamingCmdb, setRenamingCmdb] = useState<CmdbAccount | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiRequest("PATCH", `/api/cmdbs/${id}`, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cmdbs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/pipelines"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventories"] });
+      setRenamingCmdb(null);
+      toast({ title: "CMDB renamed successfully" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to rename CMDB", description: error.message, variant: "destructive" });
+    },
+  });
 
   const { data: cmdbs = [], isLoading } = useQuery<CmdbAccount[]>({
     queryKey: ["/api/cmdbs"],
@@ -290,6 +307,16 @@ export default function CmdbsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
+                            title="Rename CMDB"
+                            onClick={() => { setRenamingCmdb(cmdb); setRenameValue(cmdb.name); }}
+                            data-testid={`button-rename-${cmdb.id}`}
+                          >
+                            <CaseSensitive className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="Edit configuration"
                             onClick={() => handleEdit(cmdb)}
                             data-testid={`button-edit-${cmdb.id}`}
                           >
@@ -507,6 +534,47 @@ export default function CmdbsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Rename Dialog */}
+      <Dialog open={!!renamingCmdb} onOpenChange={(open) => { if (!open) setRenamingCmdb(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rename CMDB</DialogTitle>
+            <DialogDescription>
+              Only the display name changes. All pipelines and automation inventories continue to reference this CMDB by its internal ID.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Input
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              placeholder="CMDB name"
+              autoFocus
+              data-testid="input-rename-cmdb"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && renameValue.trim() && renamingCmdb) {
+                  renameMutation.mutate({ id: renamingCmdb.id, name: renameValue.trim() });
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenamingCmdb(null)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (renameValue.trim() && renamingCmdb) {
+                  renameMutation.mutate({ id: renamingCmdb.id, name: renameValue.trim() });
+                }
+              }}
+              disabled={renameMutation.isPending || !renameValue.trim()}
+              data-testid="button-confirm-rename-cmdb"
+            >
+              {renameMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

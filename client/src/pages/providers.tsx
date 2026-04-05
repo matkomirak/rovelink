@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, PlayCircle, TestTube, Loader2, CheckCircle, XCircle, Clock, Eye, Pencil, Trash2, ExternalLink } from "lucide-react";
+import { Plus, PlayCircle, TestTube, Loader2, CheckCircle, XCircle, Clock, Eye, Pencil, Trash2, ExternalLink, CaseSensitive } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -94,6 +94,23 @@ export default function Providers() {
   });
 
   const [editingProvider, setEditingProvider] = useState<ProviderAccount | null>(null);
+  const [renamingProvider, setRenamingProvider] = useState<ProviderAccount | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiRequest("PATCH", `/api/providers/${id}`, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/pipelines"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/runs"] });
+      setRenamingProvider(null);
+      toast({ title: "Provider renamed successfully" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to rename provider", description: error.message, variant: "destructive" });
+    },
+  });
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -1003,6 +1020,16 @@ export default function Providers() {
                           <Button
                             size="icon"
                             variant="ghost"
+                            title="Rename provider"
+                            onClick={() => { setRenamingProvider(provider); setRenameValue(provider.name); }}
+                            data-testid={`button-rename-${provider.id}`}
+                          >
+                            <CaseSensitive className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            title="Edit configuration"
                             onClick={() => handleEdit(provider)}
                             data-testid={`button-edit-${provider.id}`}
                           >
@@ -1044,6 +1071,47 @@ export default function Providers() {
           </CardContent>
         </Card>
       )}
+
+      {/* Rename Dialog */}
+      <Dialog open={!!renamingProvider} onOpenChange={(open) => { if (!open) setRenamingProvider(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rename Provider</DialogTitle>
+            <DialogDescription>
+              Only the display name changes. All pipelines, syncs, and runs continue to reference this provider by its internal ID.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Input
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              placeholder="Provider name"
+              autoFocus
+              data-testid="input-rename-provider"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && renameValue.trim() && renamingProvider) {
+                  renameMutation.mutate({ id: renamingProvider.id, name: renameValue.trim() });
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenamingProvider(null)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (renameValue.trim() && renamingProvider) {
+                  renameMutation.mutate({ id: renamingProvider.id, name: renameValue.trim() });
+                }
+              }}
+              disabled={renameMutation.isPending || !renameValue.trim()}
+              data-testid="button-confirm-rename"
+            >
+              {renameMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -5,17 +5,22 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, Save, Database, FileText, Info } from "lucide-react";
 import { type AutomationInventory } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const editFormSchema = z.object({
+const linkedFormSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+});
+
+const fileFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   fileFormat: z.enum(["yaml", "json", "ini"]),
   fileContent: z.string().min(1, "File content is required"),
@@ -30,18 +35,25 @@ export default function AutomationInventoryEdit() {
     queryKey: ["/api/inventories", id],
   });
 
-  const form = useForm<z.infer<typeof editFormSchema>>({
-    resolver: zodResolver(editFormSchema),
+  const linkedForm = useForm<z.infer<typeof linkedFormSchema>>({
+    resolver: zodResolver(linkedFormSchema),
+    defaultValues: { name: "" },
+  });
+
+  const fileForm = useForm<z.infer<typeof fileFormSchema>>({
+    resolver: zodResolver(fileFormSchema),
     defaultValues: {
-      name: inventory?.name || "",
-      fileFormat: (inventory?.fileFormat as "yaml" | "json" | "ini") || "yaml",
-      fileContent: inventory?.fileContent || "",
+      name: "",
+      fileFormat: "yaml",
+      fileContent: "",
     },
   });
 
-  // Update form when data loads
-  if (inventory && !form.formState.isDirty) {
-    form.reset({
+  if (inventory && !linkedForm.formState.isDirty && inventory.type === "linked") {
+    linkedForm.reset({ name: inventory.name });
+  }
+  if (inventory && !fileForm.formState.isDirty && inventory.type === "file") {
+    fileForm.reset({
       name: inventory.name,
       fileFormat: (inventory.fileFormat as "yaml" | "json" | "ini") || "yaml",
       fileContent: inventory.fileContent || "",
@@ -49,16 +61,14 @@ export default function AutomationInventoryEdit() {
   }
 
   const updateMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof editFormSchema>) => {
-      return await apiRequest("/api/inventories/" + id, "PATCH", data);
+    mutationFn: async (data: Record<string, any>) => {
+      return await apiRequest("PATCH", `/api/inventories/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventories"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventories", id] });
-      toast({
-        title: "Success",
-        description: "Inventory updated successfully",
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+      toast({ title: "Success", description: "Inventory updated successfully" });
       setLocation(`/inventories/${id}`);
     },
     onError: (error: any) => {
@@ -92,14 +102,80 @@ export default function AutomationInventoryEdit() {
     );
   }
 
-  if (inventory.type !== "file") {
+  const backButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setLocation(`/inventories/${id}`)}
+      data-testid="button-back"
+    >
+      <ArrowLeft className="h-4 w-4" />
+    </Button>
+  );
+
+  if (inventory.type === "linked") {
     return (
-      <div className="p-6">
+      <div className="p-6 space-y-6">
+        <div className="flex items-center gap-4">
+          {backButton}
+          <div>
+            <h1 className="text-3xl font-bold">Edit Inventory</h1>
+            <p className="text-muted-foreground">Rename this linked inventory</p>
+          </div>
+        </div>
+
         <Card>
           <CardHeader>
-            <CardTitle>Cannot Edit</CardTitle>
-            <CardDescription>Only file-based inventories can be edited.</CardDescription>
+            <div className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-muted-foreground" />
+              <CardTitle>Linked Inventory</CardTitle>
+              <Badge variant="outline" className="capitalize">{inventory.sourceType || "linked"}</Badge>
+            </div>
+            <CardDescription>
+              You can rename this inventory. Its CMDB source connection is managed by ID and will not be affected.
+            </CardDescription>
           </CardHeader>
+          <CardContent>
+            <Form {...linkedForm}>
+              <form
+                onSubmit={linkedForm.handleSubmit((data) => updateMutation.mutate(data))}
+                className="space-y-4"
+              >
+                <FormField
+                  control={linkedForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Inventory Name</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="My Inventory" data-testid="input-name" />
+                      </FormControl>
+                      <FormDescription className="flex items-center gap-1 text-xs">
+                        <Info className="h-3 w-3" />
+                        Renaming does not affect any job templates or pipelines — they reference this inventory by its internal ID.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setLocation(`/inventories/${id}`)}
+                    data-testid="button-cancel"
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={updateMutation.isPending} data-testid="button-save">
+                    <Save className="h-4 w-4 mr-2" />
+                    {updateMutation.isPending ? "Saving..." : "Save Name"}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </CardContent>
         </Card>
       </div>
     );
@@ -108,14 +184,7 @@ export default function AutomationInventoryEdit() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setLocation(`/inventories/${id}`)}
-          data-testid="button-back"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
+        {backButton}
         <div>
           <h1 className="text-3xl font-bold">Edit Inventory</h1>
           <p className="text-muted-foreground">Update file-based inventory configuration</p>
@@ -124,16 +193,20 @@ export default function AutomationInventoryEdit() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Inventory Details</CardTitle>
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-muted-foreground" />
+            <CardTitle>Inventory Details</CardTitle>
+          </div>
           <CardDescription>
-            Modify the inventory name, format, and content
+            Modify the inventory name, format, and content.
+            Renaming does not affect any job templates — they reference this inventory by its internal ID.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit((data) => updateMutation.mutate(data))} className="space-y-4">
+          <Form {...fileForm}>
+            <form onSubmit={fileForm.handleSubmit((data) => updateMutation.mutate(data))} className="space-y-4">
               <FormField
-                control={form.control}
+                control={fileForm.control}
                 name="name"
                 render={({ field }) => (
                   <FormItem>
@@ -147,7 +220,7 @@ export default function AutomationInventoryEdit() {
               />
 
               <FormField
-                control={form.control}
+                control={fileForm.control}
                 name="fileFormat"
                 render={({ field }) => (
                   <FormItem>
@@ -170,7 +243,7 @@ export default function AutomationInventoryEdit() {
               />
 
               <FormField
-                control={form.control}
+                control={fileForm.control}
                 name="fileContent"
                 render={({ field }) => (
                   <FormItem>

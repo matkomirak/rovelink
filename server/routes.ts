@@ -1016,6 +1016,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/cmdbs/:id/vms", authMiddleware, async (req, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      if (cmdb.kind !== "netbox") {
+        return res.status(400).json({ message: "VM listing is only supported for NetBox CMDBs" });
+      }
+      const decryptedConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
+      const adapter = new NetBoxAdapter(decryptedConfig as any);
+      const vms = await adapter.listAllVms();
+      res.json({ vms, total: vms.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to fetch VMs" });
+    }
+  });
+
   // Housekeeping routes
   app.post("/api/housekeeping/rebuild-groups-cache", authMiddleware, requireRole("admin"), async (req, res) => {
     try {

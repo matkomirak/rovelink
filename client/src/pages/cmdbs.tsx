@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { Link } from "wouter";
 import { Plus, TestTube, Settings, Loader2, InfoIcon, Trash2 } from "lucide-react";
 import {
   AlertDialog,
@@ -241,7 +242,13 @@ export default function CmdbsPage() {
                   {cmdbs.map((cmdb) => (
                     <tr key={cmdb.id} className="border-b hover-elevate" data-testid={`row-cmdb-${cmdb.id}`}>
                       <td className="p-3 font-medium" data-testid={`text-cmdb-name-${cmdb.id}`}>
-                        {cmdb.name}
+                        <Link
+                          href={`/cmdbs/${cmdb.id}`}
+                          className="hover:underline text-foreground"
+                          data-testid={`link-cmdb-${cmdb.id}`}
+                        >
+                          {cmdb.name}
+                        </Link>
                       </td>
                       <td className="p-3">
                         <Badge variant="outline">{cmdb.kind}</Badge>

@@ -23,6 +23,7 @@ import Notifications from "@/pages/notifications";
 import Providers from "@/pages/providers";
 import ProviderDetail from "@/pages/provider-detail";
 import Cmdbs from "@/pages/cmdbs";
+import CmdbDetail from "@/pages/cmdb-detail";
 import Pipelines from "@/pages/pipelines";
 import PipelineNew from "@/pages/pipeline-new";
 import PipelineDetail from "@/pages/pipeline-detail";
@@ -49,6 +50,7 @@ function AuthenticatedRouter() {
       <Route path="/providers" component={Providers} />
       <Route path="/providers/:id" component={ProviderDetail} />
       <Route path="/cmdbs" component={Cmdbs} />
+      <Route path="/cmdbs/:id" component={CmdbDetail} />
       <Route path="/pipelines" component={Pipelines} />
       <Route path="/pipelines/new" component={PipelineNew} />
       <Route path="/pipelines/:pipelineId/mappings/:mapId/edit" component={MappingEditor} />

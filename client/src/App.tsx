@@ -27,6 +27,7 @@ import CmdbDetail from "@/pages/cmdb-detail";
 import Pipelines from "@/pages/pipelines";
 import PipelineNew from "@/pages/pipeline-new";
 import PipelineDetail from "@/pages/pipeline-detail";
+import PipelineEdit from "@/pages/pipeline-edit";
 import MappingEditor from "@/pages/mapping-editor";
 import NetBoxInventory from "@/pages/netbox-inventory";
 import AutomationInventories from "@/pages/automation-inventories";
@@ -53,6 +54,7 @@ function AuthenticatedRouter() {
       <Route path="/cmdbs/:id" component={CmdbDetail} />
       <Route path="/pipelines" component={Pipelines} />
       <Route path="/pipelines/new" component={PipelineNew} />
+      <Route path="/pipelines/:id/edit" component={PipelineEdit} />
       <Route path="/pipelines/:pipelineId/mappings/:mapId/edit" component={MappingEditor} />
       <Route path="/pipelines/:id" component={PipelineDetail} />
       <Route path="/templates" component={Templates} />

@@ -238,17 +238,15 @@ export default function AutomationInventoryDetail() {
               Refresh
             </Button>
           )}
-          {inventory.type === "file" && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setLocation(`/inventories/${id}/edit`)}
-              data-testid="button-edit"
-            >
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setLocation(`/inventories/${id}/edit`)}
+            data-testid="button-edit"
+          >
+            <Edit className="h-4 w-4 mr-2" />
+            Edit
+          </Button>
         </div>
       </div>
 

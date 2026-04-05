@@ -32,7 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Play, RefreshCw, Download, Clock, Save } from "lucide-react";
+import { ArrowLeft, Play, RefreshCw, Download, Clock, Save, Edit } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import parser from "cron-parser";
@@ -329,6 +329,14 @@ export default function PipelineDetail() {
         </div>
         {userRole !== "viewer" && (
           <div className="flex items-center gap-2">
+            {userRole === "admin" && (
+              <Link href={`/pipelines/${id}/edit`}>
+                <Button variant="outline" data-testid="button-edit">
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit
+                </Button>
+              </Link>
+            )}
             <Button
               variant="outline"
               onClick={() => runDryRun.mutate()}

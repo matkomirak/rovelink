@@ -980,8 +980,9 @@ router.get("/:id/automation.yml", async (req, res) => {
     const allowedDecisions = await readAllowedAssets();
     const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
 
-    // Fetch VMs from NetBox
-    const adapter = new NetBoxAdapter(cmdb.config as any);
+    // Fetch VMs from NetBox — always decrypt config before use
+    const decryptedAutomationYmlCfg = decryptCmdbConfig(cmdb.config as Record<string, any>);
+    const adapter = new NetBoxAdapter(decryptedAutomationYmlCfg as any);
     const vms = await adapter.listAllVms();
 
     // Filter to allowed VMs only

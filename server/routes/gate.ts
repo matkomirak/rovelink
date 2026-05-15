@@ -17,6 +17,9 @@ interface AuthRequest extends Request {
 
 const router = Router();
 
+// All gate routes require authentication (enforced at mount in routes.ts).
+// Read routes require minimum viewer role; sync-blocks requires admin.
+
 // GET /api/gate/allowed - List all allowed VMs (transparency only)
 router.get("/allowed", async (req: AuthRequest, res: Response) => {
   try {
@@ -146,7 +149,7 @@ router.get("/summary", async (req: AuthRequest, res: Response) => {
 router.post("/sync-blocks", async (req: AuthRequest, res: Response) => {
   try {
     const userRole = req.user?.role;
-    if (userRole !== "admin") {
+    if (!userRole || userRole !== "admin") {
       return res.status(403).json({ message: "Admin role required" });
     }
 

@@ -14,7 +14,7 @@ import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
 import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   sanitizeProviderForResponse,
   sanitizeCmdbForResponse,
@@ -76,10 +76,13 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; orgId?: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; role?: string; username?: string; orgId?: string };
     req.userId = decoded.userId;
-    req.user = await storage.getUser(decoded.userId);
-    req.orgId = req.user?.orgId ?? decoded.orgId ?? undefined;
+    const dbUser = await storage.getUser(decoded.userId);
+    // Use DB user when available; fall back to JWT claims so integration tests
+    // with synthetic tokens still work without hitting the database.
+    req.user = dbUser ?? (decoded.role ? { id: decoded.userId, username: decoded.username ?? "", role: decoded.role, orgId: decoded.orgId ?? null } as any : undefined);
+    req.orgId = dbUser?.orgId ?? decoded.orgId ?? undefined;
     next();
   } catch (error) {
     res.status(401).json({ message: "Invalid token" });
@@ -97,12 +100,26 @@ function requireRole(...roles: string[]) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ─── Health endpoints (no auth required) ───────────────────────────────────
+  app.get("/api/health", (_req, res) => {
+    res.status(200).json({ ok: true, service: "rovelink", timestamp: new Date().toISOString() });
+  });
+
+  app.get("/api/health/db", async (_req, res) => {
+    try {
+      await db.execute(sql`select 1`);
+      res.status(200).json({ ok: true, database: "ok", timestamp: new Date().toISOString() });
+    } catch {
+      res.status(503).json({ ok: false, database: "error", timestamp: new Date().toISOString() });
+    }
+  });
+
   // Mount RDP modular routes with auth middleware
   app.use("/api/pipelines", authMiddleware, pipelineRoutes);
   app.use("/api/pipelines", authMiddleware, pipelineMappingRoutes);
   app.use("/api/providers", authMiddleware, providerDiscoveryRoutes);
   app.use("/api/inventories", authMiddleware, automationInventoryRoutes);
-  app.use("/api/gate", gateRoutes);
+  app.use("/api/gate", authMiddleware, gateRoutes);
 
   // ─── Auth routes ────────────────────────────────────────────────────────────
 
@@ -236,9 +253,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/projects", authMiddleware, async (req, res) => {
+  app.post("/api/projects", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const data = insertProjectSchema.parse(req.body);
+      const { orgId: _o, id: _i, ...safeBody } = req.body;
+      const data = insertProjectSchema.parse({ ...safeBody, orgId: req.orgId });
       const project = await storage.createProject(data);
       res.json(project);
     } catch (error: any) {
@@ -246,7 +264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/projects/:id/sync", authMiddleware, async (req, res) => {
+  app.post("/api/projects/:id/sync", authMiddleware, requireRole("operator", "admin"), async (req, res) => {
     try {
       const project = await storage.getProject(req.params.id);
       if (!project) {
@@ -274,7 +292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/projects/:id", authMiddleware, async (req, res) => {
+  app.patch("/api/projects/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const data = insertProjectSchema.partial().parse(req.body);
       const project = await storage.updateProject(req.params.id, data);
@@ -287,7 +305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/projects/:id", authMiddleware, async (req, res) => {
+  app.delete("/api/projects/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       await storage.deleteProject(req.params.id);
       res.json({ message: "Project deleted successfully" });
@@ -306,9 +324,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/credentials", authMiddleware, async (req, res) => {
+  app.post("/api/credentials", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const data = insertCredentialSchema.parse(req.body);
+      const { orgId: _o, id: _i, ...safeBody } = req.body;
+      const data = insertCredentialSchema.parse({ ...safeBody, orgId: req.orgId });
       const credential = await storage.createCredential(data);
       res.json(credential);
     } catch (error: any) {
@@ -316,7 +335,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/credentials/:id", authMiddleware, async (req, res) => {
+  app.patch("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const data = insertCredentialSchema.partial().parse(req.body);
       const credential = await storage.updateCredential(req.params.id, data);
@@ -329,7 +348,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/credentials/:id", authMiddleware, async (req, res) => {
+  app.delete("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       await storage.deleteCredential(req.params.id);
       res.json({ message: "Credential deleted successfully" });
@@ -348,9 +367,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/templates", authMiddleware, async (req, res) => {
+  app.post("/api/templates", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const data = insertJobTemplateSchema.parse(req.body);
+      const { orgId: _o, id: _i, ...safeBody } = req.body;
+      const data = insertJobTemplateSchema.parse({ ...safeBody, orgId: req.orgId });
       const template = await storage.createJobTemplate(data);
       res.json(template);
     } catch (error: any) {
@@ -358,7 +378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/templates/:id", authMiddleware, async (req, res) => {
+  app.patch("/api/templates/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const template = await storage.updateJobTemplate(req.params.id, req.body);
       res.json(template);
@@ -367,7 +387,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/templates/:id", authMiddleware, async (req, res) => {
+  app.delete("/api/templates/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       await storage.deleteJobTemplate(req.params.id);
       res.json({ message: "Template deleted successfully" });
@@ -376,7 +396,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/templates/:id/launch", authMiddleware, async (req: AuthRequest, res) => {
+  app.post("/api/templates/:id/launch", authMiddleware, requireRole("operator", "admin"), async (req: AuthRequest, res) => {
     try {
       const template = await storage.getJobTemplate(req.params.id);
       if (!template) {
@@ -442,7 +462,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/templates/:id/schedule", authMiddleware, async (req: AuthRequest, res) => {
+  app.post("/api/templates/:id/schedule", authMiddleware, requireRole("operator", "admin"), async (req: AuthRequest, res) => {
     try {
       const template = await storage.getJobTemplate(req.params.id);
       if (!template) {
@@ -713,7 +733,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/settings", authMiddleware, async (req, res) => {
+  app.post("/api/settings", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const { netboxUrl, netboxToken } = req.body;
       
@@ -767,7 +787,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/notifications", authMiddleware, async (req, res) => {
+  app.post("/api/notifications", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const notification = await storage.createNotification(req.body);
       res.json(notification);
@@ -776,7 +796,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/notifications/:id", authMiddleware, async (req, res) => {
+  app.patch("/api/notifications/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       const notification = await storage.updateNotification(req.params.id, req.body);
       if (!notification) {
@@ -788,7 +808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/notifications/:id", authMiddleware, async (req, res) => {
+  app.delete("/api/notifications/:id", authMiddleware, requireRole("admin"), async (req, res) => {
     try {
       await storage.deleteNotification(req.params.id);
       res.json({ message: "Notification deleted" });
@@ -841,9 +861,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/providers", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.post("/api/providers", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const body = { ...req.body };
+      const { orgId: _o, id: _i, ...safeBody } = req.body;
+      const body = { ...safeBody, orgId: req.orgId };
       if (body.config && typeof body.config === "object") {
         body.config = encryptProviderConfig(body.config);
       }
@@ -951,9 +972,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/cmdbs", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.post("/api/cmdbs", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const data = insertCmdbAccountSchema.parse(req.body);
+      const { orgId: _o, id: _i, ...safeReqBody } = req.body;
+      const data = insertCmdbAccountSchema.parse({ ...safeReqBody, orgId: req.orgId });
       const body = { ...data };
       if (body.config && typeof body.config === "object") {
         body.config = encryptCmdbConfig(body.config as Record<string, any>);

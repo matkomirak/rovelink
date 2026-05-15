@@ -1,0 +1,839 @@
+Below is a technical implementation brief you can give to Replit. It covers all recommended fixes **except point 7**.
+
+---
+
+# Technical Implementation Brief: NetBoxBridge / Rovelink Hardening
+
+Implement the following backend, security, testing, and operational improvements.
+
+## 1. Secure `/api/gate` routes with authentication and authorization
+
+### Problem
+
+The gate routes are currently mounted without authentication:
+
+```ts
+app.use("/api/gate", gateRoutes);
+```
+
+This exposes Automation GATE data publicly, including VM names, asset IDs, NetBox IDs, provider hints, allowed/blocked decisions, and governance failure reasons.
+
+### Required change
+
+Update `server/routes.ts` so `/api/gate` is protected by authentication:
+
+```ts
+app.use("/api/gate", authMiddleware, gateRoutes);
+```
+
+Then add role-based access controls inside the gate router where appropriate.
+
+Suggested role policy:
+
+| Endpoint type                         | Minimum role |
+| ------------------------------------- | ------------ |
+| Read gate evaluations                 | `viewer`     |
+| Trigger gate re-evaluation            | `operator`   |
+| Modify gate settings/rules            | `admin`      |
+| Sync gate results back to NetBox/CMDB | `admin`      |
+
+Example:
+
+```ts
+router.post(
+  "/evaluate",
+  requireRole(["operator", "admin"]),
+  async (req, res) => {
+    // existing handler
+  }
+);
+```
+
+If `requireRole` currently accepts a different signature, adapt accordingly.
+
+### Acceptance criteria
+
+* Unauthenticated requests to `/api/gate/*` return `401`.
+* Authenticated viewers can read gate status/evaluation results.
+* Viewers cannot trigger syncs, updates, or re-evaluations.
+* Operators can run evaluations.
+* Only admins can change gate configuration or sync gate blocks externally.
+* Add tests for these cases.
+
+---
+
+## 2. Enforce tenant isolation consistently with `orgId`
+
+### Problem
+
+The database schema includes `orgId`, and some list methods filter by `orgId`, but several single-object read/update/delete operations only use `id`.
+
+Examples that need review:
+
+```ts
+getProject(id)
+getProvider(id)
+getCmdbAccount(id)
+updateProvider(id)
+deleteProvider(id)
+updateCmdbAccount(id)
+deleteCmdbAccount(id)
+```
+
+This can allow cross-tenant access if a user guesses or obtains another tenant’s UUID.
+
+### Required change
+
+Every tenant-owned resource must be queried, updated, or deleted using both:
+
+```ts
+id
+orgId
+```
+
+Do not trust `orgId` from the client request body.
+
+The authenticated user’s organization should come from the auth context, for example:
+
+```ts
+req.orgId
+```
+
+or:
+
+```ts
+req.user.orgId
+```
+
+depending on the existing implementation.
+
+### Example fix
+
+Before:
+
+```ts
+await db
+  .select()
+  .from(providerAccounts)
+  .where(eq(providerAccounts.id, id));
+```
+
+After:
+
+```ts
+await db
+  .select()
+  .from(providerAccounts)
+  .where(
+    and(
+      eq(providerAccounts.id, id),
+      eq(providerAccounts.orgId, orgId)
+    )
+  );
+```
+
+Before:
+
+```ts
+await db
+  .delete(providerAccounts)
+  .where(eq(providerAccounts.id, id));
+```
+
+After:
+
+```ts
+await db
+  .delete(providerAccounts)
+  .where(
+    and(
+      eq(providerAccounts.id, id),
+      eq(providerAccounts.orgId, orgId)
+    )
+  );
+```
+
+### Routes to audit
+
+Audit all routes and storage methods for these resource types:
+
+```text
+projects
+providerAccounts
+cmdbAccounts
+pipelines
+pipelineRuns
+mappingRules
+automationInventories
+jobTemplates
+jobRuns
+credentials
+reports
+notifications
+settings
+netboxVms
+```
+
+Any object tied to an organization must enforce `orgId`.
+
+### Creation rule
+
+When creating tenant-owned resources, ignore `orgId` in the client body.
+
+Bad:
+
+```ts
+const data = req.body;
+await storage.createProvider(data);
+```
+
+Good:
+
+```ts
+const data = {
+  ...req.body,
+  orgId: req.orgId,
+};
+await storage.createProvider(data);
+```
+
+Optionally strip dangerous fields:
+
+```ts
+const { orgId, userId, id, ...safeBody } = req.body;
+
+const data = {
+  ...safeBody,
+  orgId: req.orgId,
+};
+```
+
+### Acceptance criteria
+
+* A user from organization A cannot read, update, delete, launch, or list organization B’s resources.
+* Client-provided `orgId` is ignored during creation.
+* All tenant-owned single-object methods require `orgId`.
+* Add cross-tenant tests for providers, CMDB accounts, projects, job templates, credentials, and gate data.
+
+---
+
+## 3. Add role enforcement to mutation and execution routes
+
+### Problem
+
+Some backend routes are protected only by `authMiddleware`, not by role checks. This may allow low-privilege authenticated users to create resources, modify secrets, or launch automation jobs.
+
+Examples to review:
+
+```ts
+app.post("/api/projects", authMiddleware, ...)
+app.post("/api/credentials", authMiddleware, ...)
+app.post("/api/templates/:id/launch", authMiddleware, ...)
+```
+
+### Required change
+
+Add role enforcement to all write, delete, execution, and sensitive read operations.
+
+Suggested role model:
+
+| Action                                | Minimum role                                     |
+| ------------------------------------- | ------------------------------------------------ |
+| Read dashboard/list data              | `viewer`                                         |
+| Read non-secret configuration         | `viewer`                                         |
+| Create/update projects                | `admin`                                          |
+| Delete projects                       | `admin`                                          |
+| Create/update/delete providers        | `admin`                                          |
+| Create/update/delete CMDB accounts    | `admin`                                          |
+| Create/update/delete credentials      | `admin`                                          |
+| Create/update/delete job templates    | `admin`                                          |
+| Launch jobs                           | `operator`                                       |
+| Cancel jobs                           | `operator`                                       |
+| Create/update/delete inventories      | `operator` or `admin`                            |
+| Generate reports                      | `viewer` or `operator`, depending on sensitivity |
+| Change settings                       | `admin`                                          |
+| Sync provider/CMDB data               | `operator`                                       |
+| Sync gate results back to NetBox/CMDB | `admin`                                          |
+
+### Example route change
+
+Before:
+
+```ts
+app.post("/api/templates/:id/launch", authMiddleware, async (req, res) => {
+  // launch job
+});
+```
+
+After:
+
+```ts
+app.post(
+  "/api/templates/:id/launch",
+  authMiddleware,
+  requireRole(["operator", "admin"]),
+  async (req, res) => {
+    // launch job
+  }
+);
+```
+
+Before:
+
+```ts
+app.post("/api/credentials", authMiddleware, async (req, res) => {
+  // create credential
+});
+```
+
+After:
+
+```ts
+app.post(
+  "/api/credentials",
+  authMiddleware,
+  requireRole(["admin"]),
+  async (req, res) => {
+    // create credential
+  }
+);
+```
+
+### Acceptance criteria
+
+* Viewers cannot create, update, delete, sync, or launch automation.
+* Operators can launch jobs and run syncs but cannot manage secrets or global settings.
+* Admins can manage configuration and credentials.
+* Add role-based tests for important routes.
+
+---
+
+## 4. Restrict local Ansible playbook execution paths
+
+### Problem
+
+The local Ansible runner launches playbooks using a path from the job template:
+
+```ts
+args = ["-i", options.inventoryPath, options.playbookPath];
+```
+
+Even though `spawn()` is safer than shell execution, the playbook path itself may be unsafe. A user who can create or modify templates could point Ansible to unexpected files on the host.
+
+### Required change
+
+Only allow project-relative playbook paths from the checked-out project directory.
+
+Do not allow:
+
+```text
+absolute paths
+../ traversal
+symlinks escaping project root
+paths outside the project checkout
+empty paths
+non-YAML files if the app expects YAML playbooks
+```
+
+### Recommended helper
+
+Create a helper such as:
+
+```ts
+import path from "node:path";
+import fs from "node:fs/promises";
+
+export async function resolveSafePlaybookPath(
+  projectRoot: string,
+  playbookPath: string
+): Promise<string> {
+  if (!playbookPath || typeof playbookPath !== "string") {
+    throw new Error("Playbook path is required");
+  }
+
+  if (path.isAbsolute(playbookPath)) {
+    throw new Error("Absolute playbook paths are not allowed");
+  }
+
+  const normalizedRelative = path.normalize(playbookPath);
+
+  if (
+    normalizedRelative.startsWith("..") ||
+    normalizedRelative.includes(`..${path.sep}`)
+  ) {
+    throw new Error("Playbook path cannot escape project directory");
+  }
+
+  if (!/\.(ya?ml)$/i.test(normalizedRelative)) {
+    throw new Error("Playbook must be a YAML file");
+  }
+
+  const projectRealPath = await fs.realpath(projectRoot);
+  const candidatePath = path.resolve(projectRealPath, normalizedRelative);
+  const candidateRealPath = await fs.realpath(candidatePath);
+
+  const relativeToProject = path.relative(projectRealPath, candidateRealPath);
+
+  if (
+    relativeToProject.startsWith("..") ||
+    path.isAbsolute(relativeToProject)
+  ) {
+    throw new Error("Playbook path escapes project directory");
+  }
+
+  return candidateRealPath;
+}
+```
+
+Use this before launching Ansible:
+
+```ts
+const safePlaybookPath = await resolveSafePlaybookPath(
+  project.checkoutPath,
+  template.playbook
+);
+
+await localRunner.run({
+  inventoryPath,
+  playbookPath: safePlaybookPath,
+  extraVars,
+});
+```
+
+### Additional requirements
+
+Also validate inventory paths if they are generated on disk.
+
+The inventory file should be created in a controlled runtime directory, for example:
+
+```text
+./runtime/inventories/<orgId>/<runId>/inventory.yml
+```
+
+The app should not accept arbitrary inventory paths from the client.
+
+### Acceptance criteria
+
+* Absolute playbook paths are rejected.
+* `../` traversal is rejected.
+* Symlinks escaping the project root are rejected.
+* Only `.yml` or `.yaml` files are allowed.
+* Playbooks must exist inside the project checkout.
+* Add unit tests for safe and unsafe path examples.
+
+---
+
+## 5. Fix encrypted CMDB config usage in automation inventory generation
+
+### Problem
+
+One route creates a `NetBoxAdapter` directly from `cmdb.config`:
+
+```ts
+const adapter = new NetBoxAdapter(cmdb.config as any);
+```
+
+Elsewhere, CMDB config is decrypted first:
+
+```ts
+const decryptedConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
+```
+
+If the NetBox token is encrypted, this route may fail or send the encrypted token as the API token.
+
+### Required change
+
+Find the route in:
+
+```text
+server/routes/automation-inventories.ts
+```
+
+Replace direct usage of encrypted config with decrypted config.
+
+### Expected implementation
+
+```ts
+import { decryptCmdbConfig } from "../security/secrets";
+```
+
+Then:
+
+```ts
+const decryptedConfig = decryptCmdbConfig(
+  cmdb.config as Record<string, any>
+);
+
+const adapter = new NetBoxAdapter(decryptedConfig as any);
+```
+
+Make sure the decrypted config is never logged or returned in API responses.
+
+### Acceptance criteria
+
+* Automation inventory generation works with encrypted NetBox tokens.
+* Decrypted tokens are not returned in API responses.
+* Decrypted tokens are not logged.
+* Add a test using an encrypted CMDB token and verify the adapter receives the decrypted token.
+
+---
+
+## 6. Fix README setup scripts and package scripts
+
+### Problem
+
+`README.md` references:
+
+```bash
+npm run db:seed
+```
+
+But `package.json` does not define that script.
+
+There is a seed file:
+
+```text
+server/seed.ts
+```
+
+### Required change
+
+Add scripts to `package.json`.
+
+Recommended scripts:
+
+```json
+{
+  "scripts": {
+    "dev": "NODE_ENV=development tsx server/index.ts",
+    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "start": "NODE_ENV=production node dist/index.js",
+    "check": "tsc",
+    "db:push": "drizzle-kit push",
+    "db:seed": "tsx server/seed.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "test:security": "tsx --test tests/security.test.ts"
+  }
+}
+```
+
+Adapt the existing scripts if they differ, but preserve current behavior.
+
+### README update
+
+Make sure setup instructions match the real scripts.
+
+Example:
+
+```bash
+npm install
+npm run db:push
+npm run db:seed
+npm run dev
+```
+
+Also document required environment variables:
+
+```text
+DATABASE_URL
+SESSION_SECRET
+SECRET_KEY or ENCRYPTION_KEY
+NODE_ENV
+```
+
+Use the exact variable names used by the codebase.
+
+### Acceptance criteria
+
+* `npm run db:seed` works.
+* `npm test` runs the test suite.
+* README setup instructions are accurate.
+* A new developer can follow the README without hitting missing script errors.
+
+---
+
+## 7. Add `/api/health` endpoint for Docker healthcheck
+
+### Problem
+
+The Dockerfile healthcheck points to:
+
+```dockerfile
+http://localhost:5000/api/health
+```
+
+But the server does not appear to define this endpoint.
+
+This can cause the Docker container to be marked unhealthy even when the app is running.
+
+### Required change
+
+Add a lightweight health endpoint.
+
+In the main server route registration file:
+
+```ts
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: "rovelink",
+    timestamp: new Date().toISOString()
+  });
+});
+```
+
+This endpoint should not require authentication.
+
+### Optional database health endpoint
+
+Keep `/api/health` lightweight and fast.
+
+If database health is needed, add a separate endpoint:
+
+```text
+/api/health/db
+```
+
+Example:
+
+```ts
+app.get("/api/health/db", async (_req, res) => {
+  try {
+    await db.execute(sql`select 1`);
+    res.status(200).json({
+      ok: true,
+      database: "ok",
+      timestamp: new Date().toISOString()
+    });
+  } catch {
+    res.status(503).json({
+      ok: false,
+      database: "error",
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+```
+
+### Acceptance criteria
+
+* `curl http://localhost:5000/api/health` returns HTTP `200`.
+* Docker healthcheck passes.
+* `/api/health` does not expose secrets, config, database URLs, or environment details.
+
+---
+
+## 8. Fix dependency vulnerabilities
+
+### Problem
+
+`npm audit` reported vulnerabilities, including high-severity issues.
+
+### Required change
+
+Run:
+
+```bash
+npm audit
+```
+
+Then attempt safe fixes:
+
+```bash
+npm audit fix
+```
+
+If high-severity vulnerabilities remain, evaluate:
+
+```bash
+npm audit fix --force
+```
+
+Do not blindly apply force upgrades if they introduce breaking changes. Review affected packages and test the app after upgrades.
+
+### Required validation after upgrades
+
+Run:
+
+```bash
+npm run check
+npm test
+npm run build
+```
+
+If the app has frontend smoke tests or route tests, run those too.
+
+### Packages to review carefully
+
+Pay attention to vulnerabilities involving:
+
+```text
+express
+axios
+drizzle-orm
+lodash
+rollup
+path-to-regexp
+vite
+esbuild
+```
+
+Upgrade these to patched versions where possible.
+
+### Acceptance criteria
+
+* No high-severity vulnerabilities remain if reasonably fixable.
+* If any vulnerabilities remain, document why they remain and whether they are reachable in production.
+* TypeScript check still passes.
+* Build still passes.
+* Tests still pass.
+
+---
+
+## 9. Add authorization and security tests
+
+### Problem
+
+Existing tests cover secret encryption/redaction, but authorization and tenant boundaries need coverage.
+
+### Required change
+
+Add tests for:
+
+```text
+unauthenticated access
+role-based access
+cross-tenant isolation
+secret redaction
+safe playbook path validation
+encrypted CMDB config usage
+```
+
+### Suggested test files
+
+```text
+tests/authz.test.ts
+tests/tenant-isolation.test.ts
+tests/playbook-paths.test.ts
+tests/cmdb-config.test.ts
+```
+
+### Minimum test cases
+
+#### Gate auth
+
+```text
+GET /api/gate/... without auth returns 401
+GET /api/gate/... as viewer succeeds
+POST /api/gate/evaluate as viewer returns 403
+POST /api/gate/evaluate as operator succeeds
+POST /api/gate/sync-blocks as operator returns 403
+POST /api/gate/sync-blocks as admin succeeds
+```
+
+#### Tenant isolation
+
+```text
+User from org A cannot read provider from org B
+User from org A cannot update provider from org B
+User from org A cannot delete provider from org B
+User from org A cannot launch template from org B
+User from org A cannot read credentials from org B
+```
+
+#### Role checks
+
+```text
+Viewer cannot create credentials
+Viewer cannot launch job templates
+Operator can launch job templates
+Operator cannot create credentials
+Admin can create credentials
+Admin can update providers
+```
+
+#### Secret redaction
+
+```text
+Provider config responses never include raw passwords/tokens
+CMDB config responses never include raw tokens
+Credential responses never include raw secret values
+```
+
+#### Safe playbook paths
+
+Test allowed:
+
+```text
+site.yml
+playbooks/deploy.yml
+roles/example/tasks/main.yaml
+```
+
+Test rejected:
+
+```text
+/etc/passwd
+../outside.yml
+playbooks/../../outside.yml
+symlink-to-outside.yml
+script.sh
+empty string
+```
+
+#### Encrypted CMDB config
+
+```text
+Create CMDB account with encrypted token
+Generate automation inventory
+Verify NetBoxAdapter receives decrypted token
+Verify API response does not include decrypted token
+```
+
+### Acceptance criteria
+
+* `npm test` runs all tests.
+* Tests fail before the fixes and pass after the fixes.
+* Tests can run in CI or Replit without manual setup beyond documented environment variables.
+
+---
+
+# Final verification checklist
+
+After implementing all changes, run:
+
+```bash
+npm install
+npm run check
+npm test
+npm run build
+npm audit
+```
+
+Then start the app and verify:
+
+```bash
+curl http://localhost:5000/api/health
+```
+
+Expected:
+
+```json
+{
+  "ok": true,
+  "service": "rovelink",
+  "timestamp": "..."
+}
+```
+
+Also manually verify:
+
+```text
+Unauthenticated users cannot access protected API routes.
+Viewer users cannot mutate or launch automation.
+Operator users can launch automation but cannot manage credentials.
+Admin users can manage configuration.
+Users cannot access another organization's resources.
+Secrets are never returned in API responses.
+Local playbook execution cannot escape the project directory.
+```

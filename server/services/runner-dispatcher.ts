@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { AwxRunner } from "./awx-runner";
 import { LocalRunner } from "./local-runner";
 import { decryptSecret } from "./secrets";
+import { validatePlaybookPathSyntax } from "./safe-playbook-path";
 import type { JobRun } from "../../shared/schema";
 
 export interface RunResult {
@@ -74,6 +75,9 @@ async function runLocally(
   template: any,
   onLog: (line: string) => void
 ): Promise<RunResult> {
+  // Validate playbook path before spawning to prevent path traversal
+  validatePlaybookPathSyntax(template.playbook);
+
   const runner = new LocalRunner();
   const result = await runner.execute(
     {

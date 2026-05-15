@@ -1,4 +1,4 @@
-import rovelinkLogo from "@assets/logo_1775392789311.png";
+import rovelinkLogo from "@assets/rovelink-logo-clean.png";
 import {
   Calendar,
   Settings,
@@ -104,12 +104,14 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border p-0 overflow-hidden">
-        <img
-          src={rovelinkLogo}
-          alt="Rovelink"
-          style={{ width: "100%", height: "auto", display: "block" }}
-        />
+      <SidebarHeader className="border-b border-sidebar-border p-0 overflow-hidden bg-white">
+        <div className="px-4 py-3 flex items-center justify-center">
+          <img
+            src={rovelinkLogo}
+            alt="Rovelink"
+            style={{ width: "100%", maxWidth: "200px", height: "auto", display: "block" }}
+          />
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

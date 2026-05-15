@@ -1,4 +1,4 @@
-import rovelinkLogo from "@assets/logo_1775392789311.png";
+import rovelinkLogo from "@assets/rovelink-logo-clean.png";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -67,11 +67,11 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
-        <div className="rounded-t-lg overflow-hidden">
+        <div className="rounded-t-lg overflow-hidden bg-white px-6 py-4 flex items-center justify-center">
           <img
             src={rovelinkLogo}
             alt="Rovelink"
-            style={{ width: "100%", height: "auto", display: "block" }}
+            style={{ width: "100%", maxWidth: "320px", height: "auto", display: "block" }}
           />
         </div>
         <CardContent className="pt-6">

@@ -53,9 +53,9 @@ export interface IStorage {
 
   // Job Run operations
   getJobRuns(filters?: any, page?: number, pageSize?: number, orgId?: string | null): Promise<JobRun[]>;
-  getJobRun(id: string): Promise<JobRun | undefined>;
+  getJobRun(id: string, orgId?: string | null): Promise<JobRun | undefined>;
   createJobRun(run: InsertJobRun): Promise<JobRun>;
-  updateJobRun(id: string, data: Partial<JobRun>): Promise<JobRun | undefined>;
+  updateJobRun(id: string, data: Partial<JobRun>, orgId?: string | null): Promise<JobRun | undefined>;
 
   // Settings operations
   getSetting(key: string): Promise<Setting | undefined>;
@@ -63,11 +63,11 @@ export interface IStorage {
   getAllSettings(): Promise<Setting[]>;
 
   // Notification operations
-  getNotifications(): Promise<Notification[]>;
-  getNotification(id: string): Promise<Notification | undefined>;
+  getNotifications(orgId?: string | null): Promise<Notification[]>;
+  getNotification(id: string, orgId?: string | null): Promise<Notification | undefined>;
   createNotification(notification: InsertNotification): Promise<Notification>;
-  updateNotification(id: string, data: Partial<Notification>): Promise<Notification | undefined>;
-  deleteNotification(id: string): Promise<void>;
+  updateNotification(id: string, data: Partial<Notification>, orgId?: string | null): Promise<Notification | undefined>;
+  deleteNotification(id: string, orgId?: string | null): Promise<void>;
 
   // Provider operations
   getProviders(orgId?: string | null): Promise<ProviderAccount[]>;
@@ -282,8 +282,9 @@ export class DatabaseStorage implements IStorage {
     return await query.orderBy(desc(jobRuns.createdAt)).limit(pageSize).offset(offset);
   }
 
-  async getJobRun(id: string): Promise<JobRun | undefined> {
-    const [run] = await db.select().from(jobRuns).where(eq(jobRuns.id, id));
+  async getJobRun(id: string, orgId?: string | null): Promise<JobRun | undefined> {
+    const where = orgId ? and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)) : eq(jobRuns.id, id);
+    const [run] = await db.select().from(jobRuns).where(where);
     return run || undefined;
   }
 
@@ -295,11 +296,12 @@ export class DatabaseStorage implements IStorage {
     return run;
   }
 
-  async updateJobRun(id: string, data: Partial<JobRun>): Promise<JobRun | undefined> {
+  async updateJobRun(id: string, data: Partial<JobRun>, orgId?: string | null): Promise<JobRun | undefined> {
+    const where = orgId ? and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)) : eq(jobRuns.id, id);
     const [updated] = await db
       .update(jobRuns)
       .set(data)
-      .where(eq(jobRuns.id, id))
+      .where(where)
       .returning();
     return updated || undefined;
   }
@@ -333,12 +335,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Notification operations
-  async getNotifications(): Promise<Notification[]> {
+  async getNotifications(orgId?: string | null): Promise<Notification[]> {
+    if (orgId) {
+      return await db.select().from(notifications).where(eq(notifications.orgId, orgId)).orderBy(desc(notifications.createdAt));
+    }
     return await db.select().from(notifications).orderBy(desc(notifications.createdAt));
   }
 
-  async getNotification(id: string): Promise<Notification | undefined> {
-    const [notification] = await db.select().from(notifications).where(eq(notifications.id, id));
+  async getNotification(id: string, orgId?: string | null): Promise<Notification | undefined> {
+    const where = orgId ? and(eq(notifications.id, id), eq(notifications.orgId, orgId)) : eq(notifications.id, id);
+    const [notification] = await db.select().from(notifications).where(where);
     return notification || undefined;
   }
 
@@ -350,17 +356,19 @@ export class DatabaseStorage implements IStorage {
     return notification;
   }
 
-  async updateNotification(id: string, data: Partial<Notification>): Promise<Notification | undefined> {
+  async updateNotification(id: string, data: Partial<Notification>, orgId?: string | null): Promise<Notification | undefined> {
+    const where = orgId ? and(eq(notifications.id, id), eq(notifications.orgId, orgId)) : eq(notifications.id, id);
     const [updated] = await db
       .update(notifications)
       .set(data)
-      .where(eq(notifications.id, id))
+      .where(where)
       .returning();
     return updated || undefined;
   }
 
-  async deleteNotification(id: string): Promise<void> {
-    await db.delete(notifications).where(eq(notifications.id, id));
+  async deleteNotification(id: string, orgId?: string | null): Promise<void> {
+    const where = orgId ? and(eq(notifications.id, id), eq(notifications.orgId, orgId)) : eq(notifications.id, id);
+    await db.delete(notifications).where(where);
   }
 
   // Provider operations

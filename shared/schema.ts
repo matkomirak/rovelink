@@ -130,6 +130,7 @@ export const settings = pgTable("settings", {
 // Notification Configurations
 export const notifications = pgTable("notifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   type: text("type").notNull(), // "email" or "webhook"
   enabled: boolean("enabled").notNull().default(true),

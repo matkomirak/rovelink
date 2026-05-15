@@ -10,13 +10,14 @@ const router = Router();
 
 interface AuthRequest extends Request {
   userId?: string;
+  orgId?: string;
   user?: any;
 }
 
 // GET /api/providers/:id/object-types - Get available object types
 router.get("/:id/object-types", async (req: AuthRequest, res: Response) => {
   try {
-    const provider = await storage.getProvider(req.params.id);
+    const provider = await storage.getProvider(req.params.id, req.orgId);
     if (!provider) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -35,7 +36,7 @@ router.get("/:id/object-types", async (req: AuthRequest, res: Response) => {
 // GET /api/providers/:id/samples - Get sample objects
 router.get("/:id/samples", async (req: AuthRequest, res: Response) => {
   try {
-    const provider = await storage.getProvider(req.params.id);
+    const provider = await storage.getProvider(req.params.id, req.orgId);
     if (!provider) {
       return res.status(404).json({ error: "not_found" });
     }

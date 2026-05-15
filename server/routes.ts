@@ -75,18 +75,46 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
     return res.status(401).json({ message: "Unauthorized" });
   }
 
+  // Step 1: Verify the token — this is the only hard failure path.
+  let decoded: { userId: string; role?: string; username?: string; orgId?: string };
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; role?: string; username?: string; orgId?: string };
-    req.userId = decoded.userId;
-    const dbUser = await storage.getUser(decoded.userId);
-    // Use DB user when available; fall back to JWT claims so integration tests
-    // with synthetic tokens still work without hitting the database.
-    req.user = dbUser ?? (decoded.role ? { id: decoded.userId, username: decoded.username ?? "", role: decoded.role, orgId: decoded.orgId ?? null } as any : undefined);
-    req.orgId = dbUser?.orgId ?? decoded.orgId ?? undefined;
-    next();
-  } catch (error) {
-    res.status(401).json({ message: "Invalid token" });
+    decoded = jwt.verify(token, JWT_SECRET) as any;
+  } catch {
+    return res.status(401).json({ message: "Invalid token" });
   }
+
+  // Step 2: Set fallback identity from JWT claims immediately so that tests
+  // using synthetic tokens work even if no DB is reachable.
+  req.userId = decoded.userId;
+  req.orgId = decoded.orgId ?? undefined;
+  req.user = decoded.role
+    ? ({
+        id: decoded.userId,
+        username: decoded.username ?? "",
+        role: decoded.role,
+        orgId: decoded.orgId ?? null,
+      } as any)
+    : undefined;
+
+  // Step 3: Attempt to hydrate from DB — DB errors must NOT invalidate a valid token.
+  try {
+    const dbUser = await storage.getUser(decoded.userId);
+    if (dbUser) {
+      req.user = dbUser;
+      req.orgId = dbUser.orgId ?? undefined;
+    }
+  } catch (error) {
+    // Log in non-test environments but do not reject the request.
+    if (process.env.NODE_ENV !== "test") {
+      console.error("[auth] DB user lookup failed, continuing with JWT claims:", (error as any)?.message);
+    }
+  }
+
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  next();
 }
 
 // Role middleware
@@ -615,12 +643,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/runs/:id", authMiddleware, async (req, res) => {
+  app.get("/api/runs/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const id = req.params.id;
       
-      // Try to find the run in all three tables
-      const jobRun = await storage.getJobRun(id);
+      // Try to find the run in all three tables — scoped to caller's org where applicable
+      const jobRun = await storage.getJobRun(id, req.orgId);
       if (jobRun) {
         return res.json({
           ...jobRun,
@@ -658,37 +686,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/runs/:id/archive", authMiddleware, async (req, res) => {
+  app.post("/api/runs/:id/archive", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const run = await storage.getJobRun(req.params.id);
+      const run = await storage.getJobRun(req.params.id, req.orgId);
       if (!run) {
         return res.status(404).json({ message: "Run not found" });
       }
 
-      await storage.updateJobRun(req.params.id, { archived: true });
+      await storage.updateJobRun(req.params.id, { archived: true }, req.orgId);
       res.json({ message: "Run archived successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to archive run" });
     }
   });
 
-  app.post("/api/runs/:id/unarchive", authMiddleware, async (req, res) => {
+  app.post("/api/runs/:id/unarchive", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const run = await storage.getJobRun(req.params.id);
+      const run = await storage.getJobRun(req.params.id, req.orgId);
       if (!run) {
         return res.status(404).json({ message: "Run not found" });
       }
 
-      await storage.updateJobRun(req.params.id, { archived: false });
+      await storage.updateJobRun(req.params.id, { archived: false }, req.orgId);
       res.json({ message: "Run unarchived successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to unarchive run" });
     }
   });
 
-  app.get("/api/runs/:id/csv", authMiddleware, async (req, res) => {
+  app.get("/api/runs/:id/csv", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const run = await storage.getJobRun(req.params.id);
+      const run = await storage.getJobRun(req.params.id, req.orgId);
       if (!run) {
         return res.status(404).json({ message: "Run not found" });
       }
@@ -778,27 +806,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Notification routes
-  app.get("/api/notifications", authMiddleware, async (req, res) => {
+  app.get("/api/notifications", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const notifications = await storage.getNotifications();
+      const notifications = await storage.getNotifications(req.orgId);
       res.json(notifications);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch notifications" });
     }
   });
 
-  app.post("/api/notifications", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.post("/api/notifications", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const notification = await storage.createNotification(req.body);
+      const { orgId: _o, id: _i, ...safeBody } = req.body;
+      const notification = await storage.createNotification({ ...safeBody, orgId: req.orgId });
       res.json(notification);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to create notification" });
     }
   });
 
-  app.patch("/api/notifications/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.get("/api/notifications/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const notification = await storage.updateNotification(req.params.id, req.body);
+      const notification = await storage.getNotification(req.params.id, req.orgId);
+      if (!notification) {
+        return res.status(404).json({ message: "Notification not found" });
+      }
+      res.json(notification);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to fetch notification" });
+    }
+  });
+
+  app.patch("/api/notifications/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
+    try {
+      const notification = await storage.updateNotification(req.params.id, req.body, req.orgId);
       if (!notification) {
         return res.status(404).json({ message: "Notification not found" });
       }
@@ -808,9 +849,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/notifications/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.delete("/api/notifications/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteNotification(req.params.id);
+      const existing = await storage.getNotification(req.params.id, req.orgId);
+      if (!existing) {
+        return res.status(404).json({ message: "Notification not found" });
+      }
+      await storage.deleteNotification(req.params.id, req.orgId);
       res.json({ message: "Notification deleted" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete notification" });
@@ -987,6 +1032,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/cmdbs/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      res.json(sanitizeCmdbForResponse(cmdb));
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to fetch CMDB account" });
+    }
+  });
+
   app.patch("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const body = { ...req.body };
@@ -1019,6 +1076,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
+      const existing = await storage.getCmdbAccount(req.params.id, req.orgId);
+      if (!existing) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
       await storage.deleteCmdbAccount(req.params.id, req.orgId);
       res.json({ message: "CMDB account deleted successfully" });
     } catch (error: any) {

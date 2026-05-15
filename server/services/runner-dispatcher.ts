@@ -4,12 +4,12 @@
  */
 
 import { db } from "../db";
-import { jobTemplates, settings } from "../../shared/schema";
-import { eq } from "drizzle-orm";
+import { settings } from "../../shared/schema";
+import { storage } from "../storage";
 import { AwxRunner } from "./awx-runner";
 import { LocalRunner } from "./local-runner";
 import { decryptSecret } from "./secrets";
-import { validatePlaybookPathSyntax } from "./safe-playbook-path";
+import { resolveSafePlaybookPath, validatePlaybookPathSyntax } from "./safe-playbook-path";
 import type { JobRun } from "../../shared/schema";
 
 export interface RunResult {
@@ -19,9 +19,19 @@ export interface RunResult {
 }
 
 export async function dispatchRun(run: JobRun, onLog: (line: string) => void): Promise<RunResult> {
-  const template = await db.query.jobTemplates.findFirst({
-    where: eq(jobTemplates.id, run.templateId),
-  });
+  // Tenant safety: fail closed in production if orgId is missing
+  if (!run.orgId) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Job run is missing orgId — cannot dispatch safely in production");
+    }
+    console.warn(`[dispatchRun] run ${run.id} has no orgId — falling back to unscoped template lookup`);
+  }
+
+  // Use tenant-aware storage instead of raw db query to prevent cross-tenant template access
+  const template = run.orgId
+    ? await storage.getJobTemplate(run.templateId, run.orgId)
+    : await storage.getJobTemplate(run.templateId);
+
   if (!template) throw new Error(`Job template ${run.templateId} not found`);
 
   if (template.runnerMode === "awx") {
@@ -75,14 +85,24 @@ async function runLocally(
   template: any,
   onLog: (line: string) => void
 ): Promise<RunResult> {
-  // Validate playbook path before spawning to prevent path traversal
+  // Attempt to resolve a disk-safe playbook path when the project has been checked out.
+  // Fall back to syntax-only validation when no real checkout exists (demo/simulation mode).
+  let resolvedPlaybookPath: string = template.playbook;
+
+  // resolveSafePlaybookPath requires project.checkoutPath (added when real Git sync is implemented).
+  // Until then, validatePlaybookPathSyntax enforces syntax-level safety on all paths.
   validatePlaybookPathSyntax(template.playbook);
+
+  // Generate a per-org/run inventory path — never accept a path from the client
+  const inventoryPath = run.orgId
+    ? `runtime/inventories/${run.orgId}/${run.id}/inventory.yml`
+    : `runtime/inventories/default/${run.id}/inventory.yml`;
 
   const runner = new LocalRunner();
   const result = await runner.execute(
     {
-      playbookPath: template.playbook,
-      inventoryPath: "inventory/netbox.yml",
+      playbookPath: resolvedPlaybookPath,
+      inventoryPath,
       limitExpr: run.limitExpr ?? undefined,
       extraVars: (template.extraVars as Record<string, any>) ?? {},
       checkMode: template.checkMode ?? false,

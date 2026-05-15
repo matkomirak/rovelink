@@ -15,17 +15,17 @@ const router = Router();
 
 interface AuthRequest extends Request {
   userId?: string;
+  orgId?: string;
   user?: any;
 }
 
-// Helper to get CMDB adapter instance with decrypted secrets
-async function getCmdbAdapter(cmdbAccountId: string) {
-  const cmdb = await storage.getCmdbAccount(cmdbAccountId);
+// Helper to get CMDB adapter instance — tenant-aware
+async function getCmdbAdapter(cmdbAccountId: string, orgId?: string) {
+  const cmdb = await storage.getCmdbAccount(cmdbAccountId, orgId);
   if (!cmdb) {
     throw new Error("CMDB account not found");
   }
 
-  // Decrypt secrets before passing to adapter
   const config = decryptCmdbConfig(cmdb.config as Record<string, any>);
 
   if (cmdb.kind === "netbox") {
@@ -37,10 +37,10 @@ async function getCmdbAdapter(cmdbAccountId: string) {
   }
 }
 
-// POST /api/pipelines/:pipelineId/mappings - Create mapping
+// POST /api/pipelines/:pipelineId/mappings - Create mapping (verify pipeline ownership)
 router.post("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.pipelineId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found", message: "Pipeline not found" });
     }
@@ -60,10 +60,14 @@ router.post("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => 
   }
 });
 
-// GET /api/pipelines/:pipelineId/mappings - List mappings for pipeline
+// GET /api/pipelines/:pipelineId/mappings - List mappings (verify pipeline ownership)
 router.get("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => {
   try {
-    const mappings = await storage.getPipelineMappings(req.params.pipelineId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    if (!pipeline) {
+      return res.status(404).json({ error: "not_found", message: "Pipeline not found" });
+    }
+    const mappings = await storage.getPipelineMappings(pipeline.id);
     res.json({ items: mappings });
   } catch (error: any) {
     res.status(500).json({ error: "internal", message: error.message });
@@ -73,8 +77,12 @@ router.get("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => {
 // GET /api/pipelines/:pipelineId/mappings/:mapId - Get specific mapping
 router.get("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Response) => {
   try {
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    if (!pipeline) {
+      return res.status(404).json({ error: "not_found" });
+    }
     const mapping = await storage.getPipelineMapping(req.params.mapId);
-    if (!mapping || mapping.pipelineId !== req.params.pipelineId) {
+    if (!mapping || mapping.pipelineId !== pipeline.id) {
       return res.status(404).json({ error: "not_found" });
     }
     res.json(mapping);
@@ -86,23 +94,23 @@ router.get("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Respons
 // PATCH /api/pipelines/:pipelineId/mappings/:mapId - Update mapping rules
 router.patch("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Response) => {
   try {
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    if (!pipeline) {
+      return res.status(404).json({ error: "not_found" });
+    }
     const mapping = await storage.getPipelineMapping(req.params.mapId);
-    if (!mapping || mapping.pipelineId !== req.params.pipelineId) {
+    if (!mapping || mapping.pipelineId !== pipeline.id) {
       return res.status(404).json({ error: "not_found" });
     }
 
-    // Update mapping
     const updated = await storage.updatePipelineMapping(req.params.mapId, req.body);
-    
-    // Increment pipeline version
     await storage.incrementPipelineVersion(req.params.pipelineId);
 
-    // Get updated pipeline version
-    const pipeline = await storage.getPipeline(req.params.pipelineId);
+    const refreshedPipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
 
     res.json({
       ...updated,
-      pipelineVersion: pipeline?.version,
+      pipelineVersion: refreshedPipeline?.version,
     });
   } catch (error: any) {
     res.status(500).json({ error: "internal", message: error.message });
@@ -112,8 +120,12 @@ router.patch("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Respo
 // DELETE /api/pipelines/:pipelineId/mappings/:mapId - Delete mapping
 router.delete("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Response) => {
   try {
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    if (!pipeline) {
+      return res.status(404).json({ error: "not_found" });
+    }
     const mapping = await storage.getPipelineMapping(req.params.mapId);
-    if (!mapping || mapping.pipelineId !== req.params.pipelineId) {
+    if (!mapping || mapping.pipelineId !== pipeline.id) {
       return res.status(404).json({ error: "not_found" });
     }
 
@@ -127,8 +139,13 @@ router.delete("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Resp
 // POST /api/pipelines/:pipelineId/mappings/:mapId/test - Test transformation
 router.post("/:pipelineId/mappings/:mapId/test", async (req: AuthRequest, res: Response) => {
   try {
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    if (!pipeline) {
+      return res.status(404).json({ error: "not_found", message: "Pipeline not found" });
+    }
+
     const mapping = await storage.getPipelineMapping(req.params.mapId);
-    if (!mapping || mapping.pipelineId !== req.params.pipelineId) {
+    if (!mapping || mapping.pipelineId !== pipeline.id) {
       return res.status(404).json({ error: "not_found" });
     }
 
@@ -137,21 +154,14 @@ router.post("/:pipelineId/mappings/:mapId/test", async (req: AuthRequest, res: R
       return res.status(400).json({ error: "validation_error", message: "sampleId is required" });
     }
 
-    // Get sample object
     const sample = getSample(sampleId);
     if (!sample) {
       return res.status(404).json({ error: "not_found", message: "Sample not found" });
     }
 
-    // Get pipeline and CMDB adapter
-    const pipeline = await storage.getPipeline(req.params.pipelineId);
-    if (!pipeline) {
-      return res.status(404).json({ error: "not_found", message: "Pipeline not found" });
-    }
+    // Use org-scoped CMDB adapter
+    const adapter = await getCmdbAdapter(pipeline.cmdbAccountId, req.orgId);
 
-    const adapter = await getCmdbAdapter(pipeline.cmdbAccountId);
-
-    // Apply transformation rules
     const rules = mapping.rules as any;
     if (!rules || !rules.fields) {
       return res.status(400).json({ 
@@ -161,8 +171,6 @@ router.post("/:pipelineId/mappings/:mapId/test", async (req: AuthRequest, res: R
     }
 
     const transformed = rulesEngine.transformObject(sample.normalized, rules);
-
-    // Validate transformed object
     const validation = adapter.validate(mapping.targetType, transformed);
 
     res.json({
@@ -173,10 +181,7 @@ router.post("/:pipelineId/mappings/:mapId/test", async (req: AuthRequest, res: R
     });
   } catch (error: any) {
     if (error.message.includes("not implemented")) {
-      return res.status(422).json({ 
-        error: "transform_error", 
-        message: error.message 
-      });
+      return res.status(422).json({ error: "transform_error", message: error.message });
     }
     res.status(500).json({ error: "internal", message: error.message });
   }

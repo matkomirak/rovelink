@@ -1,0 +1,1083 @@
+NetBoxBridge / Rovelink — Open Tasks for Replit After Review of Version 12
+================================================================================
+
+Review date: 2026-05-15
+Reviewed package: NetBoxBridge (12).zip
+
+Summary
+-------
+
+The latest update fixed several previously open items:
+
+DONE:
+- package.json now includes db:seed and test scripts.
+- server/app.ts was added.
+- Docker Compose now has a default DATABASE_URL pointing to the included db service.
+- /api/cmdbs now uses req.orgId.
+- Job template launch and scheduling now set orgId on job runs.
+- Frontend route-level lazy loading/code splitting is implemented.
+- Dashboard now includes Automation GATE readiness cards.
+- TypeScript check passes.
+- Production build passes.
+- Main bundle size is much better than before.
+
+Still open:
+1. npm test still fails.
+2. Auth tests still depend on a database connection and return 401 for valid synthetic JWTs.
+3. Tenant isolation is still incomplete in pipeline, provider discovery, job run, notification, and pipeline mapping flows.
+4. Local Ansible runner still executes raw template.playbook instead of a resolved safe project-root path.
+5. Dependency audit still reports high-severity production vulnerabilities.
+6. Project sync is still demo/mock only.
+7. server/routes.ts is still very large.
+8. Production docs overstate readiness while tests and audit still fail.
+
+
+Validation Results
+------------------
+
+These commands were run.
+
+TypeScript:
+
+    npm run check
+
+Result:
+
+    PASS
+
+Build:
+
+    npm run build
+
+Result:
+
+    PASS
+
+Notes:
+- Frontend code splitting is now working.
+- Main JS bundle is around 421 kB.
+- The previous large bundle warning is no longer the main issue.
+- The logo asset is large at about 3.4 MB and should eventually be optimized, but this is not a production blocker.
+
+Tests without DATABASE_URL:
+
+    npm test
+
+Result:
+
+    FAIL
+
+Failure:
+
+    Error: DATABASE_URL must be set. Did you forget to provision a database?
+
+Tests with a dummy DATABASE_URL:
+
+    DATABASE_URL='postgres://u:p@localhost:5432/db' npm test
+
+Result:
+
+    FAIL
+
+Summary:
+- 53 tests total
+- 45 pass
+- 8 fail
+
+Main failure:
+- Authenticated requests using synthetic JWTs return 401 instead of the expected 200/403.
+- Cause: authMiddleware verifies the JWT, then calls storage.getUser(decoded.userId). If the database is unavailable, the DB lookup throws and the catch block treats the whole request as an invalid token.
+
+Audit:
+
+    npm audit --omit=dev
+
+Result:
+
+    19 production vulnerabilities
+    3 low
+    7 moderate
+    9 high
+    0 critical
+
+High-severity packages include:
+- axios
+- drizzle-orm
+- express
+- glob
+- jws
+- lodash
+- minimatch
+- path-to-regexp
+- picomatch
+
+
+Task 1 — Fix Auth Test Harness and DB Dependency
+------------------------------------------------
+
+Problem:
+
+tests/authz.test.ts now uses supertest, which is good. However, registerRoutes imports server/db.ts, and server/db.ts throws if DATABASE_URL is missing. Even when DATABASE_URL is set to a dummy value, authMiddleware tries to query the database during JWT authentication.
+
+Current authMiddleware behavior:
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.userId;
+    const dbUser = await storage.getUser(decoded.userId);
+    req.user = dbUser ?? decodedFallbackUser;
+    req.orgId = dbUser?.orgId ?? decoded.orgId;
+    next();
+
+Because storage.getUser can throw when the database is unavailable, tests with valid JWTs return 401.
+
+Required fix:
+
+Separate JWT validation errors from database lookup errors.
+
+The middleware should:
+1. Verify the token.
+2. Set fallback user data from JWT claims immediately.
+3. Try to load the DB user.
+4. If the DB lookup fails in test mode, continue with JWT claims.
+5. In production, either fail safely or log the DB lookup error separately.
+
+Recommended implementation:
+
+    async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+      let token: string | undefined;
+
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        token = authHeader.substring(7);
+      } else if (req.cookies?.auth_token) {
+        token = req.cookies.auth_token;
+      }
+
+      if (!token) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      let decoded: {
+        userId: string;
+        role?: string;
+        username?: string;
+        orgId?: string;
+      };
+
+      try {
+        decoded = jwt.verify(token, JWT_SECRET) as any;
+      } catch {
+        return res.status(401).json({ message: "Invalid token" });
+      }
+
+      req.userId = decoded.userId;
+      req.user = decoded.role
+        ? {
+            id: decoded.userId,
+            username: decoded.username ?? "",
+            role: decoded.role,
+            orgId: decoded.orgId ?? null
+          }
+        : undefined;
+      req.orgId = decoded.orgId ?? undefined;
+
+      try {
+        const dbUser = await storage.getUser(decoded.userId);
+        if (dbUser) {
+          req.user = dbUser;
+          req.orgId = dbUser.orgId ?? undefined;
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV !== "test") {
+          console.error("User lookup failed during auth", error);
+        }
+      }
+
+      if (!req.user) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      next();
+    }
+
+Also update package scripts so tests run with NODE_ENV=test:
+
+    "test": "NODE_ENV=test tsx --test tests/*.test.ts",
+    "test:authz": "NODE_ENV=test tsx --test tests/authz.test.ts"
+
+If cross-platform Windows compatibility is needed, use cross-env:
+
+    "test": "cross-env NODE_ENV=test tsx --test tests/*.test.ts"
+
+Acceptance criteria:
+
+- npm test does not fail because DATABASE_URL is missing.
+- Auth tests do not require a real database connection.
+- Valid synthetic JWTs with role/orgId claims are accepted in tests.
+- Invalid JWTs still return 401.
+- Unauthenticated requests still return 401.
+- Viewer requests to admin/operator endpoints return 403, not 401.
+- npm test passes.
+
+
+Task 2 — Make server/db.ts Test-Friendly
+----------------------------------------
+
+Problem:
+
+server/db.ts throws immediately if DATABASE_URL is not set. This prevents route/auth tests from importing registerRoutes without a real database.
+
+Current behavior:
+
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL must be set...");
+    }
+
+Required fix:
+
+Avoid hard failure during unit/integration tests that do not need a real DB.
+
+Option A — provide a test database URL in the test command:
+
+    "test": "cross-env NODE_ENV=test DATABASE_URL=postgres://test:test@localhost:5432/test tsx --test tests/*.test.ts"
+
+This is not enough by itself if the code tries to connect.
+
+Option B — isolate DB-dependent routes or mock storage in tests.
+
+Option C — refactor createApp/registerRoutes to accept dependencies.
+
+Recommended approach:
+
+Refactor registerRoutes to accept optional dependencies:
+
+    export interface RouteDeps {
+      storage?: typeof storage;
+      db?: typeof db;
+    }
+
+    export async function registerRoutes(app: Express, deps: RouteDeps = {}): Promise<Server> {
+      const routeStorage = deps.storage ?? storage;
+      const routeDb = deps.db ?? db;
+      ...
+    }
+
+Then authz tests can pass a mock storage object:
+
+    const mockStorage = {
+      getUser: async (id: string) => undefined,
+      ...
+    };
+
+    server = await registerRoutes(app, { storage: mockStorage as any });
+
+Acceptance criteria:
+
+- Tests can run without a live PostgreSQL database.
+- Auth/role tests use mocked storage where DB data is not the thing under test.
+- Database health tests are separate and can be skipped unless DATABASE_URL points to a real database.
+
+
+Task 3 — Finish Tenant Isolation in Pipeline Routes
+---------------------------------------------------
+
+Problem:
+
+server/routes/pipelines.ts still does not use req.orgId for important operations.
+
+Unsafe examples:
+
+    const pipelines = await storage.getPipelines();
+
+    const provider = await storage.getProvider(data.providerAccountId);
+
+    const cmdb = await storage.getCmdbAccount(data.cmdbAccountId);
+
+    const pipeline = await storage.getPipeline(req.params.id);
+
+    const pipeline = await storage.updatePipeline(req.params.id, req.body);
+
+    await storage.deletePipeline(req.params.id);
+
+    const providerAccount = await storage.getProvider(pipeline.providerAccountId);
+
+    const cmdbAdapter = await getCmdbAdapter(pipeline.cmdbAccountId);
+
+Required fix:
+
+Add orgId to AuthRequest:
+
+    interface AuthRequest extends Request {
+      userId?: string;
+      orgId?: string;
+      user?: any;
+    }
+
+Use req.orgId everywhere.
+
+Examples:
+
+    const pipelines = await storage.getPipelines(req.orgId);
+
+    const provider = await storage.getProvider(data.providerAccountId, req.orgId);
+
+    const cmdb = await storage.getCmdbAccount(data.cmdbAccountId, req.orgId);
+
+    const pipeline = await storage.getPipeline(req.params.id, req.orgId);
+
+    const pipeline = await storage.updatePipeline(req.params.id, req.body, req.orgId);
+
+    await storage.deletePipeline(req.params.id, req.orgId);
+
+Also set orgId during create:
+
+    const pipeline = await storage.createPipeline({
+      ...data,
+      orgId: req.orgId,
+      createdBy: req.userId
+    });
+
+Do not trust orgId from req.body.
+
+Update getCmdbAdapter to be tenant-aware:
+
+    async function getCmdbAdapter(cmdbAccountId: string, orgId: string) {
+      const cmdb = await storage.getCmdbAccount(cmdbAccountId, orgId);
+      ...
+    }
+
+Acceptance criteria:
+
+- /api/pipelines only lists current organization pipelines.
+- Creating a pipeline cannot reference a provider or CMDB from another organization.
+- Reading/updating/deleting a pipeline requires matching orgId.
+- Pipeline dry-run and sync cannot use provider/CMDB accounts from another organization.
+- Add tests for cross-tenant pipeline access.
+
+
+Task 4 — Finish Tenant Isolation in Pipeline Mapping Routes
+-----------------------------------------------------------
+
+Problem:
+
+server/routes/pipeline-mappings.ts still checks pipeline/mapping IDs but does not verify that the parent pipeline belongs to req.orgId.
+
+Unsafe examples:
+
+    const pipeline = await storage.getPipeline(req.params.pipelineId);
+
+    const mappings = await storage.getPipelineMappings(req.params.pipelineId);
+
+    const mapping = await storage.getPipelineMapping(req.params.mapId);
+
+    const updated = await storage.updatePipelineMapping(req.params.mapId, req.body);
+
+    await storage.deletePipelineMapping(req.params.mapId);
+
+Required fix:
+
+Always load the parent pipeline with orgId first:
+
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    if (!pipeline) {
+      return res.status(404).json({ error: "not_found" });
+    }
+
+Only then operate on mappings belonging to that pipeline.
+
+For single mapping operations:
+
+    const mapping = await storage.getPipelineMapping(req.params.mapId);
+    if (!mapping || mapping.pipelineId !== pipeline.id) {
+      return res.status(404).json({ error: "not_found" });
+    }
+
+Better storage-layer improvement:
+
+Add tenant-aware mapping methods that join through pipeline:
+
+    getPipelineMapping(mapId: string, pipelineId: string, orgId: string)
+    updatePipelineMapping(mapId: string, pipelineId: string, orgId: string, data)
+    deletePipelineMapping(mapId: string, pipelineId: string, orgId: string)
+
+Acceptance criteria:
+
+- A user cannot list mappings for another organization's pipeline.
+- A user cannot create a mapping under another organization's pipeline.
+- A user cannot edit/delete/test another organization's mapping.
+- Mapping test cannot access another organization's CMDB adapter.
+- Add cross-tenant mapping tests.
+
+
+Task 5 — Fix Provider Discovery Tenant Isolation
+------------------------------------------------
+
+Problem:
+
+server/routes/provider-discovery.ts is mounted behind auth, but it calls:
+
+    storage.getProvider(req.params.id)
+
+without orgId.
+
+Required fix:
+
+Add orgId to AuthRequest:
+
+    interface AuthRequest extends Request {
+      userId?: string;
+      orgId?: string;
+      user?: any;
+    }
+
+Use:
+
+    const provider = await storage.getProvider(req.params.id, req.orgId);
+
+Acceptance criteria:
+
+- A user cannot call /api/providers/:id/object-types for another organization's provider.
+- A user cannot call /api/providers/:id/samples for another organization's provider.
+- Cross-tenant tests cover both endpoints.
+
+
+Task 6 — Fix Job Run Access and Updates with orgId
+--------------------------------------------------
+
+Problem:
+
+Job run creation now sets orgId, which is good. But single-run read/update routes still use ID only.
+
+Unsafe examples:
+
+    const run = await storage.getJobRun(req.params.id);
+
+    await storage.updateJobRun(req.params.id, { archived: true });
+
+    await storage.updateJobRun(req.params.id, { archived: false });
+
+Storage methods are also ID-only:
+
+    async getJobRun(id: string)
+    async updateJobRun(id: string, data: Partial<JobRun>)
+
+Required fix:
+
+Make storage methods tenant-aware:
+
+    async getJobRun(id: string, orgId: string)
+
+    async updateJobRun(id: string, data: Partial<JobRun>, orgId: string)
+
+Implementation:
+
+    const [run] = await db
+      .select()
+      .from(jobRuns)
+      .where(and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)));
+
+    const [updated] = await db
+      .update(jobRuns)
+      .set(data)
+      .where(and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)))
+      .returning();
+
+Update all routes:
+
+    const run = await storage.getJobRun(req.params.id, req.orgId);
+
+    await storage.updateJobRun(req.params.id, { archived: true }, req.orgId);
+
+Internal async execution can use run.orgId:
+
+    await storage.updateJobRun(run.id, {...}, run.orgId);
+
+Acceptance criteria:
+
+- A user cannot view another organization's job run.
+- A user cannot archive/unarchive another organization's job run.
+- Background job status updates preserve org safety.
+- Reports only include runs from the current org.
+
+
+Task 7 — Fix Pipeline Run Tenant Isolation
+------------------------------------------
+
+Problem:
+
+Pipeline runs are accessed by pipelineId/runId, but storage methods are not tenant-aware.
+
+Unsafe examples:
+
+    storage.getPipelineRuns(pipeline.id, 1)
+    storage.getPipelineRun(req.params.runId)
+    storage.updatePipelineRun(run.id, ...)
+
+Required fix:
+
+Because pipelineRuns may not have orgId directly, enforce tenant ownership through the parent pipeline.
+
+Recommended storage methods:
+
+    getPipelineRuns(pipelineId: string, orgId: string, limit?: number)
+    getPipelineRun(runId: string, pipelineId: string, orgId: string)
+    updatePipelineRun(runId: string, pipelineId: string, orgId: string, data)
+
+Implementation should either:
+- Join pipelineRuns to pipelines and filter pipelines.orgId, or
+- First load pipeline by pipelineId + orgId, then operate on runs belonging to that pipeline.
+
+Acceptance criteria:
+
+- A user cannot list pipeline runs for another organization's pipeline.
+- A user cannot read/export another organization's pipeline run.
+- A user cannot update another organization's pipeline run indirectly.
+
+
+Task 8 — Use resolveSafePlaybookPath Before Local Ansible Execution
+-------------------------------------------------------------------
+
+Problem:
+
+server/services/runner-dispatcher.ts still only validates the playbook string:
+
+    validatePlaybookPathSyntax(template.playbook);
+
+Then it executes the raw path:
+
+    playbookPath: template.playbook,
+    inventoryPath: "inventory/netbox.yml"
+
+This is still not safe enough.
+
+Required fix:
+
+Use resolveSafePlaybookPath with the project checkout path.
+
+Implementation outline:
+
+1. Load the template with org scoping.
+2. Load the project with org scoping.
+3. Resolve the playbook path against project.checkoutPath.
+4. Generate or locate a controlled inventory file for the run.
+5. Pass only safe resolved paths to LocalRunner.
+
+Example:
+
+    const project = await storage.getProject(template.projectId, run.orgId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const safePlaybookPath = await resolveSafePlaybookPath(
+      project.checkoutPath,
+      template.playbook
+    );
+
+    const safeInventoryPath = await createInventoryForRun({
+      orgId: run.orgId,
+      runId: run.id,
+      templateId: template.id
+    });
+
+    const result = await runner.execute({
+      playbookPath: safePlaybookPath,
+      inventoryPath: safeInventoryPath,
+      limitExpr: run.limitExpr ?? undefined,
+      extraVars: template.extraVars ?? {},
+      checkMode: template.checkMode ?? false,
+      diffMode: template.diffMode ?? false
+    }, onLog);
+
+Do not pass raw template.playbook directly to LocalRunner.
+
+Do not hardcode:
+
+    inventory/netbox.yml
+
+Use a controlled runtime path:
+
+    runtime/inventories/<orgId>/<runId>/inventory.yml
+
+Acceptance criteria:
+
+- Raw template.playbook is never passed directly to LocalRunner.
+- Absolute playbook paths are rejected.
+- ../ traversal is rejected.
+- Symlink escapes are rejected.
+- Missing playbooks are rejected.
+- Only .yml/.yaml playbooks inside project.checkoutPath are allowed.
+- Inventory path is generated by the server, not accepted from the client.
+- Add tests for resolveSafePlaybookPath, not only validatePlaybookPathSyntax.
+
+
+Task 9 — Fix Dispatcher Tenant Scope
+------------------------------------
+
+Problem:
+
+dispatchRun currently loads the template directly from db by template ID only:
+
+    const template = await db.query.jobTemplates.findFirst({
+      where: eq(jobTemplates.id, run.templateId),
+    });
+
+This bypasses storage tenant protections.
+
+Required fix:
+
+Use run.orgId and tenant-aware storage:
+
+    const template = await storage.getJobTemplate(run.templateId, run.orgId);
+
+If run.orgId is missing, fail closed:
+
+    if (!run.orgId) {
+      throw new Error("Job run is missing orgId");
+    }
+
+Acceptance criteria:
+
+- dispatchRun cannot accidentally load a template from another organization.
+- Local and AWX execution both use the job run's orgId.
+
+
+Task 10 — Fix AWX Settings Scope or Explicitly Mark Global Settings
+-------------------------------------------------------------------
+
+Problem:
+
+settings appear global:
+
+    const rows = await db.select().from(settings);
+
+If the product is multi-tenant, AWX configuration may need to be org-scoped. If settings are intentionally global, document this clearly and restrict settings access to platform admins.
+
+Required decision:
+
+Choose one model.
+
+Option A — org-scoped settings:
+
+- Add orgId to settings table.
+- Read settings by orgId.
+- Write settings by orgId.
+- AWX settings are per organization.
+
+Option B — global settings:
+
+- Rename UI/docs to "Global Settings".
+- Only platform admins can modify them.
+- Organization admins should not be able to alter global AWX configuration unless they are platform admins.
+
+Acceptance criteria:
+
+- Settings scope is explicit.
+- AWX token cannot be overwritten by an unrelated tenant admin.
+- Tests cover the selected model.
+
+
+Task 11 — Fix Notification Tenant Isolation
+-------------------------------------------
+
+Problem:
+
+Notification update/delete routes use ID-only methods:
+
+    storage.updateNotification(req.params.id, req.body)
+    storage.deleteNotification(req.params.id)
+
+Required fix:
+
+Make notification methods org-aware if notifications are tenant-owned:
+
+    updateNotification(id: string, orgId: string, data)
+    deleteNotification(id: string, orgId: string)
+
+Update routes:
+
+    await storage.updateNotification(req.params.id, req.orgId, req.body);
+
+    await storage.deleteNotification(req.params.id, req.orgId);
+
+Acceptance criteria:
+
+- Users cannot update/delete another organization's notifications.
+- Notification list/read/update/delete all filter by orgId.
+
+
+Task 12 — Fix Dependency Vulnerabilities
+----------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    19 production vulnerabilities
+    9 high
+    7 moderate
+    3 low
+
+High-severity packages include:
+
+- axios
+- drizzle-orm
+- express
+- glob
+- jws
+- lodash
+- minimatch
+- path-to-regexp
+- picomatch
+
+Required fix:
+
+Run:
+
+    npm audit --omit=dev
+
+Then:
+
+    npm audit fix
+
+Then validate:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+If vulnerabilities remain, manually upgrade affected direct dependencies where possible.
+
+Pay special attention to:
+- axios, because the app connects to external systems.
+- express/path-to-regexp, because these affect the HTTP API surface.
+- lodash/minimatch/glob/picomatch, because they may be reachable through tooling or file/path handling.
+- drizzle-orm, because it is core data access infrastructure.
+
+Do not use force upgrades blindly. If npm audit fix --force is needed, review breaking changes and rerun all checks.
+
+Acceptance criteria:
+
+- No high-severity production vulnerabilities remain if reasonably fixable.
+- Any remaining vulnerabilities are documented with:
+  - package
+  - severity
+  - reason it remains
+  - whether it is reachable in production
+  - planned mitigation
+- npm run check passes.
+- npm test passes.
+- npm run build passes.
+
+
+Task 13 — Replace Demo Project Sync or Label It More Clearly
+------------------------------------------------------------
+
+Problem:
+
+Project sync is still simulated:
+
+    const demoPlaybooks = ["site.yml", "deploy.yml", "rollback.yml"];
+
+Response:
+
+    "Demo sync started — playbooks discovered from simulated repository"
+
+This is honest in the API response, but product/docs should not call Git sync production-ready until real checkout exists.
+
+Required fix option A — implement real Git sync:
+
+- Store repository URL.
+- Store branch/ref.
+- Clone/pull into:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Discover .yml/.yaml playbooks from the checkout.
+- Store project.checkoutPath.
+- Do not log credentials.
+- Use credential store for private repository access.
+- Use spawn argument arrays for git commands.
+- Reject unsafe repository URLs if needed.
+
+Required fix option B — keep demo sync but label it everywhere:
+
+- UI label: "Demo Sync"
+- Docs: "Repository sync is simulated in this version"
+- PRODUCTION-READY.md should not claim real Git sync.
+- Do not imply that playbooks are discovered from a real repository.
+
+Acceptance criteria for option A:
+
+- Real repository sync works.
+- Playbooks are discovered from the checked-out repository.
+- checkoutPath is tenant-scoped.
+- resolveSafePlaybookPath uses checkoutPath.
+
+Acceptance criteria for option B:
+
+- No docs or UI claim production Git sync.
+- Users understand it is simulated/demo behavior.
+
+
+Task 14 — Continue Splitting server/routes.ts
+---------------------------------------------
+
+Problem:
+
+server/routes.ts is still too large and mixes many domains.
+
+It still contains:
+- auth
+- projects
+- credentials
+- templates
+- runs
+- settings
+- notifications
+- providers
+- CMDBs
+- housekeeping
+- NetBox inventory sources
+- organizations
+- admin endpoints
+
+Required fix:
+
+Split into modules:
+
+    server/routes/auth.ts
+    server/routes/projects.ts
+    server/routes/credentials.ts
+    server/routes/templates.ts
+    server/routes/runs.ts
+    server/routes/settings.ts
+    server/routes/notifications.ts
+    server/routes/providers.ts
+    server/routes/cmdbs.ts
+    server/routes/netbox-sources.ts
+    server/routes/housekeeping.ts
+    server/routes/organizations.ts
+    server/routes/health.ts
+
+Each module should:
+- Import authMiddleware and requireRole where needed.
+- Enforce orgId locally.
+- Have tests for its sensitive paths.
+
+Acceptance criteria:
+
+- server/routes.ts is reduced to app-level mounting.
+- Each route module clearly shows auth/role requirements.
+- Route behavior remains unchanged.
+- Tests pass after refactor.
+
+
+Task 15 — Add Cross-Tenant Tests
+--------------------------------
+
+Problem:
+
+The current tests cover basic auth behavior and secret helpers, but not enough tenant isolation.
+
+Required tests:
+
+Create:
+
+    tests/tenant-isolation.test.ts
+
+Minimum test cases:
+
+Providers:
+- Org A cannot read Org B provider detail.
+- Org A cannot test Org B provider.
+- Org A cannot sync Org B provider.
+- Org A cannot delete Org B provider.
+- Org A cannot call provider discovery endpoints for Org B provider.
+
+CMDB:
+- Org A cannot list Org B CMDBs.
+- Org A cannot test Org B CMDB.
+- Org A cannot update/delete Org B CMDB.
+
+Pipelines:
+- Org A cannot list Org B pipelines.
+- Org A cannot read/update/delete Org B pipeline.
+- Org A cannot create a pipeline using Org B provider or CMDB.
+- Org A cannot dry-run/sync Org B pipeline.
+- Org A cannot read/export Org B pipeline runs.
+
+Job templates/runs:
+- Org A cannot launch Org B template.
+- Org A cannot view/archive/unarchive Org B run.
+
+Credentials:
+- Org A cannot list/read/update/delete Org B credentials.
+
+Notifications:
+- Org A cannot update/delete Org B notification.
+
+Acceptance criteria:
+
+- Tests fail before tenant fixes.
+- Tests pass after tenant fixes.
+- Tests run through npm test.
+
+
+Task 16 — Fix Docs That Claim Production Readiness Too Early
+------------------------------------------------------------
+
+Problem:
+
+The repository contains PRODUCTION-READY.md. Current state is not production-ready because:
+- npm test fails.
+- npm audit has high vulnerabilities.
+- tenant isolation is incomplete.
+- local Ansible path resolution is incomplete.
+- project sync is simulated.
+
+Required fix:
+
+Either rename:
+
+    PRODUCTION-READY.md
+
+to:
+
+    PRODUCTION-HARDENING.md
+
+or update it with a clear status:
+
+    Current status: hardening in progress, not production-ready yet.
+
+Add a blocking checklist:
+
+- npm test passes.
+- npm audit --omit=dev has no high vulnerabilities or documented mitigations.
+- tenant isolation tests pass.
+- local runner uses resolveSafePlaybookPath.
+- pipeline routes are org-scoped.
+- provider discovery is org-scoped.
+- job run read/update is org-scoped.
+- project sync is either real or documented as demo.
+
+Acceptance criteria:
+
+- Docs do not overstate readiness.
+- Replit/user-facing docs match actual implementation state.
+
+
+Task 17 — Optimize Large Logo Asset
+-----------------------------------
+
+Problem:
+
+Build output shows:
+
+    rovelink-logo-clean-*.png: about 3.4 MB
+
+This is not a security blocker, but it is heavy for a web app.
+
+Required fix:
+
+- Compress the PNG.
+- Convert to WebP or SVG if appropriate.
+- Use responsive image sizing.
+- Avoid shipping a large original asset if a smaller one is sufficient.
+
+Acceptance criteria:
+
+- Logo asset is significantly smaller.
+- No visible quality regression in the UI.
+- Build still passes.
+
+
+Updated Product Review
+----------------------
+
+Product maturity: 7.5/10
+
+The product has improved. The Automation GATE concept is now more visible on the dashboard, and the product story is clearer:
+
+    Provider inventory + CMDB authority + gate evaluation + safe automation inventory + AWX/local execution
+
+This is the right direction.
+
+Remaining product gaps:
+
+1. Blocked asset drill-down still needs to be more direct.
+   Users should be able to click blocked counts and see exact block reasons.
+
+2. Project sync is still demo-only.
+   This limits production credibility for Ansible workflows.
+
+3. Reports and run history should explicitly show whether gated inventory was used.
+
+4. Documentation should stop claiming production readiness until security and tests are green.
+
+Product recommendation:
+
+Position the MVP as:
+
+    "A governance-first automation bridge that only executes against CMDB-approved assets."
+
+Do not position it as a full AWX replacement.
+
+
+Updated Code Review
+-------------------
+
+Code maturity: 6.8/10
+Production readiness: 5.8/10
+
+What improved:
+- Better package scripts.
+- Better frontend bundle splitting.
+- Better Docker Compose defaults.
+- Better Automation GATE dashboard.
+- Many main routes now pass req.orgId.
+- Health endpoints still good.
+- Secret redaction/encryption tests still pass.
+
+What remains risky:
+- Tenant isolation is incomplete in modular routes.
+- Tests still fail.
+- Auth middleware incorrectly turns DB lookup failures into 401.
+- Local runner path safety is not fully wired into execution.
+- dispatchRun bypasses tenant-aware storage.
+- Dependency vulnerabilities remain.
+- Settings scope is unclear in a multi-tenant product.
+
+Recommended next implementation order:
+1. Fix auth test harness and DB dependency.
+2. Fix tenant isolation in pipeline/provider-discovery/job-run/notification paths.
+3. Wire resolveSafePlaybookPath into LocalRunner execution.
+4. Fix dependency vulnerabilities.
+5. Add cross-tenant tests.
+6. Correct production-readiness docs.
+7. Decide real Git sync vs clearly demo-only sync.
+
+
+Final Acceptance Gate
+---------------------
+
+Do not call this production-ready until all of these pass:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+And the following are true:
+
+- Tenant isolation is enforced in every route.
+- Cross-tenant tests pass.
+- Auth tests do not need a real database.
+- Local Ansible execution uses resolved safe playbook paths.
+- dispatchRun uses run.orgId.
+- Provider discovery is org-scoped.
+- Pipeline and mapping routes are org-scoped.
+- Job run read/update routes are org-scoped.
+- Remaining dependency vulnerabilities are resolved or documented.
+- Project sync is either real or clearly marked as demo-only.

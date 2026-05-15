@@ -6,11 +6,21 @@ import * as schema from "@shared/schema";
 
 neonConfig.webSocketConstructor = ws;
 
-if (!process.env.DATABASE_URL) {
+const DATABASE_URL = process.env.DATABASE_URL;
+
+// In test environments, allow import without DATABASE_URL.
+// Queries will throw at runtime if they actually reach the DB — but auth/security
+// tests never call storage, so the missing connection is never triggered.
+if (!DATABASE_URL && process.env.NODE_ENV !== "test") {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?",
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle({ client: pool, schema });
+export const pool = DATABASE_URL
+  ? new Pool({ connectionString: DATABASE_URL })
+  : (null as unknown as Pool);
+
+export const db = DATABASE_URL
+  ? drizzle({ client: pool, schema })
+  : (null as unknown as ReturnType<typeof drizzle<typeof schema>>);

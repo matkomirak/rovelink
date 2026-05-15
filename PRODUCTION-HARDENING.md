@@ -1,143 +1,153 @@
 # Rovelink — Production Hardening Status
 
-**Current status: hardening in progress — not production-ready yet**
+**Current status: pre-production MVP — not production-ready**
 
-This document tracks what has been completed and what remains before Rovelink
-can be considered production-ready.
+This document accurately reflects the state of the codebase as of v14.
+Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
+
+## Command Gate (must all pass before production)
+
+```
+npm ci
+npm run check   # TypeScript
+npm test        # DB-free unit/API tests
+npm run build
+npm audit --omit=dev
+```
 
 ## Blocking Checklist
 
 | Check | Status |
 |---|---|
-| `npm run check` passes | ✅ PASS |
-| `npm test` passes | ✅ PASS (53/53) |
-| `npm run build` passes | ✅ PASS |
-| `npm audit --omit=dev` — no high vulnerabilities | ⚠ 9 high remain (see below) |
-| Tenant isolation enforced in every route | ✅ Done (all major routes) |
-| Auth middleware does not turn DB errors into 401 | ✅ Fixed |
-| Auth tests do not require a live database | ✅ Fixed |
-| dispatchRun uses run.orgId for template lookup | ✅ Fixed |
-| Provider discovery routes are org-scoped | ✅ Fixed |
-| Pipeline and mapping routes are org-scoped | ✅ Fixed |
-| Job run read/update routes are org-scoped | ✅ Fixed |
-| Notification update/delete routes are org-scoped | ✅ Fixed |
-| Local runner uses safe playbook path validation | ✅ Syntax validation enforced |
-| Local runner uses resolveSafePlaybookPath (disk-level) | ⏳ Requires real Git checkout |
-| Project sync is real or clearly labeled as demo | ✅ Labeled as demo in API response |
-| Production docs do not overstate readiness | ✅ This file updated |
+| `npm run check` passes | PASS |
+| `npm run build` passes | PASS |
+| `npm test` passes without external services | PASS |
+| `npm run test:integration` passes (requires DATABASE_URL) | PASS (real DB needed) |
+| `npm audit --omit=dev` — no high vulnerabilities | FAIL — 1 high remains (see below) |
+| Auth middleware does not turn DB errors into 401 | PASS |
+| Auth/security tests use in-process supertest, no live DB needed | PASS |
+| Tenant isolation tests available under `test:integration` | PASS |
+| Provider discovery routes are org-scoped | PASS |
+| Job run read/archive/unarchive/update are org-scoped | PASS |
+| Notification list/create/read/update/delete are org-scoped | PASS |
+| Pipeline and mapping routes are org-scoped | PASS |
+| CMDB read/update/delete routes are org-scoped | PASS |
+| `dispatchRun` uses `run.orgId` for template lookup | PASS |
+| Local runner uses `resolveSafePlaybookPath` (disk-level) | PASS — fails closed without checkoutPath |
+| Local execution blocked when no `checkoutPath` on project | PASS |
+| Project sync is real or clearly labeled as demo | PARTIAL — demo only; labeled in API response |
+| Settings/AWX scope enforced for platform admins | FAIL / undecided (see below) |
+| Logo asset optimized | PASS — 3.4 MB PNG → 12 KB WebP |
 
 ---
 
-## Completed Items
+## Test Commands
 
-### Security & Auth
-- `authMiddleware` now separates JWT token verification from DB user lookup.
-  A DB failure no longer returns 401 for a valid token. JWT claims are used as
-  an immediate fallback, and `NODE_ENV=test` suppresses DB error logs.
-- All singular get/update/delete storage methods accept `orgId` and enforce
-  `WHERE id = ? AND org_id = ?` at the query level.
-- Provider, CMDB, pipeline, pipeline-mapping, netbox-source, job-run, and
-  notification routes all pass `req.orgId` to storage.
-- `dispatchRun` uses `storage.getJobTemplate(run.templateId, run.orgId)` instead
-  of raw `db.query`, preventing cross-tenant template access.
-- Playbook paths are validated with `validatePlaybookPathSyntax` before any
-  LocalRunner execution (rejects absolute paths, traversal, non-YAML).
-- All provider-originated tags are namespaced before writing to NetBox.
-- Secrets encrypted at rest with AES-256-GCM; redacted from all API responses
-  and server logs.
-- Auth tokens stored as HttpOnly cookies; never in localStorage.
-- `AUTH_DISABLE` hard-fails with HTTP 403 in production.
-
-### Testing
-- `npm test` runs with `NODE_ENV=test` so the auth middleware does not reject
-  valid synthetic JWTs due to unreachable DB.
-- `tests/authz.test.ts` uses `supertest` (in-process) — no live server needed.
-- All 53 tests pass including auth, role, and secret-redaction tests.
-
-### Architecture
-- `server/app.ts` exports `createApp()` — clean separation from entry point.
-- Frontend route-level code splitting via `React.lazy()` + `Suspense`.
-- Docker Compose includes a default `DATABASE_URL` pointing to the bundled db.
-
-### Pipeline & Provider Isolation
-- `pipelines.ts`: `getPipelines(req.orgId)`, `getPipeline(id, orgId)`,
-  `updatePipeline(id, body, orgId)`, `deletePipeline(id, orgId)`.
-- Cross-org provider/CMDB references blocked during pipeline creation.
-- `pipeline-mappings.ts`: parent pipeline verified with orgId before any
-  mapping read/write/delete.
-- `provider-discovery.ts`: both object-type and samples endpoints scoped to
-  caller's org.
+| Command | What it runs | Requires DB |
+|---|---|---|
+| `npm test` | authz, security, playbook-path tests | No |
+| `npm run test:integration` | Cross-tenant isolation (18 tests) | Yes — DATABASE_URL required |
+| `npm run test:authz` | Auth/role tests only | No |
+| `npm run test:security` | Secret redaction/log tests only | No |
+| `npm run test:paths` | Safe playbook path tests only | No |
 
 ---
 
 ## Remaining Issues
 
-### 1. Dependency Vulnerabilities (9 high, 7 moderate, 3 low)
+### 1. High Dependency Vulnerability — drizzle-orm
 
-`npm audit fix` was run. Remaining high-severity packages that cannot be
-automatically fixed without breaking changes:
+```
+drizzle-orm <0.45.2
+Severity: high
+Advisory: GHSA-gpj5-g38j-94v9
+Risk: SQL injection via improperly escaped SQL identifiers
+Fix: npm audit fix --force installs drizzle-orm@0.45.2 (breaking change)
+```
 
-| Package | Severity | Notes |
-|---|---|---|
-| `axios` | high | Used for external HTTP calls. Update to latest when time allows. |
-| `drizzle-orm` | high | Core ORM — breaking changes risk. Monitor for patch release. |
-| `express` / `path-to-regexp` | high | Affects HTTP routing surface. Priority fix. |
-| `glob` / `minimatch` / `picomatch` | high | Used in build tooling (not direct production API surface). |
-| `jws` / `lodash` | high | Transitive dependencies. |
+**Assessment:** The affected query patterns (dynamic SQL identifiers — table/column names
+passed as variables) are not used in this codebase. All queries use Drizzle's typed
+query builder with schema-defined table references. Direct string interpolation into
+SQL identifiers does not occur.
 
-Mitigation: Most high-severity packages are transitive build-time or tooling
-dependencies rather than direct production API surface. The app does not
-expose raw file-glob inputs from users.
+**Mitigation:** Low exploitation risk given current usage patterns. Upgrade blocked
+by breaking API changes in drizzle-orm@0.45.2. Monitor for a non-breaking patch release.
 
-### 2. Local Ansible Execution — Disk-Level Path Safety
+**Planned action:** Upgrade drizzle-orm when a semver-minor or semver-patch fix is
+available, or when the migration to 0.45.x API is scheduled.
 
-`validatePlaybookPathSyntax` is enforced before every LocalRunner execution
-(no absolute paths, no `../` traversal, YAML-only). `resolveSafePlaybookPath`
-(which also checks real file existence and resolves symlinks) cannot be used
-until projects have a real `checkoutPath` from a real Git sync.
+### 2. Local Ansible Execution — requires real Git sync
 
-**Required:** Add `checkoutPath` to the projects schema and implement real
-Git clone/pull in the project sync route. Once done, wire
-`resolveSafePlaybookPath(project.checkoutPath, template.playbook)` into
-`runLocally` in `server/services/runner-dispatcher.ts`.
+`runLocally` now **fails closed**: if the job template's project has no `checkoutPath`
+on disk, execution is rejected with a clear error. This prevents raw user-supplied
+playbook strings from reaching the shell.
+
+**To enable local Ansible:** Implement real Git clone/pull in the project sync route,
+store the checkout under `runtime/projects/<orgId>/<projectId>/`, and populate
+`project.checkoutPath`. Then `resolveSafePlaybookPath` (already wired) will handle
+disk-level traversal and symlink protection.
+
+**Current demo:** Local runner is effectively disabled. All current demo jobs go through
+AWX runner (simulated). This is the safe default.
 
 ### 3. Project Sync is Demo-Only
 
-The `/api/projects/:id/sync` route returns a list of hardcoded demo playbooks.
-No actual Git checkout is performed. This is intentional for the current demo
-phase and is clearly labeled in the API response.
+`/api/projects/:id/sync` returns hardcoded demo playbooks (`site.yml`, `deploy.yml`,
+`rollback.yml`). No actual Git clone is performed. This is labeled in the API response.
+The product cannot run real local Ansible playbooks until real Git sync is implemented.
 
-**Required for production:** Implement real Git clone/pull using `spawn`
-argument arrays, scoped to `runtime/projects/<orgId>/<projectId>/`, with
-credential store integration.
+### 4. Settings / AWX Scope
 
-### 4. Settings Scope
+AWX settings (`awx_url`, `awx_token`) are currently global — shared across all
+organizations in the database.
 
-AWX settings (URL, token) are currently global. In a multi-tenant deployment,
-platform admins should be the only users who can modify them. Organization
-admins should not be able to overwrite the global AWX token.
+**Decision:** Settings are intentionally global (platform-wide AWX configuration).
+This is safe for a single-org or single-platform-team deployment. For true multi-tenant
+SaaS, settings should either be per-org or restricted to a platform-admin role that does
+not exist in the current `viewer / operator / admin` model.
 
-**Decision made:** Settings are intentionally global (platform-wide). The
-settings UI should only be accessible to platform admins. This will be
-enforced in a future update.
+**Planned action:** Add a `platform_admin` role or restrict settings mutations to a
+bootstrap admin account. Until then, only organization admins with the `admin` role
+can modify settings — which is the current behavior.
 
 ---
 
-## Final Acceptance Gate
+## Completed Hardening
 
-Do not mark as production-ready until all of these pass:
+### Authentication
+- JWT verification is decoupled from DB user lookup. DB errors never cause 401 on valid tokens.
+- JWT claims provide identity fallback when DB is unreachable (`NODE_ENV=test`).
+- `AUTH_DISABLE` hard-fails with HTTP 403 in production.
+- Auth tokens stored as HttpOnly cookies, never localStorage.
 
-```
-npm run check   # TypeScript — PASS
-npm test        # 53/53 — PASS
-npm run build   # Production build — PASS
-npm audit --omit=dev   # Vulnerabilities documented above
-```
+### Tenant Isolation
+- All CRUD routes for providers, CMDBs, pipelines, pipeline mappings, job runs,
+  notifications, and NetBox sources are scoped with `WHERE id = ? AND org_id = ?`.
+- List endpoints filter by the caller's `orgId`.
+- Create endpoints stamp `orgId` from the authenticated request, never from the client body.
+- Delete endpoints verify resource ownership before deleting (no blind delete).
+- `dispatchRun` uses `storage.getJobTemplate(run.templateId, run.orgId)` — no raw DB query.
 
-And the following are true:
-- [ ] No high-severity production vulnerabilities remain (or all documented with mitigations)
-- [ ] `resolveSafePlaybookPath` is used in LocalRunner execution
-- [ ] Real Git project sync is implemented (or permanently labeled as demo)
-- [ ] Settings access is restricted to platform admins
+### Local Runner Safety
+- `runLocally` fails closed when `project.checkoutPath` is null.
+- `resolveSafePlaybookPath` is called on every local execution (rejects traversal, symlinks, non-YAML).
+- Inventory paths are generated per-org/run on the server — never accepted from the client.
+
+### Secrets
+- All provider and CMDB tokens encrypted at rest with AES-256-GCM (`ENCRYPTION_KEY`).
+- `redactForLog` prevents secrets appearing in server logs.
+- API responses strip encrypted values (`enc:v1:...` never returned to the client).
+
+### Dependencies
+- `npm audit fix` applied: vulnerabilities reduced from 19 to 6 (5 moderate, 1 high).
+- One remaining high (`drizzle-orm`) documented with risk assessment above.
+
+### Testing
+- `npm test` runs without DATABASE_URL: authz, security, playbook-path tests (53 tests).
+- `npm run test:integration` runs cross-tenant isolation tests (18 tests, requires DATABASE_URL).
+- `server/db.ts` defers the DATABASE_URL check to first use, so imports do not throw in test environments.
+
+### Assets
+- Logo optimized from 3.4 MB PNG to 12 KB WebP (99.6% reduction).

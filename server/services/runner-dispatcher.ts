@@ -85,15 +85,31 @@ async function runLocally(
   template: any,
   onLog: (line: string) => void
 ): Promise<RunResult> {
-  // Attempt to resolve a disk-safe playbook path when the project has been checked out.
-  // Fall back to syntax-only validation when no real checkout exists (demo/simulation mode).
-  let resolvedPlaybookPath: string = template.playbook;
+  // Fail closed: local execution requires a real project checkout on disk.
+  // Without checkoutPath, we cannot safely resolve playbook paths (no traversal
+  // protection, no symlink guard, no existence check). Demo/simulation runs must
+  // use runnerMode="awx" pointing at AWX, not LocalRunner.
+  if (!template.projectId) {
+    throw new Error(
+      "Local execution requires a project to be set on the job template."
+    );
+  }
 
-  // resolveSafePlaybookPath requires project.checkoutPath (added when real Git sync is implemented).
-  // Until then, validatePlaybookPathSyntax enforces syntax-level safety on all paths.
-  validatePlaybookPathSyntax(template.playbook);
+  const project = await storage.getProject(template.projectId, run.orgId ?? null);
+  if (!project?.checkoutPath) {
+    throw new Error(
+      `Project ${template.projectId} has no checkoutPath on disk. ` +
+      "Real Git sync must be implemented before local Ansible execution is enabled."
+    );
+  }
 
-  // Generate a per-org/run inventory path — never accept a path from the client
+  // Disk-level path safety: rejects traversal, symlinks outside root, and non-YAML files.
+  const resolvedPlaybookPath = await resolveSafePlaybookPath(
+    project.checkoutPath,
+    template.playbook
+  );
+
+  // Generate a per-org/run inventory path — never accept a path from the client.
   const inventoryPath = run.orgId
     ? `runtime/inventories/${run.orgId}/${run.id}/inventory.yml`
     : `runtime/inventories/default/${run.id}/inventory.yml`;

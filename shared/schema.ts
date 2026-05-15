@@ -38,6 +38,8 @@ export const projects = pgTable("projects", {
   playbooks: jsonb("playbooks").default([]), // Array of discovered playbook paths
   syncStatus: text("sync_status").default("pending"), // pending, syncing, success, error
   syncError: text("sync_error"),
+  // Set by real Git sync; null means demo/simulation mode only
+  checkoutPath: text("checkout_path"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

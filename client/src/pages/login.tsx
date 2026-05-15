@@ -1,4 +1,4 @@
-import rovelinkLogo from "@assets/rovelink-logo-clean.png";
+import rovelinkLogo from "@assets/rovelink-logo-clean.webp";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";

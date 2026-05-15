@@ -1,4 +1,4 @@
-import rovelinkLogo from "@assets/rovelink-logo-clean.png";
+import rovelinkLogo from "@assets/rovelink-logo-clean.webp";
 import {
   Calendar,
   Settings,

@@ -1,0 +1,517 @@
+NetBoxBridge / Rovelink — Version 13 Review and Remaining Replit Tasks
+================================================================================
+
+Reviewed package: NetBoxBridge (13).zip
+Review date: 2026-05-15
+
+Summary
+-------
+
+Version 13 is a clear improvement over version 12.
+
+Fixed or improved:
+- npm install / npm ci works.
+- npm run check passes after dependencies are installed.
+- npm run build passes.
+- Dependency audit improved significantly: now only 1 high production vulnerability remains.
+- Auth middleware now separates JWT verification from DB user lookup.
+- Authz tests use supertest / in-process server.
+- Provider discovery routes are now org-scoped.
+- Job run read/archive/unarchive routes are now org-scoped.
+- Notification read/update/delete routes are now org-scoped.
+- dispatchRun now uses run.orgId for job template lookup.
+- PRODUCTION-READY.md was replaced by PRODUCTION-HARDENING.md.
+- Project sync is labeled as demo in the API response.
+
+Still open:
+1. npm test still fails without DATABASE_URL.
+2. Tenant-isolation tests still require a real database and fail with a dummy DB URL.
+3. PRODUCTION-HARDENING.md contains stale/inaccurate status claims.
+4. Local Ansible execution still does not use resolveSafePlaybookPath.
+5. Project sync is still demo-only.
+6. Settings/AWX scope is still unresolved in code.
+7. One high production dependency vulnerability remains: drizzle-orm.
+8. server/routes.ts is still very large.
+9. Large logo asset remains around 3.4 MB.
+
+
+Validation Results
+------------------
+
+Dependency install:
+
+    npm ci
+
+Result:
+
+    PASS
+
+Audit after npm ci:
+
+    6 vulnerabilities
+    5 moderate
+    1 high
+
+TypeScript:
+
+    npm run check
+
+Result:
+
+    PASS
+
+Build:
+
+    npm run build
+
+Result:
+
+    PASS
+
+Notes:
+- Build succeeds.
+- Frontend code splitting is working.
+- Main bundle remains around 421 kB, which is acceptable compared with earlier versions.
+- The logo asset is still large: about 3.4 MB.
+
+Tests without DATABASE_URL:
+
+    npm test
+
+Result:
+
+    FAIL
+
+Failure:
+
+    Error: DATABASE_URL must be set. Did you forget to provision a database?
+
+Tests with dummy DATABASE_URL:
+
+    DATABASE_URL='postgres://u:p@localhost:5432/db' npm test
+
+Result:
+
+    FAIL
+
+Observed result:
+- Auth/role/security tests pass.
+- Tenant isolation tests fail in setup because they try to insert test organizations into a database.
+- A dummy localhost database URL is not enough because no PostgreSQL database is actually running.
+
+Production audit:
+
+    npm audit --omit=dev
+
+Result:
+
+    1 high vulnerability
+
+Remaining high vulnerability:
+- drizzle-orm
+
+
+Task 1 — Make npm test Pass Without a Real Database
+---------------------------------------------------
+
+Problem:
+
+npm test still imports server/db.ts, and server/db.ts still throws when DATABASE_URL is missing:
+
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
+    }
+
+This means tests cannot run in a clean CI/Replit environment unless a real database is provisioned first.
+
+Required fix:
+
+Choose one of the following approaches.
+
+Preferred approach: dependency injection / test storage.
+
+Refactor registerRoutes so tests can pass mock dependencies and avoid importing or using the real db for auth/authorization tests.
+
+Example target design:
+
+    export interface RouteDeps {
+      storage?: typeof storage;
+      db?: typeof db;
+    }
+
+    export async function registerRoutes(app: Express, deps: RouteDeps = {}): Promise<Server> {
+      const routeStorage = deps.storage ?? storage;
+      const routeDb = deps.db ?? db;
+      ...
+    }
+
+Then tests can use:
+
+    const mockStorage = createMockStorage();
+    server = await registerRoutes(app, { storage: mockStorage as any });
+
+Alternative approach:
+
+Create a separate test setup that starts a disposable PostgreSQL database and sets DATABASE_URL before tests run.
+
+Acceptance criteria:
+
+- Running npm test in a clean environment does not immediately fail because DATABASE_URL is missing.
+- Authz tests do not require a live database.
+- Security/path tests do not require a live database.
+- DB integration tests are either isolated behind their own command or start a test DB automatically.
+
+
+Task 2 — Fix Tenant-Isolation Test Strategy
+-------------------------------------------
+
+Problem:
+
+tests/tenant-isolation.test.ts uses the real db:
+
+    import { db } from "../server/db";
+    import { organizations } from "../shared/schema";
+
+and tries to insert test organizations in a before hook.
+
+This causes tests to fail unless a real, reachable database exists.
+
+Required fix:
+
+Choose one:
+
+Option A — Make tenant-isolation tests true integration tests.
+
+Create a separate script:
+
+    "test:integration": "NODE_ENV=test tsx --test tests/tenant-isolation.test.ts"
+
+Document that this command requires DATABASE_URL and a test database.
+
+Do not include these integration tests in the default npm test unless the test DB is automatically available.
+
+Default test command should run DB-free tests:
+
+    "test": "NODE_ENV=test tsx --test tests/authz.test.ts tests/security.test.ts tests/playbook-paths.test.ts"
+
+Option B — Mock tenant isolation tests.
+
+Use mocked storage and test route behavior without a real database.
+
+Option C — Provide an automatic test DB.
+
+Use Docker Compose or a test container approach so npm test starts with a real PostgreSQL database.
+
+Acceptance criteria:
+
+- npm test passes in a clean environment.
+- Tenant isolation tests are still available.
+- If tenant isolation tests require a DB, they run under a separate documented command.
+- Test documentation clearly explains which tests are unit/API tests and which are DB integration tests.
+
+
+Task 3 — Correct PRODUCTION-HARDENING.md Status
+-----------------------------------------------
+
+Problem:
+
+PRODUCTION-HARDENING.md currently claims:
+
+    npm test passes — PASS (53/53)
+    npm audit --omit=dev — 9 high remain
+    Auth tests do not require a live database — Fixed
+
+These claims do not match the actual review results.
+
+Actual results:
+- npm test fails without DATABASE_URL.
+- npm test also fails with a dummy DATABASE_URL if no DB is running.
+- npm audit --omit=dev now shows only 1 high vulnerability.
+- Authz tests are DB-light, but tenant isolation tests still require a real DB.
+
+Required fix:
+
+Update PRODUCTION-HARDENING.md with accurate status.
+
+Suggested status table:
+
+    | Check | Status |
+    |---|---|
+    | npm run check passes | PASS |
+    | npm run build passes | PASS |
+    | npm test passes without external services | FAIL |
+    | npm audit --omit=dev has no high vulnerabilities | FAIL — 1 high remains |
+    | Authz tests use supertest | PASS |
+    | Tenant isolation tests available | PARTIAL — require real DB |
+    | Local runner uses resolveSafePlaybookPath | FAIL |
+    | Project sync is real | FAIL — demo only |
+    | Settings scope enforced for platform admins | FAIL / undecided |
+
+Acceptance criteria:
+
+- Documentation reflects actual command results.
+- No doc claims production readiness.
+- No doc claims tests pass unless npm test really passes.
+
+
+Task 4 — Wire resolveSafePlaybookPath Into Local Ansible Execution
+------------------------------------------------------------------
+
+Problem:
+
+runner-dispatcher.ts still does not use resolveSafePlaybookPath.
+
+Current behavior:
+
+    let resolvedPlaybookPath: string = template.playbook;
+    validatePlaybookPathSyntax(template.playbook);
+
+    const result = await runner.execute({
+      playbookPath: resolvedPlaybookPath,
+      inventoryPath,
+      ...
+    });
+
+This only validates the string syntax. It does not verify that the playbook exists inside a checked-out project directory, and it does not protect against symlink escapes.
+
+Required fix:
+
+Implement real project checkoutPath support or fail closed when checkoutPath is missing.
+
+Recommended production-safe behavior:
+
+    if (!template.projectId) {
+      throw new Error("Local execution requires a project");
+    }
+
+    const project = await storage.getProject(template.projectId, run.orgId);
+    if (!project?.checkoutPath) {
+      throw new Error("Local execution requires a real project checkoutPath");
+    }
+
+    const resolvedPlaybookPath = await resolveSafePlaybookPath(
+      project.checkoutPath,
+      template.playbook
+    );
+
+    const inventoryPath = await createInventoryForRun({
+      orgId: run.orgId,
+      runId: run.id,
+      templateId: template.id
+    });
+
+    await runner.execute({
+      playbookPath: resolvedPlaybookPath,
+      inventoryPath,
+      ...
+    });
+
+If demo mode must remain, make it explicit and do not allow production local execution without checkoutPath.
+
+Acceptance criteria:
+
+- LocalRunner never receives raw template.playbook in production.
+- resolveSafePlaybookPath is used before local execution.
+- Missing project checkoutPath fails safely.
+- Symlink escape tests are added.
+- Inventory path is generated in a controlled runtime directory.
+
+
+Task 5 — Implement Real Project Sync or Keep It Demo-Only Everywhere
+--------------------------------------------------------------------
+
+Problem:
+
+Project sync still uses hardcoded demo playbooks:
+
+    const demoPlaybooks = ["site.yml", "deploy.yml", "rollback.yml"];
+
+The API response labels this as demo, which is good, but the product is not production-ready for local Ansible workflows until real Git checkout exists.
+
+Required fix option A — implement real Git sync:
+
+- Add checkoutPath to project model/schema if not already present.
+- Store checkouts under:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Clone or pull repository using spawn argument arrays.
+- Discover .yml/.yaml playbooks from the checkout.
+- Store or return discovered playbooks.
+- Use credential store for private repositories.
+- Never log tokens or credentials.
+- Use checkoutPath with resolveSafePlaybookPath during execution.
+
+Required fix option B — keep demo mode:
+
+- Make UI clearly show "Demo Sync".
+- Documentation must say repository sync is simulated.
+- Local execution should be disabled in production unless a real checkoutPath exists.
+
+Acceptance criteria:
+- Either real Git sync works safely, or demo limitations are visible everywhere.
+- No production documentation implies real repository sync if it is not implemented.
+
+
+Task 6 — Resolve Remaining High Dependency Vulnerability
+--------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev reports one high vulnerability:
+
+    drizzle-orm
+
+Required fix:
+
+Run:
+
+    npm audit --omit=dev
+
+Review the drizzle-orm advisory and check whether a safe upgrade exists.
+
+Try:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit
+
+Then validate:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+If no compatible fixed version exists, document the risk in PRODUCTION-HARDENING.md:
+
+- advisory name
+- affected version
+- installed version
+- whether app usage is reachable
+- mitigation
+- planned upgrade path
+
+Acceptance criteria:
+- No high vulnerabilities remain, or the remaining one is documented accurately.
+- Documentation says 1 high remains, not 9.
+- Checks still pass after any dependency update.
+
+
+Task 7 — Enforce or Clarify Settings / AWX Scope
+------------------------------------------------
+
+Problem:
+
+AWX settings are global:
+
+    db.select().from(settings)
+
+PRODUCTION-HARDENING.md says this is intentionally global and should only be editable by platform admins in a future update.
+
+Current product role model appears to have viewer/operator/admin, but no clear platform-admin distinction.
+
+Required fix:
+
+Choose one model.
+
+Option A — org-scoped settings:
+
+- Add orgId to settings.
+- Read/write settings by orgId.
+- AWX config is per organization.
+
+Option B — global platform settings:
+
+- Add platformAdmin/superAdmin role.
+- Only platform admins can change global AWX settings.
+- Organization admins cannot modify global settings.
+- Hide settings UI from non-platform admins.
+
+Acceptance criteria:
+- AWX token cannot be overwritten by a regular organization admin from another tenant.
+- Settings scope is documented and enforced in code.
+- Tests cover settings authorization.
+
+
+Task 8 — Continue Splitting server/routes.ts
+--------------------------------------------
+
+Problem:
+
+server/routes.ts is still very large:
+
+    1559 lines
+
+It still mixes many domains.
+
+Required fix:
+
+Continue moving sections into route modules:
+
+- auth
+- projects
+- credentials
+- templates
+- runs
+- settings
+- notifications
+- providers
+- cmdbs
+- netbox inventory sources
+- housekeeping
+- organizations
+- health
+
+Acceptance criteria:
+- server/routes.ts becomes mostly route mounting.
+- Each route module declares its own auth and role requirements.
+- Tests still pass after refactor.
+
+
+Task 9 — Optimize Large Logo Asset
+----------------------------------
+
+Problem:
+
+Build output still includes:
+
+    rovelink-logo-clean-*.png: about 3.4 MB
+
+Required fix:
+
+- Compress the PNG.
+- Convert to WebP or SVG if appropriate.
+- Use a smaller display asset.
+- Avoid shipping oversized original artwork in the production bundle.
+
+Acceptance criteria:
+- Logo asset is significantly smaller.
+- No visible UI regression.
+- npm run build still passes.
+
+
+Updated Review Scores
+---------------------
+
+Product maturity: 7.7/10
+Code maturity: 7.1/10
+Production readiness: 6.3/10
+
+Version 13 is closer to a credible MVP. The biggest improvements are the reduced dependency audit surface, better org scoping in more routes, better auth middleware behavior, and clearer hardening documentation.
+
+The main blockers before production are now narrower:
+
+1. Make tests actually pass in a clean environment.
+2. Resolve or document the remaining drizzle-orm high vulnerability.
+3. Use disk-level safe playbook resolution for local Ansible execution.
+4. Resolve global settings/platform-admin scope.
+5. Implement real Git sync or keep local execution/demo sync clearly non-production.
+
+Final command gate before production:
+
+    npm ci
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+All must pass, or remaining exceptions must be accurately documented.

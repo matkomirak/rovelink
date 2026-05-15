@@ -1,10 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Server, FolderGit2, PlayCircle, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Server, FolderGit2, PlayCircle, CheckCircle2, XCircle, Clock, ShieldCheck, ShieldX, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { JobRun, Project, JobTemplate } from "@shared/schema";
 
+interface GateSummary {
+  allowed: number;
+  blocked: number;
+  last_evaluation: string | null;
+  evaluation_complete: boolean;
+}
+
 export default function Dashboard() {
+  const [, setLocation] = useLocation();
+
   const { data: projects } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
   });
@@ -17,10 +28,14 @@ export default function Dashboard() {
     queryKey: ["/api/runs"],
   });
 
+  const { data: gate } = useQuery<GateSummary>({
+    queryKey: ["/api/gate/summary"],
+    refetchInterval: 30000,
+  });
+
   const recentRuns = runs?.slice(0, 5) || [];
   const successCount = runs?.filter(r => r.status === "ok").length || 0;
   const failedCount = runs?.filter(r => r.status === "failed").length || 0;
-  const runningCount = runs?.filter(r => r.status === "running").length || 0;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -49,6 +64,9 @@ export default function Dashboard() {
     );
   };
 
+  const totalGate = (gate?.allowed ?? 0) + (gate?.blocked ?? 0);
+  const readinessPct = totalGate > 0 ? Math.round(((gate?.allowed ?? 0) / totalGate) * 100) : 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -56,9 +74,88 @@ export default function Dashboard() {
         <p className="text-sm text-muted-foreground">Overview of your infrastructure automation</p>
       </div>
 
+      {/* Automation GATE readiness — primary hero section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="md:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
+            <CardTitle className="text-sm font-medium">Automation Readiness</CardTitle>
+            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-gate-allowed">
+              {gate?.allowed ?? "—"}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">assets safe to automate</p>
+            {totalGate > 0 && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">{readinessPct}% ready</span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-green-500 transition-all"
+                    style={{ width: `${readinessPct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="md:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
+            <CardTitle className="text-sm font-medium">Blocked Assets</CardTitle>
+            <ShieldX className="h-4 w-4 text-destructive" />
+          </CardHeader>
+          <CardContent>
+            <div
+              className="text-3xl font-bold text-red-600 dark:text-red-400 cursor-pointer hover:underline"
+              data-testid="text-gate-blocked"
+              onClick={() => setLocation("/automation-inventories")}
+            >
+              {gate?.blocked ?? "—"}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">assets blocked from automation</p>
+            {gate && gate.blocked > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => setLocation("/automation-inventories")}
+                data-testid="button-view-blocked"
+              >
+                Review blocked
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="md:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
+            <CardTitle className="text-sm font-medium">Gate Status</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2 mt-1">
+              {gate?.evaluation_complete ? (
+                <Badge variant="default" data-testid="badge-gate-status">Complete</Badge>
+              ) : (
+                <Badge variant="secondary" data-testid="badge-gate-status">Pending</Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              {gate?.last_evaluation
+                ? `Last evaluated ${new Date(gate.last_evaluation).toLocaleString()}`
+                : "No evaluation recorded yet"}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Standard stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
             <CardTitle className="text-sm font-medium">Projects</CardTitle>
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -69,7 +166,7 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
             <CardTitle className="text-sm font-medium">Templates</CardTitle>
             <Server className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -80,7 +177,7 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
             <CardTitle className="text-sm font-medium">Successful Runs</CardTitle>
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           </CardHeader>
@@ -91,7 +188,7 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
             <CardTitle className="text-sm font-medium">Failed Runs</CardTitle>
             <XCircle className="h-4 w-4 text-red-500" />
           </CardHeader>
@@ -118,7 +215,7 @@ export default function Dashboard() {
               {recentRuns.map((run) => (
                 <div
                   key={run.id}
-                  className="flex items-center justify-between p-3 border rounded-lg hover-elevate"
+                  className="flex items-center justify-between p-3 border rounded-md hover-elevate"
                   data-testid={`run-item-${run.id}`}
                 >
                   <div className="flex items-center gap-3 flex-1">

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -9,63 +10,74 @@ import { ThemeProvider } from "@/lib/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
-import Dashboard from "@/pages/dashboard";
-import Inventory from "@/pages/inventory";
-import Projects from "@/pages/projects";
-import Credentials from "@/pages/credentials";
-import Templates from "@/pages/templates";
-import Runs from "@/pages/runs";
-import RunDetail from "@/pages/run-detail";
-import RunComparison from "@/pages/run-comparison";
-import Reports from "@/pages/reports";
-import Settings from "@/pages/settings";
-import Notifications from "@/pages/notifications";
-import Providers from "@/pages/providers";
-import ProviderDetail from "@/pages/provider-detail";
-import Cmdbs from "@/pages/cmdbs";
-import CmdbDetail from "@/pages/cmdb-detail";
-import Pipelines from "@/pages/pipelines";
-import PipelineNew from "@/pages/pipeline-new";
-import PipelineDetail from "@/pages/pipeline-detail";
-import PipelineEdit from "@/pages/pipeline-edit";
-import MappingEditor from "@/pages/mapping-editor";
-import NetBoxInventory from "@/pages/netbox-inventory";
-import AutomationInventories from "@/pages/automation-inventories";
-import AutomationInventoryNew from "@/pages/automation-inventory-new";
-import AutomationInventoryDetail from "@/pages/automation-inventory-detail";
-import AutomationInventoryEdit from "@/pages/automation-inventory-edit";
 import type { User } from "@shared/schema";
+
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const Inventory = lazy(() => import("@/pages/inventory"));
+const Projects = lazy(() => import("@/pages/projects"));
+const Credentials = lazy(() => import("@/pages/credentials"));
+const Templates = lazy(() => import("@/pages/templates"));
+const Runs = lazy(() => import("@/pages/runs"));
+const RunDetail = lazy(() => import("@/pages/run-detail"));
+const RunComparison = lazy(() => import("@/pages/run-comparison"));
+const Reports = lazy(() => import("@/pages/reports"));
+const Settings = lazy(() => import("@/pages/settings"));
+const Notifications = lazy(() => import("@/pages/notifications"));
+const Providers = lazy(() => import("@/pages/providers"));
+const ProviderDetail = lazy(() => import("@/pages/provider-detail"));
+const Cmdbs = lazy(() => import("@/pages/cmdbs"));
+const CmdbDetail = lazy(() => import("@/pages/cmdb-detail"));
+const Pipelines = lazy(() => import("@/pages/pipelines"));
+const PipelineNew = lazy(() => import("@/pages/pipeline-new"));
+const PipelineDetail = lazy(() => import("@/pages/pipeline-detail"));
+const PipelineEdit = lazy(() => import("@/pages/pipeline-edit"));
+const MappingEditor = lazy(() => import("@/pages/mapping-editor"));
+const NetBoxInventory = lazy(() => import("@/pages/netbox-inventory"));
+const AutomationInventories = lazy(() => import("@/pages/automation-inventories"));
+const AutomationInventoryNew = lazy(() => import("@/pages/automation-inventory-new"));
+const AutomationInventoryDetail = lazy(() => import("@/pages/automation-inventory-detail"));
+const AutomationInventoryEdit = lazy(() => import("@/pages/automation-inventory-edit"));
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-full min-h-48 text-muted-foreground">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+    </div>
+  );
+}
 
 function AuthenticatedRouter() {
   return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/inventory" component={Inventory} />
-      <Route path="/netbox-inventory" component={NetBoxInventory} />
-      <Route path="/automation-inventories" component={AutomationInventories} />
-      <Route path="/inventories/new" component={AutomationInventoryNew} />
-      <Route path="/inventories/:id/edit" component={AutomationInventoryEdit} />
-      <Route path="/inventories/:id" component={AutomationInventoryDetail} />
-      <Route path="/projects" component={Projects} />
-      <Route path="/credentials" component={Credentials} />
-      <Route path="/providers" component={Providers} />
-      <Route path="/providers/:id" component={ProviderDetail} />
-      <Route path="/cmdbs" component={Cmdbs} />
-      <Route path="/cmdbs/:id" component={CmdbDetail} />
-      <Route path="/pipelines" component={Pipelines} />
-      <Route path="/pipelines/new" component={PipelineNew} />
-      <Route path="/pipelines/:id/edit" component={PipelineEdit} />
-      <Route path="/pipelines/:pipelineId/mappings/:mapId/edit" component={MappingEditor} />
-      <Route path="/pipelines/:id" component={PipelineDetail} />
-      <Route path="/templates" component={Templates} />
-      <Route path="/runs" component={Runs} />
-      <Route path="/runs/:id" component={RunDetail} />
-      <Route path="/compare" component={RunComparison} />
-      <Route path="/reports" component={Reports} />
-      <Route path="/notifications" component={Notifications} />
-      <Route path="/settings" component={Settings} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<PageLoader />}>
+      <Switch>
+        <Route path="/" component={Dashboard} />
+        <Route path="/inventory" component={Inventory} />
+        <Route path="/netbox-inventory" component={NetBoxInventory} />
+        <Route path="/automation-inventories" component={AutomationInventories} />
+        <Route path="/inventories/new" component={AutomationInventoryNew} />
+        <Route path="/inventories/:id/edit" component={AutomationInventoryEdit} />
+        <Route path="/inventories/:id" component={AutomationInventoryDetail} />
+        <Route path="/projects" component={Projects} />
+        <Route path="/credentials" component={Credentials} />
+        <Route path="/providers" component={Providers} />
+        <Route path="/providers/:id" component={ProviderDetail} />
+        <Route path="/cmdbs" component={Cmdbs} />
+        <Route path="/cmdbs/:id" component={CmdbDetail} />
+        <Route path="/pipelines" component={Pipelines} />
+        <Route path="/pipelines/new" component={PipelineNew} />
+        <Route path="/pipelines/:id/edit" component={PipelineEdit} />
+        <Route path="/pipelines/:pipelineId/mappings/:mapId/edit" component={MappingEditor} />
+        <Route path="/pipelines/:id" component={PipelineDetail} />
+        <Route path="/templates" component={Templates} />
+        <Route path="/runs" component={Runs} />
+        <Route path="/runs/:id" component={RunDetail} />
+        <Route path="/compare" component={RunComparison} />
+        <Route path="/reports" component={Reports} />
+        <Route path="/notifications" component={Notifications} />
+        <Route path="/settings" component={Settings} />
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
 
@@ -75,7 +87,6 @@ function AppContent() {
     queryKey: ["/api/auth/me"],
   });
 
-  // Redirect to login if not authenticated (using useEffect to avoid state update during render)
   if (!user && location !== "/login" && !isLoading) {
     setTimeout(() => setLocation("/login"), 0);
   }

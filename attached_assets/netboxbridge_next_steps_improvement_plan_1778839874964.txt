@@ -1,0 +1,869 @@
+NetBoxBridge / Rovelink — Next Steps Improvement Plan
+=====================================================
+
+Purpose
+-------
+
+This document describes the remaining technical improvements needed before NetBoxBridge / Rovelink should be considered production-ready.
+
+The focus is on the issues still missing after the latest update:
+
+1. Tenant isolation
+2. CMDB list filtering
+3. Local Ansible playbook path enforcement
+4. Job run organization ownership
+5. Missing package scripts
+6. Broken automated test harness
+7. Remaining dependency vulnerabilities
+8. Docker Compose database configuration
+9. Route/module cleanup
+10. Stronger route-level authorization
+11. Frontend bundle/code splitting
+12. Project sync implementation clarity
+13. Product UX improvements around Automation GATE
+
+
+1. Enforce Tenant Isolation Everywhere
+-------------------------------------
+
+Current problem:
+
+Many storage methods still query, update, or delete resources by ID only. This can allow a user from organization A to access or modify organization B's data if they know the UUID.
+
+Examples that need fixing:
+
+- getProject(id)
+- updateProject(id)
+- deleteProject(id)
+- getCredential(id)
+- updateCredential(id)
+- deleteCredential(id)
+- getJobTemplate(id)
+- updateJobTemplate(id)
+- deleteJobTemplate(id)
+- getProvider(id)
+- updateProvider(id)
+- deleteProvider(id)
+- getCmdbAccount(id)
+- updateCmdbAccount(id)
+- deleteCmdbAccount(id)
+- getPipeline(id)
+- updatePipeline(id)
+- deletePipeline(id)
+- getPipelineRun(id)
+- getAutomationInventory(id)
+- updateAutomationInventory(id)
+- deleteAutomationInventory(id)
+
+Required implementation:
+
+All organization-owned resources must be accessed using both:
+
+- id
+- orgId
+
+Do not trust orgId from the client request body. Always use the authenticated org ID from the request context.
+
+Example unsafe code:
+
+    async getProvider(id: string) {
+      const [provider] = await db
+        .select()
+        .from(providerAccounts)
+        .where(eq(providerAccounts.id, id));
+
+      return provider;
+    }
+
+Required safe version:
+
+    async getProvider(id: string, orgId: string) {
+      const [provider] = await db
+        .select()
+        .from(providerAccounts)
+        .where(
+          and(
+            eq(providerAccounts.id, id),
+            eq(providerAccounts.orgId, orgId)
+          )
+        );
+
+      return provider;
+    }
+
+Route usage must also change.
+
+Unsafe route usage:
+
+    const provider = await storage.getProvider(req.params.id);
+
+Safe route usage:
+
+    const provider = await storage.getProvider(req.params.id, req.orgId);
+
+Creation routes must ignore client-provided orgId.
+
+Unsafe creation:
+
+    const provider = await storage.createProvider(req.body);
+
+Safe creation:
+
+    const { id, orgId, userId, ...safeBody } = req.body;
+
+    const provider = await storage.createProvider({
+      ...safeBody,
+      orgId: req.orgId
+    });
+
+Acceptance criteria:
+
+- A user from organization A cannot read organization B's providers.
+- A user from organization A cannot update organization B's providers.
+- A user from organization A cannot delete organization B's providers.
+- A user from organization A cannot launch organization B's job templates.
+- A user from organization A cannot read organization B's credentials.
+- A user from organization A cannot access organization B's CMDB accounts.
+- Client-provided orgId is ignored during resource creation.
+- Cross-tenant tests exist and pass.
+
+
+2. Fix CMDB List Route to Filter by Organization
+------------------------------------------------
+
+Current problem:
+
+The CMDB list route still appears to return all CMDB accounts.
+
+Unsafe example:
+
+    app.get("/api/cmdbs", authMiddleware, async (req, res) => {
+      const cmdbs = await storage.getCmdbAccounts();
+      res.json(cmdbs.map(sanitizeCmdbForResponse));
+    });
+
+Required implementation:
+
+    app.get("/api/cmdbs", authMiddleware, async (req, res) => {
+      const cmdbs = await storage.getCmdbAccounts(req.orgId);
+      res.json(cmdbs.map(sanitizeCmdbForResponse));
+    });
+
+The storage method should require orgId:
+
+    async getCmdbAccounts(orgId: string) {
+      return db
+        .select()
+        .from(cmdbAccounts)
+        .where(eq(cmdbAccounts.orgId, orgId));
+    }
+
+Acceptance criteria:
+
+- Users only see CMDB accounts belonging to their organization.
+- CMDB list responses never include raw secrets.
+- Add a test proving org A cannot list org B's CMDB accounts.
+
+
+3. Fully Enforce Safe Local Ansible Playbook Paths
+--------------------------------------------------
+
+Current problem:
+
+A safe playbook path helper exists, but local execution still appears to use only syntax validation and then executes the raw template path.
+
+Unsafe pattern:
+
+    validatePlaybookPathSyntax(template.playbook);
+
+    await runner.execute({
+      playbookPath: template.playbook,
+      inventoryPath: "inventory/netbox.yml"
+    });
+
+This is not enough. The code must resolve the playbook against the actual project checkout directory.
+
+Required implementation:
+
+Use the existing safe helper:
+
+    resolveSafePlaybookPath(projectRoot, template.playbook)
+
+The execution flow should look like this:
+
+    const template = await storage.getJobTemplate(req.params.id, req.orgId);
+    if (!template) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+
+    const project = await storage.getProject(template.projectId, req.orgId);
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    const safePlaybookPath = await resolveSafePlaybookPath(
+      project.checkoutPath,
+      template.playbook
+    );
+
+    const safeInventoryPath = await createInventoryForRun({
+      orgId: req.orgId,
+      runId: run.id,
+      templateId: template.id
+    });
+
+    await runner.execute({
+      playbookPath: safePlaybookPath,
+      inventoryPath: safeInventoryPath,
+      extraVars: safeExtraVars
+    });
+
+Required validation:
+
+Reject:
+
+- Empty playbook path
+- Absolute paths
+- ../ traversal
+- Symlinks escaping the project root
+- Non-YAML files
+- Missing files
+- Files outside the project checkout
+
+Allow:
+
+- site.yml
+- playbooks/deploy.yml
+- roles/example/tasks/main.yaml
+
+Inventory path requirement:
+
+The inventory path should not be accepted from the client and should not be hardcoded as inventory/netbox.yml.
+
+Generate it per run in a controlled runtime directory:
+
+    runtime/inventories/<orgId>/<runId>/inventory.yml
+
+Acceptance criteria:
+
+- Raw template.playbook is never passed directly to the local runner.
+- The local runner receives only a verified, resolved, safe absolute path.
+- Unsafe path tests pass.
+- Symlink escape tests pass.
+- Inventory files are generated in a controlled runtime directory.
+
+
+4. Set orgId When Creating Job Runs
+-----------------------------------
+
+Current problem:
+
+Job runs may be created without orgId.
+
+Unsafe example:
+
+    const run = await storage.createJobRun({
+      templateId: template.id,
+      userId: req.userId!,
+      status: "queued",
+      limitExpr: template.limitExpr || null
+    });
+
+Required implementation:
+
+    const run = await storage.createJobRun({
+      orgId: req.orgId,
+      templateId: template.id,
+      userId: req.userId!,
+      status: "queued",
+      limitExpr: template.limitExpr || null
+    });
+
+Also ensure the template is loaded with org scoping:
+
+    const template = await storage.getJobTemplate(req.params.id, req.orgId);
+
+Acceptance criteria:
+
+- Every job run has orgId.
+- Job runs can only be listed by users in the same organization.
+- Reports only include job runs from the current organization.
+- A user cannot launch a job template from another organization.
+
+
+5. Add Missing Package Scripts
+------------------------------
+
+Current problem:
+
+Documentation references scripts that do not exist, including:
+
+    npm run db:seed
+    npm test
+
+Required package.json scripts:
+
+    {
+      "scripts": {
+        "dev": "NODE_ENV=development tsx server/index.ts",
+        "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+        "start": "NODE_ENV=production node dist/index.js",
+        "check": "tsc",
+        "db:push": "drizzle-kit push",
+        "db:seed": "tsx server/seed.ts",
+        "test": "tsx --test tests/*.test.ts",
+        "test:security": "tsx --test tests/security.test.ts",
+        "test:authz": "tsx --test tests/authz.test.ts",
+        "test:paths": "tsx --test tests/playbook-paths.test.ts"
+      }
+    }
+
+Adapt the existing scripts if needed, but make sure the following work:
+
+    npm run db:seed
+    npm test
+    npm run check
+    npm run build
+
+Acceptance criteria:
+
+- npm run db:seed executes server/seed.ts.
+- npm test runs the complete test suite.
+- README instructions match package.json.
+- A new developer can follow README setup without missing-script errors.
+
+
+6. Refactor Test Harness to Use an In-Process App
+-------------------------------------------------
+
+Current problem:
+
+The auth tests call:
+
+    fetch("http://localhost:5000/...")
+
+This requires the server to be running separately before tests start. That makes tests unreliable and unsuitable for CI/Replit automation.
+
+Required implementation:
+
+Refactor the server so the Express app can be imported without starting a network listener.
+
+Create:
+
+    server/app.ts
+
+Example:
+
+    import express from "express";
+    import helmet from "helmet";
+    import cookieParser from "cookie-parser";
+    import { registerRoutes } from "./routes";
+
+    export async function createApp() {
+      const app = express();
+
+      app.use(helmet({
+        contentSecurityPolicy: false,
+        crossOriginEmbedderPolicy: false
+      }));
+
+      app.use(cookieParser());
+      app.use(express.json({ limit: "2mb" }));
+      app.use(express.urlencoded({ extended: false, limit: "2mb" }));
+
+      await registerRoutes(app);
+
+      return app;
+    }
+
+Then update:
+
+    server/index.ts
+
+So it only starts the server:
+
+    import { createApp } from "./app";
+
+    const app = await createApp();
+
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Server running on port ${port}`);
+    });
+
+Update tests to use supertest:
+
+    import request from "supertest";
+    import { createApp } from "../server/app";
+
+    const app = await createApp();
+
+    await request(app)
+      .get("/api/health")
+      .expect(200);
+
+Acceptance criteria:
+
+- Tests do not require manually starting localhost:5000.
+- npm test starts and runs all tests automatically.
+- authz.test.ts uses supertest instead of fetch to localhost.
+- Tests can run in CI/Replit without extra steps.
+
+
+7. Fix Dependency Vulnerabilities
+---------------------------------
+
+Current problem:
+
+npm audit still reports production vulnerabilities, including high-severity issues.
+
+Required implementation:
+
+Run:
+
+    npm audit --omit=dev
+
+Then try safe fixes:
+
+    npm audit fix
+
+After applying fixes, run:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+If high-severity vulnerabilities remain, inspect them manually.
+
+Packages to review carefully:
+
+- axios
+- lodash
+- minimatch
+- path-to-regexp
+- picomatch
+- postcss
+- qs
+- yaml
+- express
+- vite
+- rollup
+
+Do not blindly use:
+
+    npm audit fix --force
+
+unless the breaking changes are reviewed and the app is tested afterward.
+
+Acceptance criteria:
+
+- No high-severity production vulnerabilities remain if reasonably fixable.
+- Any remaining vulnerabilities are documented with:
+  - package name
+  - severity
+  - reason it remains
+  - whether it is reachable in production
+  - mitigation plan
+- TypeScript check passes after dependency updates.
+- Build passes after dependency updates.
+- Tests pass after dependency updates.
+
+
+8. Make Docker Compose Database Configuration Self-Contained
+------------------------------------------------------------
+
+Current problem:
+
+docker-compose.yml starts a Postgres container but the app uses:
+
+    DATABASE_URL: ${DATABASE_URL}
+
+This means the app may not automatically connect to the included db service.
+
+Required implementation:
+
+Use a default DATABASE_URL that points to the Compose db service.
+
+Example:
+
+    DATABASE_URL: ${DATABASE_URL:-postgres://rovelink:${DB_PASSWORD:-changeme}@db:5432/rovelink}
+
+Also ensure the db service uses matching credentials:
+
+    db:
+      image: postgres:16-alpine
+      environment:
+        POSTGRES_DB: rovelink
+        POSTGRES_USER: rovelink
+        POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+
+Required startup behavior:
+
+- docker compose up should start both app and database.
+- App should connect to the included db by default.
+- Users can still override DATABASE_URL for external databases.
+
+Acceptance criteria:
+
+- docker compose up works without manually setting DATABASE_URL.
+- App connects to the db service.
+- /api/health returns 200.
+- /api/health/db returns 200 after the database is ready.
+
+
+9. Split Large server/routes.ts Into Smaller Route Modules
+----------------------------------------------------------
+
+Current problem:
+
+server/routes.ts is too large and handles too many domains.
+
+It currently mixes:
+
+- Auth
+- Projects
+- Credentials
+- Job templates
+- Job runs
+- Providers
+- CMDBs
+- Settings
+- NetBox inventory
+- Organizations
+- Notifications
+- Health routes
+- WebSocket setup
+
+This increases the risk of missing auth, role checks, or tenant filters.
+
+Required implementation:
+
+Split into route modules such as:
+
+    server/routes/auth.ts
+    server/routes/projects.ts
+    server/routes/credentials.ts
+    server/routes/templates.ts
+    server/routes/runs.ts
+    server/routes/providers.ts
+    server/routes/cmdbs.ts
+    server/routes/settings.ts
+    server/routes/health.ts
+    server/routes/organizations.ts
+    server/routes/notifications.ts
+
+Each module should export a router.
+
+Example:
+
+    import { Router } from "express";
+    import { authMiddleware, requireRole } from "../auth";
+
+    const router = Router();
+
+    router.get("/", authMiddleware, async (req, res) => {
+      // list projects for req.orgId
+    });
+
+    router.post("/", authMiddleware, requireRole(["admin"]), async (req, res) => {
+      // create project
+    });
+
+    export default router;
+
+Then mount centrally:
+
+    app.use("/api/projects", projectsRoutes);
+    app.use("/api/credentials", credentialsRoutes);
+    app.use("/api/templates", templatesRoutes);
+
+Acceptance criteria:
+
+- server/routes.ts is reduced to high-level route mounting.
+- Each route module applies its own auth and role checks.
+- Existing behavior is preserved.
+- Tests still pass.
+
+
+10. Add Stronger Route-Level Authorization
+------------------------------------------
+
+Current problem:
+
+Some modular routes rely only on mount-level auth. This works, but it is easy to accidentally expose sensitive functionality later.
+
+Required implementation:
+
+Every route that reads, writes, executes, or syncs should explicitly state its authorization requirements.
+
+Suggested policy:
+
+Viewer:
+
+- Read dashboard data
+- Read non-secret provider metadata
+- Read gate evaluation results
+- Read reports that belong to own organization
+- Read inventory summaries
+
+Operator:
+
+- Launch job templates
+- Cancel job runs
+- Trigger provider sync
+- Trigger CMDB sync
+- Generate inventories
+- Trigger gate evaluation
+
+Admin:
+
+- Create/update/delete providers
+- Create/update/delete CMDB accounts
+- Create/update/delete credentials
+- Create/update/delete projects
+- Create/update/delete job templates
+- Change settings
+- Sync gate results back to NetBox/CMDB
+- Manage users/organizations if implemented
+
+Example:
+
+    router.post(
+      "/:id/launch",
+      authMiddleware,
+      requireRole(["operator", "admin"]),
+      async (req, res) => {
+        // launch job
+      }
+    );
+
+Acceptance criteria:
+
+- Viewers cannot mutate resources.
+- Viewers cannot launch jobs.
+- Operators can launch jobs and run syncs.
+- Operators cannot manage credentials.
+- Admins can manage configuration.
+- All important route permissions are covered by tests.
+
+
+11. Add Frontend Code Splitting
+-------------------------------
+
+Current problem:
+
+The production build warns about a large JavaScript bundle of about 869 kB.
+
+Required implementation:
+
+Use route-level lazy loading for large pages.
+
+Example:
+
+    import { lazy, Suspense } from "react";
+
+    const Dashboard = lazy(() => import("./pages/Dashboard"));
+    const Providers = lazy(() => import("./pages/Providers"));
+    const Cmdbs = lazy(() => import("./pages/Cmdbs"));
+    const MappingEditor = lazy(() => import("./pages/MappingEditor"));
+    const Reports = lazy(() => import("./pages/Reports"));
+
+    function PageLoader() {
+      return <div>Loading...</div>;
+    }
+
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
+        ...
+      </Routes>
+    </Suspense>
+
+Also review heavy imports:
+
+- Charts
+- Editors
+- Mapping UI
+- Report components
+- Large icon imports
+
+Acceptance criteria:
+
+- Main bundle size is reduced.
+- Vite build warning is removed or reduced.
+- App routes still load correctly.
+- No visible UX regression.
+
+
+12. Clarify or Replace Mock Project Sync
+----------------------------------------
+
+Current problem:
+
+Project sync appears to use placeholder/fake playbooks such as:
+
+- site.yml
+- deploy.yml
+- rollback.yml
+
+This may confuse users into thinking Git sync is fully implemented.
+
+Required implementation options:
+
+Option A — Implement real Git checkout:
+
+- Store project repository URL.
+- Store branch/ref.
+- Clone or pull into a controlled project directory.
+- Validate checked-out playbooks.
+- Never allow arbitrary filesystem paths.
+- Record sync status and errors.
+
+Suggested checkout path:
+
+    runtime/projects/<orgId>/<projectId>/
+
+Security requirements:
+
+- Do not allow repository URL command injection.
+- Use spawn with argument arrays if invoking git.
+- Do not print credentials or tokens in logs.
+- Support private repository credentials only through the credential store.
+
+Option B — Clearly label as demo/mock:
+
+If real Git checkout is not implemented yet, rename the behavior in the UI and docs:
+
+- "Demo project sync"
+- "Example playbooks"
+- "Mocked repository contents"
+
+Do not describe it as production-ready Git sync.
+
+Acceptance criteria for Option A:
+
+- Real repositories can be synced.
+- Sync errors are visible to the user.
+- Playbooks are discovered from the checked-out repo.
+- Project checkout path is tenant-scoped.
+- Path validation uses the checkout root.
+
+Acceptance criteria for Option B:
+
+- UI and docs clearly state that project sync is mocked/demo-only.
+- No production claims are made for this feature.
+
+
+13. Improve Product UX Around Automation GATE
+---------------------------------------------
+
+Current problem:
+
+Automation GATE is the strongest product concept, but the UI does not yet make it dominant enough.
+
+Required product direction:
+
+The main dashboard should answer:
+
+    "Can I safely automate today?"
+
+Add dashboard widgets:
+
+- Safe to automate count
+- Blocked asset count
+- Blocked by missing tenant
+- Blocked by missing role
+- Blocked by automatable=false
+- Blocked by missing CMDB mapping
+- Provider assets not mapped to CMDB
+- Recent gate failures
+- Recent successful gated runs
+
+Suggested dashboard cards:
+
+    Automation Readiness
+    - 128 safe assets
+    - 37 blocked assets
+    - 12 unmapped provider assets
+
+    Top Block Reasons
+    - Missing tenant: 15
+    - Missing role: 9
+    - automatable=false: 8
+    - Missing owner: 5
+
+    Risky Changes
+    - 3 assets lost automatable=true in the last 24h
+    - 4 assets changed tenant
+    - 2 assets removed from NetBox
+
+Main workflow should be:
+
+1. Connect provider
+2. Connect NetBox/CMDB
+3. Map provider objects to CMDB records
+4. Run gate evaluation automatically
+5. Review blocked assets
+6. Generate safe automation inventory
+7. Launch AWX/local job
+8. Review audit trail
+
+Acceptance criteria:
+
+- Dashboard clearly shows safe vs blocked assets.
+- Users can click from a blocked count to the blocked asset list.
+- Each blocked asset shows the exact reason it is blocked.
+- Generated inventories clearly state that they only include allowed assets.
+- Job run history shows whether gated inventory was used.
+
+
+Final Verification Checklist
+----------------------------
+
+After implementing all improvements, run:
+
+    npm install
+    npm run db:push
+    npm run db:seed
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Then verify Docker:
+
+    docker compose up --build
+
+Check:
+
+    curl http://localhost:5000/api/health
+    curl http://localhost:5000/api/health/db
+
+Manual security checks:
+
+- Unauthenticated users cannot access protected routes.
+- Viewers cannot mutate resources.
+- Viewers cannot launch automation.
+- Operators can launch automation.
+- Operators cannot manage credentials.
+- Admins can manage configuration.
+- Users cannot access another organization's resources.
+- Secrets are never returned in API responses.
+- Local playbook execution cannot escape the project directory.
+- Generated inventory files are stored in controlled runtime paths.
+- Reports only include current organization data.
+
+Production Readiness Gate
+-------------------------
+
+Do not mark the product as production-ready until all of the following are true:
+
+- Tenant isolation is enforced everywhere.
+- Cross-tenant tests pass.
+- Route-level role checks are implemented.
+- Local Ansible execution uses resolved safe playbook paths.
+- Job runs always include orgId.
+- npm test works without a manually running server.
+- No high-severity production dependency vulnerabilities remain, or remaining issues are documented and mitigated.
+- Docker Compose works with its included database by default.
+- Secrets are encrypted at rest and redacted in all API responses.
+- Automation GATE is visible and understandable in the UI.

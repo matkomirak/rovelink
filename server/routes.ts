@@ -264,38 +264,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/projects/:id/sync", authMiddleware, requireRole("operator", "admin"), async (req, res) => {
+  app.post("/api/projects/:id/sync", authMiddleware, requireRole("operator", "admin"), async (req: AuthRequest, res) => {
     try {
-      const project = await storage.getProject(req.params.id);
+      const project = await storage.getProject(req.params.id, req.orgId);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });
       }
 
-      // Simulate Git sync (in real app, would use simple-git or similar)
-      await storage.updateProject(req.params.id, {
-        syncStatus: "syncing",
-      });
+      // Demo sync — simulates Git sync (no real checkout in this environment)
+      await storage.updateProject(req.params.id, { syncStatus: "syncing" }, req.orgId);
 
-      // Simulate async operation
+      // Simulate async sync with demo playbook discovery
       setTimeout(async () => {
-        const mockPlaybooks = ["site.yml", "deploy.yml", "rollback.yml"];
+        const demoPlaybooks = ["site.yml", "deploy.yml", "rollback.yml"];
         await storage.updateProject(req.params.id, {
           syncStatus: "success",
           lastSyncAt: new Date(),
-          playbooks: mockPlaybooks,
-        });
+          playbooks: demoPlaybooks,
+        }, req.orgId);
       }, 2000);
 
-      res.json({ message: "Sync started" });
+      res.json({ message: "Demo sync started — playbooks discovered from simulated repository" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Sync failed" });
     }
   });
 
-  app.patch("/api/projects/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.patch("/api/projects/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const data = insertProjectSchema.partial().parse(req.body);
-      const project = await storage.updateProject(req.params.id, data);
+      const project = await storage.updateProject(req.params.id, data, req.orgId);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });
       }
@@ -305,9 +303,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/projects/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.delete("/api/projects/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteProject(req.params.id);
+      await storage.deleteProject(req.params.id, req.orgId);
       res.json({ message: "Project deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete project" });
@@ -335,10 +333,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.patch("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const data = insertCredentialSchema.partial().parse(req.body);
-      const credential = await storage.updateCredential(req.params.id, data);
+      const credential = await storage.updateCredential(req.params.id, data, req.orgId);
       if (!credential) {
         return res.status(404).json({ message: "Credential not found" });
       }
@@ -348,9 +346,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.delete("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteCredential(req.params.id);
+      await storage.deleteCredential(req.params.id, req.orgId);
       res.json({ message: "Credential deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete credential" });
@@ -378,18 +376,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/templates/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.patch("/api/templates/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const template = await storage.updateJobTemplate(req.params.id, req.body);
+      const template = await storage.updateJobTemplate(req.params.id, req.body, req.orgId);
       res.json(template);
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Failed to update template" });
     }
   });
 
-  app.delete("/api/templates/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.delete("/api/templates/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteJobTemplate(req.params.id);
+      await storage.deleteJobTemplate(req.params.id, req.orgId);
       res.json({ message: "Template deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete template" });
@@ -398,7 +396,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/templates/:id/launch", authMiddleware, requireRole("operator", "admin"), async (req: AuthRequest, res) => {
     try {
-      const template = await storage.getJobTemplate(req.params.id);
+      const template = await storage.getJobTemplate(req.params.id, req.orgId);
       if (!template) {
         return res.status(404).json({ message: "Template not found" });
       }
@@ -406,6 +404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const run = await storage.createJobRun({
         templateId: template.id,
         userId: req.userId!,
+        orgId: req.orgId || null,
         status: "queued",
         limitExpr: template.limitExpr || null,
       });
@@ -464,7 +463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/templates/:id/schedule", authMiddleware, requireRole("operator", "admin"), async (req: AuthRequest, res) => {
     try {
-      const template = await storage.getJobTemplate(req.params.id);
+      const template = await storage.getJobTemplate(req.params.id, req.orgId);
       if (!template) {
         return res.status(404).json({ message: "Template not found" });
       }
@@ -473,6 +472,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const run = await storage.createJobRun({
         templateId: template.id,
         userId: req.userId!,
+        orgId: req.orgId || null,
         status: "queued",
         scheduledAt: new Date(scheduledAt),
         limitExpr: template.limitExpr || null,
@@ -820,16 +820,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ─── Provider routes ─────────────────────────────────────────────────────────
   app.get("/api/providers", authMiddleware, async (req, res) => {
     try {
-      const providers = await storage.getProviders();
+      const providers = await storage.getProviders((req as AuthRequest).orgId);
       res.json(providers.map(sanitizeProviderForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get providers" });
     }
   });
 
-  app.get("/api/providers/:id", authMiddleware, async (req, res) => {
+  app.get("/api/providers/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id);
+      const provider = await storage.getProvider(req.params.id, req.orgId);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -840,9 +840,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get VMs discovered by a provider
-  app.get("/api/providers/:id/vms", authMiddleware, async (req, res) => {
+  app.get("/api/providers/:id/vms", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id);
+      const provider = await storage.getProvider(req.params.id, req.orgId);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -875,12 +875,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/providers/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.patch("/api/providers/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const body = { ...req.body };
       if (body.config && typeof body.config === "object") {
         // Merge with existing encrypted config so blank secret fields don't wipe stored secrets
-        const existing = await storage.getProvider(req.params.id);
+        const existing = await storage.getProvider(req.params.id, req.orgId);
         if (existing) {
           const existingConfig = existing.config as Record<string, any>;
           const incoming = body.config as Record<string, any>;
@@ -895,7 +895,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           body.config = encryptProviderConfig(body.config);
         }
       }
-      const provider = await storage.updateProvider(req.params.id, body);
+      const provider = await storage.updateProvider(req.params.id, body, req.orgId);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -905,9 +905,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/providers/:id/test", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+  app.post("/api/providers/:id/test", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id);
+      const provider = await storage.getProvider(req.params.id, req.orgId);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -923,9 +923,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/providers/:id/sync", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+  app.post("/api/providers/:id/sync", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id);
+      const provider = await storage.getProvider(req.params.id, req.orgId);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -939,13 +939,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/providers/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.delete("/api/providers/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const existing = await storage.getProvider(req.params.id);
+      const existing = await storage.getProvider(req.params.id, req.orgId);
       if (!existing) {
         return res.status(404).json({ message: "Provider not found" });
       }
-      await storage.deleteProvider(req.params.id);
+      await storage.deleteProvider(req.params.id, req.orgId);
       res.json({ message: "Provider deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete provider" });
@@ -963,9 +963,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── CMDB routes ─────────────────────────────────────────────────────────────
-  app.get("/api/cmdbs", authMiddleware, async (req, res) => {
+  app.get("/api/cmdbs", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const cmdbs = await storage.getCmdbAccounts();
+      const cmdbs = await storage.getCmdbAccounts(req.orgId);
       res.json(cmdbs.map(sanitizeCmdbForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get CMDBs" });
@@ -987,12 +987,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.patch("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const body = { ...req.body };
       if (body.config && typeof body.config === "object") {
         // Preserve existing encrypted secrets when blank fields submitted
-        const existing = await storage.getCmdbAccount(req.params.id);
+        const existing = await storage.getCmdbAccount(req.params.id, req.orgId);
         if (existing) {
           const existingConfig = (existing.config as Record<string, any>) || {};
           const incoming = body.config as Record<string, any>;
@@ -1007,7 +1007,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           body.config = encryptCmdbConfig(body.config);
         }
       }
-      const cmdb = await storage.updateCmdbAccount(req.params.id, body);
+      const cmdb = await storage.updateCmdbAccount(req.params.id, body, req.orgId);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
@@ -1017,18 +1017,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.delete("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteCmdbAccount(req.params.id);
+      await storage.deleteCmdbAccount(req.params.id, req.orgId);
       res.json({ message: "CMDB account deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete CMDB account" });
     }
   });
 
-  app.post("/api/cmdbs/:id/test", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+  app.post("/api/cmdbs/:id/test", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
     try {
-      const cmdb = await storage.getCmdbAccount(req.params.id);
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
@@ -1039,9 +1039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const result = await adapter.test();
         
         if (result.ok) {
-          await storage.updateCmdbAccount(req.params.id, {
-            lastValidatedAt: new Date(),
-          });
+          await storage.updateCmdbAccount(req.params.id, { lastValidatedAt: new Date() }, req.orgId);
         }
         
         res.json(result);
@@ -1053,9 +1051,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/cmdbs/:id/vms", authMiddleware, async (req, res) => {
+  app.get("/api/cmdbs/:id/vms", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const cmdb = await storage.getCmdbAccount(req.params.id);
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
@@ -1154,7 +1152,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // NetBox VM import routes
-  app.post("/api/netbox/import", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.post("/api/netbox/import", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const { sourceId } = req.body;
       
@@ -1164,8 +1162,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { netboxService } = await import("./services/netbox");
       
-      // Get NetBox source
-      const source = await storage.getNetboxInventorySource(sourceId);
+      // Get NetBox source — scoped to caller's org
+      const source = await storage.getNetboxInventorySource(sourceId, req.orgId);
       
       if (!source) {
         return res.status(404).json({ message: "NetBox source not found" });
@@ -1198,7 +1196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Update last import timestamp
-      await storage.updateNetboxInventorySource(sourceId, { lastImportAt: new Date() });
+      await storage.updateNetboxInventorySource(sourceId, { lastImportAt: new Date() }, req.orgId);
 
       res.json({ 
         message: `Successfully imported ${imported} VMs from ${source.name}`, 
@@ -1234,18 +1232,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── NetBox Inventory Source routes ─────────────────────────────────────────
-  app.get("/api/netbox-sources", authMiddleware, async (req, res) => {
+  app.get("/api/netbox-sources", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const sources = await storage.getNetboxInventorySources();
+      const sources = await storage.getNetboxInventorySources(req.orgId);
       res.json(sources.map(sanitizeNetboxSourceForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get NetBox inventory sources" });
     }
   });
 
-  app.get("/api/netbox-sources/:id", authMiddleware, async (req, res) => {
+  app.get("/api/netbox-sources/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const source = await storage.getNetboxInventorySource(req.params.id);
+      const source = await storage.getNetboxInventorySource(req.params.id, req.orgId);
       if (!source) {
         return res.status(404).json({ message: "NetBox inventory source not found" });
       }
@@ -1255,9 +1253,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/netbox-sources", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.post("/api/netbox-sources", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const insertSource = insertNetboxInventorySourceSchema.parse(req.body);
+      const { orgId: _o, id: _i, ...safeBody } = req.body;
+      const insertSource = insertNetboxInventorySourceSchema.parse({ ...safeBody, orgId: req.orgId });
       if (insertSource.token) {
         insertSource.token = encryptNetboxToken(insertSource.token);
       }
@@ -1268,7 +1267,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/netbox-sources/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.patch("/api/netbox-sources/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const body = { ...req.body };
       // If token is blank, keep the existing one; if provided, encrypt it
@@ -1277,7 +1276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (body.token) {
         body.token = encryptNetboxToken(body.token);
       }
-      const source = await storage.updateNetboxInventorySource(req.params.id, body);
+      const source = await storage.updateNetboxInventorySource(req.params.id, body, req.orgId);
       if (!source) {
         return res.status(404).json({ message: "NetBox inventory source not found" });
       }
@@ -1287,9 +1286,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/netbox-sources/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+  app.delete("/api/netbox-sources/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteNetboxInventorySource(req.params.id);
+      await storage.deleteNetboxInventorySource(req.params.id, req.orgId);
       res.status(204).send();
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete NetBox inventory source" });
@@ -1297,9 +1296,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Backend-only NetBox source connection test (replaces browser-side direct call)
-  app.post("/api/netbox-sources/:id/test", authMiddleware, requireRole("admin", "operator"), async (req, res) => {
+  app.post("/api/netbox-sources/:id/test", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
     try {
-      const source = await storage.getNetboxInventorySource(req.params.id);
+      const source = await storage.getNetboxInventorySource(req.params.id, req.orgId);
       if (!source) {
         return res.status(404).json({ message: "NetBox inventory source not found" });
       }

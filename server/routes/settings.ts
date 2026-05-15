@@ -1,11 +1,12 @@
 import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
+import type { Request } from "express";
 import { storage } from "../storage";
 import {
   encryptNetboxToken,
   decryptNetboxToken,
 } from "../services/secrets";
 import { netboxService } from "../services/netbox";
+import { requireRole } from "../auth/roles";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -13,77 +14,73 @@ interface AuthRequest extends Request {
   user?: any;
 }
 
-function requireRole(...roles: string[]) {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    next();
-  };
-}
-
 const router = Router();
-
-// ─── NetBox settings ──────────────────────────────────────────────────────────
 
 router.get("/", async (_req, res) => {
   try {
-    const netboxUrl = await storage.getSetting("netbox_url");
-    const netboxToken = await storage.getSetting("netbox_token");
+    const [netboxUrlSetting, netboxTokenSetting] = await Promise.all([
+      storage.getSetting("netbox_url"),
+      storage.getSetting("netbox_token"),
+    ]);
+
     res.json({
-      netboxUrl: netboxUrl?.value || process.env.NETBOX_URL || "",
-      netboxToken: netboxToken?.value ? "********" : "",
+      netboxUrl: netboxUrlSetting?.value || "",
+      netboxToken: netboxTokenSetting?.value ? "********" : "",
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to fetch settings" });
   }
 });
 
+// Writing platform settings requires platform_admin — admins manage their own org,
+// not the global platform configuration (NetBox URL/token, AWX URL/token).
 router.post("/", requireRole("platform_admin"), async (req, res) => {
   try {
     const { netboxUrl, netboxToken } = req.body;
     if (netboxUrl) await storage.setSetting("netbox_url", netboxUrl);
     if (netboxToken && netboxToken !== "********") {
-      await storage.setSetting("netbox_token", encryptNetboxToken(netboxToken));
+      const encrypted = await encryptNetboxToken(netboxToken);
+      await storage.setSetting("netbox_token", encrypted);
     }
-    res.json({ message: "Settings saved" });
+    res.json({ message: "Settings updated" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to save settings" });
+    res.status(500).json({ message: error.message || "Failed to update settings" });
   }
 });
-
-router.post("/test-connection", async (_req, res) => {
-  try {
-    const netboxUrl = await storage.getSetting("netbox_url");
-    const netboxTokenSetting = await storage.getSetting("netbox_token");
-    const url = netboxUrl?.value || process.env.NETBOX_URL || "";
-    const rawStoredToken = netboxTokenSetting?.value || "";
-    const token = rawStoredToken
-      ? decryptNetboxToken(rawStoredToken)
-      : (process.env.NETBOX_TOKEN || "");
-    if (!url) return res.status(400).json({ message: "NetBox URL is not configured" });
-    const connected = await netboxService.testConnection(url, token);
-    if (connected) {
-      res.json({ message: "Connection successful" });
-    } else {
-      res.status(500).json({ message: "Connection failed" });
-    }
-  } catch (error: any) {
-    res.status(500).json({ message: error.message || "Connection test failed" });
-  }
-});
-
-// ─── AWX settings ─────────────────────────────────────────────────────────────
 
 router.get("/awx", async (_req, res) => {
   try {
-    const url = await storage.getSetting("awx_url");
-    const verifySsl = await storage.getSetting("awx_verify_ssl");
+    const [urlSetting, tokenSetting, verifySslSetting] = await Promise.all([
+      storage.getSetting("awx_url"),
+      storage.getSetting("awx_token"),
+      storage.getSetting("awx_verify_ssl"),
+    ]);
+
     res.json({
-      url: url?.value ?? "",
-      verify_ssl: verifySsl?.value !== "false",
-      token_set: !!(await storage.getSetting("awx_token")),
+      url: urlSetting?.value || "",
+      token: tokenSetting?.value ? "********" : "",
+      verify_ssl: verifySslSetting?.value === "false" ? false : true,
     });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post("/awx", requireRole("platform_admin"), async (req, res) => {
+  try {
+    const { encryptSecret } = await import("../services/secrets");
+    const { url, token, verify_ssl } = req.body as {
+      url?: string; token?: string; verify_ssl?: boolean;
+    };
+    if (url) await storage.setSetting("awx_url", url);
+    if (token && token !== "********") {
+      const encrypted = await encryptSecret(token);
+      await storage.setSetting("awx_token", encrypted);
+    }
+    if (verify_ssl !== undefined) {
+      await storage.setSetting("awx_verify_ssl", String(verify_ssl));
+    }
+    res.json({ message: "AWX settings updated" });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -91,26 +88,31 @@ router.get("/awx", async (_req, res) => {
 
 router.post("/awx/test", requireRole("platform_admin"), async (req, res) => {
   try {
-    const { encryptSecret: enc } = await import("../services/secrets");
     const { AwxRunner } = await import("../services/awx-runner");
     const { url, token, verify_ssl } = req.body as {
-      url: string;
-      token: string;
-      verify_ssl?: boolean;
+      url: string; token: string; verify_ssl?: boolean;
     };
     if (!url || !token) {
       return res.status(400).json({ message: "url and token are required" });
     }
-    const runner = new AwxRunner({ url, token, verifySsl: verify_ssl !== false });
+    const runner = new AwxRunner({ url, token, verifySsl: verify_ssl ?? true });
     const result = await runner.testConnection();
-    if (result.ok) {
-      await storage.setSetting("awx_url", url);
-      await storage.setSetting("awx_token", enc(token));
-      await storage.setSetting("awx_verify_ssl", String(verify_ssl !== false));
-    }
-    res.json(result);
+    res.json({ ok: result.ok, message: result.ok ? "Connection successful" : result.error });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+router.post("/netbox/test", async (req, res) => {
+  try {
+    const { url, token } = req.body;
+    if (!url || !token) {
+      return res.status(400).json({ ok: false, message: "url and token are required" });
+    }
+    const result = await netboxService.testConnection(url, token);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, message: err.message });
   }
 });
 

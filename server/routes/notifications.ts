@@ -1,20 +1,12 @@
 import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
+import type { Request } from "express";
 import { storage } from "../storage";
+import { requireRole } from "../auth/roles";
 
 interface AuthRequest extends Request {
   userId?: string;
   orgId?: string;
   user?: any;
-}
-
-function requireRole(...roles: string[]) {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    next();
-  };
 }
 
 const router = Router();
@@ -28,16 +20,6 @@ router.get("/", async (req: AuthRequest, res) => {
   }
 });
 
-router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
-  try {
-    const { orgId: _o, id: _i, ...safeBody } = req.body;
-    const notification = await storage.createNotification({ ...safeBody, orgId: req.orgId });
-    res.json(notification);
-  } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to create notification" });
-  }
-});
-
 router.get("/:id", async (req: AuthRequest, res) => {
   try {
     const notification = await storage.getNotification(req.params.id, req.orgId);
@@ -45,6 +27,15 @@ router.get("/:id", async (req: AuthRequest, res) => {
     res.json(notification);
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to fetch notification" });
+  }
+});
+
+router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
+  try {
+    const notification = await storage.createNotification({ ...req.body, orgId: req.orgId });
+    res.json(notification);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message || "Failed to create notification" });
   }
 });
 
@@ -60,10 +51,8 @@ router.patch("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
 
 router.delete("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    const existing = await storage.getNotification(req.params.id, req.orgId);
-    if (!existing) return res.status(404).json({ message: "Notification not found" });
     await storage.deleteNotification(req.params.id, req.orgId);
-    res.json({ message: "Notification deleted" });
+    res.status(204).end();
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to delete notification" });
   }

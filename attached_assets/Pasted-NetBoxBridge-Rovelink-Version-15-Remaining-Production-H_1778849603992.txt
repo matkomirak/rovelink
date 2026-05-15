@@ -1,0 +1,643 @@
+NetBoxBridge / Rovelink — Version 15 Remaining Production-Hardening Tasks
+=========================================================================
+
+Goal
+----
+
+Bring NetBoxBridge / Rovelink closer to production MVP readiness.
+
+Current status from latest review:
+
+PASS:
+- npm ci
+- npm run check
+- npm test
+- npm run build
+
+OPEN:
+- platform_admin role is not hierarchical
+- organization management is too permissive
+- local Ansible generated inventory is only localhost placeholder
+- local Ansible still depends on demo-only project sync
+- PRODUCTION-HARDENING.md has contradictory audit text
+- drizzle-orm high vulnerability remains
+- some storage methods still allow optional orgId and can be accidentally used unsafely
+
+
+Task 1 — Implement Central Role Hierarchy
+-----------------------------------------
+
+Problem:
+
+The documentation says:
+
+    platform_admin > admin > operator > viewer
+
+But the current requireRole implementation appears to check exact role membership only.
+
+That means a platform_admin may fail routes requiring admin unless platform_admin is explicitly listed.
+
+Required implementation:
+
+Create one shared role helper and use it everywhere.
+
+Recommended file:
+
+    server/auth/roles.ts
+
+Suggested implementation:
+
+    export const ROLE_RANK = {
+      viewer: 1,
+      operator: 2,
+      admin: 3,
+      platform_admin: 4,
+    } as const;
+
+    export type Role = keyof typeof ROLE_RANK;
+
+    export function hasRoleAtLeast(userRole: string | undefined, requiredRole: Role): boolean {
+      if (!userRole) return false;
+
+      const userRank = ROLE_RANK[userRole as Role] ?? 0;
+      const requiredRank = ROLE_RANK[requiredRole] ?? 999;
+
+      return userRank >= requiredRank;
+    }
+
+    export function hasAnyRoleAtLeast(userRole: string | undefined, requiredRoles: Role[]): boolean {
+      if (!requiredRoles.length) return false;
+
+      const minimumRequiredRank = Math.min(
+        ...requiredRoles.map((role) => ROLE_RANK[role])
+      );
+
+      const userRank = ROLE_RANK[userRole as Role] ?? 0;
+
+      return userRank >= minimumRequiredRank;
+    }
+
+Update requireRole to use this hierarchy.
+
+Expected behavior:
+
+- viewer can access viewer routes only.
+- operator can access operator and viewer routes.
+- admin can access admin, operator, and viewer routes.
+- platform_admin can access platform_admin, admin, operator, and viewer routes.
+
+Important:
+
+There should be only one requireRole implementation. Remove or replace duplicate local definitions in route files.
+
+Acceptance criteria:
+
+- platform_admin can access admin routes.
+- platform_admin can access operator routes.
+- platform_admin can access viewer routes.
+- admin cannot access platform_admin-only routes.
+- operator cannot access admin routes.
+- viewer cannot access operator/admin/platform_admin routes.
+- Add or update tests for the hierarchy.
+- npm test passes.
+- npm run check passes.
+
+
+Task 2 — Restrict Organization Management to platform_admin
+----------------------------------------------------------
+
+Problem:
+
+server/routes/organizations.ts currently allows normal admin users to manage organizations.
+
+For a multi-tenant app, organization list/create/update/delete should be platform_admin only.
+
+Required policy:
+
+    GET    /api/organizations          platform_admin only
+    POST   /api/organizations          platform_admin only
+    PATCH  /api/organizations/:id      platform_admin only
+    DELETE /api/organizations/:id      platform_admin only
+
+Current organization route should be separate:
+
+    GET /api/org/current               authenticated user
+    PUT /api/org/current               admin or platform_admin, scoped to own org
+
+Required implementation:
+
+Update organization-management routes to require platform_admin.
+
+Example:
+
+    router.get(
+      "/",
+      authMiddleware,
+      requireRole("platform_admin"),
+      async (_req, res) => {
+        const orgs = await db.select().from(organizations);
+        res.json(orgs);
+      }
+    );
+
+    router.post(
+      "/",
+      authMiddleware,
+      requireRole("platform_admin"),
+      async (req, res) => {
+        ...
+      }
+    );
+
+    router.patch(
+      "/:id",
+      authMiddleware,
+      requireRole("platform_admin"),
+      async (req, res) => {
+        ...
+      }
+    );
+
+    router.delete(
+      "/:id",
+      authMiddleware,
+      requireRole("platform_admin"),
+      async (req, res) => {
+        ...
+      }
+    );
+
+Add tests:
+
+- admin cannot list all organizations.
+- admin cannot create organizations.
+- admin cannot update another organization.
+- admin cannot delete organizations.
+- platform_admin can list organizations.
+- platform_admin can create organizations.
+- platform_admin can update organizations.
+- platform_admin can delete organizations.
+- admin can update only their current org through /api/org/current if that route exists.
+- admin cannot update another org through /api/org/current.
+
+Acceptance criteria:
+
+- Normal org admins cannot manage global organizations.
+- platform_admin can manage organizations.
+- Existing organization/current-org behavior remains correct.
+- npm test passes.
+- npm run check passes.
+
+
+Task 3 — Generate Real Gated Inventory for Local Ansible Runs
+-------------------------------------------------------------
+
+Problem:
+
+createInventoryForRun() currently writes a placeholder inventory:
+
+    all:
+      hosts:
+        localhost:
+          ansible_connection: local
+
+This is safe, but it does not fulfill the product promise.
+
+The product promise is:
+
+    Automation should run only against CMDB-approved / Automation-GATE-approved assets.
+
+Required implementation:
+
+Update createInventoryForRun() so it generates inventory from gate-approved hosts.
+
+Expected behavior:
+
+1. Identify the automation inventory or source inventory connected to the job template/run.
+2. Load the inventory hosts for the current org.
+3. Apply Automation GATE rules.
+4. Include only allowed hosts.
+5. Exclude blocked hosts.
+6. Write an Ansible YAML inventory file to:
+
+       runtime/inventories/<orgId>/<runId>/inventory.yml
+
+7. Return the absolute safe path.
+
+Recommended function shape:
+
+    export async function createInventoryForRun(options: {
+      orgId: string;
+      runId: string;
+      templateId: string;
+      inventoryId?: string | null;
+      limitExpr?: string | null;
+    }): Promise<string> {
+      ...
+    }
+
+Inventory file should include metadata comments:
+
+    # Generated by Rovelink
+    # Run ID: <runId>
+    # Organization ID: <orgId>
+    # Gate policy: enforced
+    # Blocked hosts excluded
+
+Example output:
+
+    all:
+      hosts:
+        vm-001:
+          ansible_host: 10.0.0.11
+          rovelink_netbox_id: 123
+          rovelink_gate_status: allowed
+        vm-002:
+          ansible_host: 10.0.0.12
+          rovelink_netbox_id: 124
+          rovelink_gate_status: allowed
+
+Required security behavior:
+
+- Do not include blocked hosts.
+- Do not include hosts from another organization.
+- Do not accept inventory path from the client.
+- Ensure parent directories are created safely.
+- Use safe path handling for runtime directory creation.
+- Do not write secrets into inventory unless explicitly required and encrypted/handled safely.
+
+If the current schema does not yet link job templates to automation inventories, add one of these:
+
+Option A:
+
+    jobTemplates.inventoryId
+
+Option B:
+
+    jobRuns.inventoryId
+
+Option C:
+
+    derive inventory from the template/project/provider/CMDB relationship
+
+Choose the smallest safe change that fits the existing data model.
+
+Acceptance criteria:
+
+- LocalRunner receives a real generated inventory file, not localhost placeholder.
+- Inventory contains only gate-approved hosts.
+- Blocked hosts are excluded.
+- Hosts from other organizations are excluded.
+- Tests cover:
+  - allowed hosts are included
+  - blocked hosts are excluded
+  - cross-org hosts are excluded
+  - inventory file is written to runtime/inventories/<orgId>/<runId>/inventory.yml
+- npm test passes.
+- npm run check passes.
+
+
+Task 4 — Keep Local Ansible Demo-Labeled or Implement Real Git Sync
+-------------------------------------------------------------------
+
+Problem:
+
+Local Ansible path validation is now safer, but project sync is still demo-only.
+
+Current demo behavior uses hardcoded playbooks such as:
+
+    site.yml
+    deploy.yml
+    rollback.yml
+
+Local Ansible cannot be considered production-functional until real project checkout exists.
+
+Choose one option.
+
+Option A — Keep demo-only behavior for now.
+
+Required changes:
+
+- UI must clearly say "Demo Sync" or "Simulated Sync".
+- Documentation must clearly say repository sync is simulated.
+- Local production execution should remain disabled unless project.checkoutPath exists.
+- Error message should be explicit:
+
+      Local execution requires a real project checkout. Demo sync does not create checkoutPath.
+
+- Do not claim local Ansible execution is production-ready.
+
+Option B — Implement real Git sync.
+
+Required changes:
+
+- Store repository URL and branch/ref.
+- Clone or pull repository into:
+
+      runtime/projects/<orgId>/<projectId>/
+
+- Save project.checkoutPath.
+- Discover .yml and .yaml playbooks from the checkout.
+- Use spawn with argument arrays for git commands.
+- Do not shell-interpolate repository URLs.
+- Do not log Git credentials or tokens.
+- Use credential store for private repo auth.
+- Use resolveSafePlaybookPath(project.checkoutPath, template.playbook) before execution.
+- Prevent path traversal and symlink escapes.
+
+Acceptance criteria for Option A:
+
+- UI and docs clearly label sync as demo/simulated.
+- Local production execution fails safely without checkoutPath.
+- No production-readiness doc claims real Git sync.
+
+Acceptance criteria for Option B:
+
+- Real Git checkout works.
+- checkoutPath is tenant-scoped.
+- Playbooks are discovered from the checked-out repo.
+- LocalRunner can run only playbooks inside checkoutPath.
+- Git credentials are not logged.
+- npm test passes.
+- npm run check passes.
+
+
+Task 5 — Clean Up PRODUCTION-HARDENING.md Audit Section
+-------------------------------------------------------
+
+Problem:
+
+PRODUCTION-HARDENING.md contains contradictory text.
+
+It correctly says there is an accepted risk:
+
+    1 high vulnerability
+
+But later it also says something like:
+
+    npm audit --omit=dev now reports 0 vulnerabilities
+
+This is inaccurate.
+
+Required update:
+
+Replace the audit section with accurate text.
+
+Suggested wording:
+
+    npm audit --omit=dev currently reports 1 high vulnerability:
+
+    - drizzle-orm GHSA-gpj5-g38j-94v9
+    - Impact: SQL injection via improperly escaped SQL identifiers
+    - Status: temporarily accepted risk
+    - Reason: current code does not appear to use dynamic SQL identifier interpolation
+    - Required before production: upgrade drizzle-orm to a patched version or maintain a formal risk exception with owner and review date
+
+Remove all contradictory text saying:
+
+    0 vulnerabilities
+
+or:
+
+    Wait — ...
+
+Acceptance criteria:
+
+- PRODUCTION-HARDENING.md matches actual npm audit --omit=dev output.
+- It does not claim 0 vulnerabilities while audit reports 1 high.
+- It clearly says the project is not fully production-ready until the risk is resolved or formally accepted.
+
+
+Task 6 — Resolve or Formally Track drizzle-orm Vulnerability
+------------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    drizzle-orm <0.45.2
+    GHSA-gpj5-g38j-94v9
+    SQL injection via improperly escaped SQL identifiers
+
+Required work:
+
+Try upgrading:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit
+
+or manually update package.json to patched compatible versions.
+
+Then run:
+
+    npm install
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+If upgrade succeeds:
+
+- Commit dependency updates.
+- Update PRODUCTION-HARDENING.md to say audit is clean.
+
+If upgrade is not feasible right now:
+
+Create a formal accepted-risk section:
+
+    Risk ID: ROVELINK-SEC-001
+    Package: drizzle-orm
+    Advisory: GHSA-gpj5-g38j-94v9
+    Severity: High
+    Status: Accepted temporarily
+    Owner: <project owner>
+    Date accepted: <date>
+    Review date: <date + 30 days>
+    Mitigation: No dynamic SQL identifier interpolation is used; all user input goes through parameterized Drizzle query builders.
+    Required resolution: Upgrade to patched drizzle-orm once compatible with current drizzle-zod/Zod setup.
+
+Acceptance criteria:
+
+- Either npm audit --omit=dev shows no high vulnerabilities,
+  OR the remaining vulnerability is documented as a formal accepted risk.
+- No contradictory documentation remains.
+- npm run check passes.
+- npm test passes.
+- npm run build passes.
+
+
+Task 7 — Make Tenant-Owned Storage Methods Require orgId
+--------------------------------------------------------
+
+Problem:
+
+Some storage methods still accept optional orgId:
+
+    getProvider(id, orgId?)
+    getPipeline(id, orgId?)
+    getJobRun(id, orgId?)
+    getSyncRun(id, orgId?)
+
+Optional orgId is risky because future routes can accidentally call these methods without orgId and bypass tenant isolation.
+
+Required implementation:
+
+For tenant-owned resources, prefer required orgId in public storage methods.
+
+Recommended approach:
+
+Create safe public methods:
+
+    getProviderForOrg(id: string, orgId: string)
+    getPipelineForOrg(id: string, orgId: string)
+    getJobRunForOrg(id: string, orgId: string)
+    getSyncRunForOrg(id: string, orgId: string)
+    getJobTemplateForOrg(id: string, orgId: string)
+    getCredentialForOrg(id: string, orgId: string)
+    getCmdbAccountForOrg(id: string, orgId: string)
+
+If an unsafe lookup is needed for internal/background jobs, make it explicit:
+
+    getProviderUnsafeById(id: string)
+    getPipelineUnsafeById(id: string)
+
+Add comments:
+
+    // Unsafe: only use in internal jobs after ownership has already been verified.
+
+Better option:
+
+Change existing method signatures so orgId is required and fix all TypeScript call sites.
+
+Example:
+
+    getProvider(id: string, orgId: string)
+
+not:
+
+    getProvider(id: string, orgId?: string)
+
+Acceptance criteria:
+
+- Tenant-owned storage methods require orgId by TypeScript signature.
+- Any unsafe method is explicitly named Unsafe and documented.
+- Route handlers do not call unsafe methods.
+- npm run check catches missing orgId at compile time.
+- npm run check passes after all call sites are updated.
+
+
+Task 8 — Add Tests for platform_admin and Organization Boundaries
+-----------------------------------------------------------------
+
+Required tests:
+
+Add/update tests for role hierarchy:
+
+- platform_admin can access admin endpoint.
+- platform_admin can access operator endpoint.
+- platform_admin can access viewer endpoint.
+- admin cannot access platform_admin endpoint.
+- operator cannot access admin endpoint.
+- viewer cannot access operator endpoint.
+
+Add/update tests for organization management:
+
+- admin cannot list all organizations.
+- admin cannot create organization.
+- admin cannot update arbitrary organization.
+- admin cannot delete organization.
+- platform_admin can list organizations.
+- platform_admin can create organization.
+- platform_admin can update organization.
+- platform_admin can delete organization.
+
+Add/update tests for settings:
+
+- admin cannot update global AWX settings if settings are global platform settings.
+- platform_admin can update global AWX settings.
+- viewer/operator cannot update settings.
+
+Acceptance criteria:
+
+- Tests fail before role/organization fixes.
+- Tests pass after fixes.
+- npm test passes.
+
+
+Task 9 — Add Tests for Gated Inventory Generation
+-------------------------------------------------
+
+Required tests:
+
+Add tests for createInventoryForRun().
+
+Test cases:
+
+1. Includes allowed hosts.
+2. Excludes blocked hosts.
+3. Excludes hosts from another organization.
+4. Writes file under:
+
+       runtime/inventories/<orgId>/<runId>/inventory.yml
+
+5. Does not include secrets.
+6. Returns an absolute path.
+7. Fails safely if no inventory or no allowed hosts exist, depending on desired behavior.
+
+Suggested expected behavior for no allowed hosts:
+
+Either:
+
+    throw new Error("No gate-approved hosts available for this run")
+
+or generate an empty inventory and mark run as failed before execution.
+
+Preferred:
+
+    fail before executing ansible-playbook
+
+Acceptance criteria:
+
+- LocalRunner is not called when there are zero allowed hosts.
+- Tests cover no-allowed-host behavior.
+- npm test passes.
+
+
+Task 10 — Final Verification
+----------------------------
+
+After all tasks, run:
+
+    npm ci
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Expected target:
+
+- npm ci passes
+- npm run check passes
+- npm test passes
+- npm run build passes
+- npm audit --omit=dev has no high vulnerabilities,
+  OR exactly documented accepted risk exists
+
+Also run, if a real test database is available:
+
+    npm run test:integration
+
+Expected:
+
+- integration tests pass with a real DATABASE_URL
+- integration tests fail clearly without DATABASE_URL
+
+Final production-readiness criteria:
+
+- platform_admin hierarchy works.
+- Organization management is platform_admin-only.
+- Local Ansible inventory is generated from gate-approved assets, not localhost placeholder.
+- Local Ansible cannot run without safe project checkoutPath.
+- Project sync is either real or clearly demo-only everywhere.
+- PRODUCTION-HARDENING.md matches actual command results.
+- Drizzle vulnerability is resolved or formally accepted with owner/review date.
+- Tenant-owned storage methods require orgId or unsafe methods are explicitly named.

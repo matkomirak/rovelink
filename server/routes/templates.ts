@@ -1,24 +1,16 @@
 import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
+import type { Request } from "express";
 import { WebSocket } from "ws";
 import { storage } from "../storage";
 import { dispatchRun } from "../services/runner-dispatcher";
 import { notificationService } from "../services/notificationService";
 import { insertJobTemplateSchema } from "@shared/schema";
+import { requireRole } from "../auth/roles";
 
 interface AuthRequest extends Request {
   userId?: string;
   orgId?: string;
   user?: any;
-}
-
-function requireRole(...roles: string[]) {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    next();
-  };
 }
 
 const router = Router();
@@ -32,10 +24,19 @@ router.get("/", async (req: AuthRequest, res) => {
   }
 });
 
+router.get("/:id", async (req: AuthRequest, res) => {
+  try {
+    const template = await storage.getJobTemplate(req.params.id, req.orgId);
+    if (!template) return res.status(404).json({ message: "Template not found" });
+    res.json(template);
+  } catch (error: any) {
+    res.status(500).json({ message: error.message || "Failed to fetch template" });
+  }
+});
+
 router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    const { orgId: _o, id: _i, ...safeBody } = req.body;
-    const data = insertJobTemplateSchema.parse({ ...safeBody, orgId: req.orgId });
+    const data = insertJobTemplateSchema.parse({ ...req.body, orgId: req.orgId });
     const template = await storage.createJobTemplate(data);
     res.json(template);
   } catch (error: any) {
@@ -46,22 +47,23 @@ router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
 router.patch("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
     const template = await storage.updateJobTemplate(req.params.id, req.body, req.orgId);
+    if (!template) return res.status(404).json({ message: "Template not found" });
     res.json(template);
   } catch (error: any) {
-    res.status(400).json({ message: error.message || "Failed to update template" });
+    res.status(500).json({ message: error.message || "Failed to update template" });
   }
 });
 
 router.delete("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
     await storage.deleteJobTemplate(req.params.id, req.orgId);
-    res.json({ message: "Template deleted successfully" });
+    res.status(204).end();
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to delete template" });
   }
 });
 
-router.post("/:id/launch", requireRole("operator", "admin"), async (req: AuthRequest, res) => {
+router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res) => {
   try {
     const template = await storage.getJobTemplate(req.params.id, req.orgId);
     if (!template) {
@@ -120,14 +122,14 @@ router.post("/:id/launch", requireRole("operator", "admin"), async (req: AuthReq
   }
 });
 
-router.post("/:id/schedule", requireRole("operator", "admin"), async (req: AuthRequest, res) => {
+router.post("/:id/schedule", requireRole("operator"), async (req: AuthRequest, res) => {
   try {
     const template = await storage.getJobTemplate(req.params.id, req.orgId);
-    if (!template) {
-      return res.status(404).json({ message: "Template not found" });
-    }
+    if (!template) return res.status(404).json({ message: "Template not found" });
 
     const { scheduledAt } = req.body;
+    if (!scheduledAt) return res.status(400).json({ message: "scheduledAt required" });
+
     const run = await storage.createJobRun({
       templateId: template.id,
       userId: req.userId!,
@@ -137,14 +139,9 @@ router.post("/:id/schedule", requireRole("operator", "admin"), async (req: AuthR
       limitExpr: template.limitExpr || null,
     });
 
-    const delay = new Date(scheduledAt).getTime() - Date.now();
-    setTimeout(async () => {
-      await storage.updateJobRun(run.id, { status: "running" });
-    }, delay);
-
     res.json(run);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to schedule job" });
+    res.status(400).json({ message: error.message || "Failed to schedule job" });
   }
 });
 

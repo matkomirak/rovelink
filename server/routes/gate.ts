@@ -5,10 +5,11 @@
 // Gate evaluation is a FIRST-CLASS PHASE.
 // Inventory generation must never implicitly re-evaluate gates.
 
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { gateStore } from "../services/gate-store";
 import { providerHintsStore } from "../services/provider-hints-store";
 import { GATE_DESIGN_PRINCIPLE } from "../services/gate-design-principle";
+import { requireRole } from "../auth/roles";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -146,12 +147,8 @@ router.get("/summary", async (req: AuthRequest, res: Response) => {
 // POST /api/gate/sync-blocks - Sync block reasons to NetBox for human visibility
 // Block reason sync-back is informational only.
 // NetBox remains the source of governance, not of gate decisions.
-router.post("/sync-blocks", async (req: AuthRequest, res: Response) => {
+router.post("/sync-blocks", requireRole("admin"), async (req: AuthRequest, res: Response) => {
   try {
-    const userRole = req.user?.role;
-    if (!userRole || userRole !== "admin") {
-      return res.status(403).json({ message: "Admin role required" });
-    }
 
     const blocked = await gateStore.getBlockedVms();
     

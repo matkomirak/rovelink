@@ -1,8 +1,20 @@
+/**
+ * Organization management routes.
+ *
+ * Route policy:
+ *   GET/POST/PATCH/DELETE /api/organizations  — platform_admin only
+ *     (Global org management is a platform-level operation.)
+ *
+ *   GET  /api/org/current  — any authenticated user (reads own org)
+ *   PUT  /api/org/current  — admin or platform_admin (updates own org only)
+ */
+
 import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
+import type { Request } from "express";
 import { db } from "../db";
 import { organizations, insertOrganizationSchema } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { requireRole } from "../auth/roles";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -10,18 +22,11 @@ interface AuthRequest extends Request {
   user?: any;
 }
 
-function requireRole(...roles: string[]) {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    next();
-  };
-}
-
 const router = Router();
 
-router.get("/", async (_req, res) => {
+// ── Global organization management — platform_admin only ─────────────────────
+
+router.get("/", requireRole("platform_admin"), async (_req, res) => {
   try {
     const orgs = await db.select().from(organizations);
     res.json(orgs);
@@ -30,7 +35,7 @@ router.get("/", async (_req, res) => {
   }
 });
 
-router.post("/", requireRole("admin"), async (req, res) => {
+router.post("/", requireRole("platform_admin"), async (req, res) => {
   try {
     const data = insertOrganizationSchema.parse(req.body);
     const [org] = await db.insert(organizations).values(data).returning();
@@ -40,7 +45,7 @@ router.post("/", requireRole("admin"), async (req, res) => {
   }
 });
 
-router.patch("/:id", requireRole("admin"), async (req, res) => {
+router.patch("/:id", requireRole("platform_admin"), async (req, res) => {
   try {
     const [org] = await db
       .update(organizations)
@@ -54,7 +59,7 @@ router.patch("/:id", requireRole("admin"), async (req, res) => {
   }
 });
 
-router.delete("/:id", requireRole("admin"), async (req, res) => {
+router.delete("/:id", requireRole("platform_admin"), async (req, res) => {
   try {
     await db.delete(organizations).where(eq(organizations.id, req.params.id));
     res.status(204).end();
@@ -63,11 +68,15 @@ router.delete("/:id", requireRole("admin"), async (req, res) => {
   }
 });
 
-// /api/org/current — caller's own org
+// ── Current-org endpoints — scoped to the caller's own org ───────────────────
+
 router.get("/current", async (req: AuthRequest, res) => {
   try {
     if (!req.orgId) return res.status(404).json({ message: "No organisation assigned" });
-    const [org] = await db.select().from(organizations).where(eq(organizations.id, req.orgId));
+    const [org] = await db
+      .select()
+      .from(organizations)
+      .where(eq(organizations.id, req.orgId));
     if (!org) return res.status(404).json({ message: "Organisation not found" });
     res.json(org);
   } catch (err: any) {

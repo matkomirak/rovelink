@@ -111,7 +111,14 @@ async function runLocally(
   );
 
   // Generate and write a per-org/run inventory file — never accept a path from the client.
-  const inventoryPath = await createInventoryForRun(run.orgId, run.id);
+  // Gate policy is enforced inside createInventoryForRun; blocked hosts are excluded.
+  const inventoryPath = await createInventoryForRun({
+    orgId: run.orgId,
+    runId: run.id,
+    templateId: template.id,
+    inventoryId: template.inventoryId ?? null,
+    limitExpr: run.limitExpr ?? null,
+  });
 
   const runner = new LocalRunner();
   const result = await runner.execute(

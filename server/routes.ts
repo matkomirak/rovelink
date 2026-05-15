@@ -1,4 +1,5 @@
 import type { Express, Request, Response, NextFunction } from "express";
+import { requireRole } from "./auth/roles";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import express from "express";
@@ -123,15 +124,7 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
   next();
 }
 
-// Role middleware
-function requireRole(...roles: string[]) {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    next();
-  };
-}
+// Role middleware — see server/auth/roles.ts for the full hierarchy.
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ─── Health endpoints (no auth required) ───────────────────────────────────

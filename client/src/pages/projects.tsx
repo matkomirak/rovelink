@@ -268,7 +268,7 @@ export default function Projects() {
                     data-testid={`button-sync-${project.id}`}
                   >
                     <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-                    Sync
+                    Demo Sync
                   </Button>
                   <Button
                     variant="outline"

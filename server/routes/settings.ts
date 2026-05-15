@@ -39,7 +39,7 @@ router.get("/", async (_req, res) => {
   }
 });
 
-router.post("/", requireRole("admin"), async (req, res) => {
+router.post("/", requireRole("platform_admin"), async (req, res) => {
   try {
     const { netboxUrl, netboxToken } = req.body;
     if (netboxUrl) await storage.setSetting("netbox_url", netboxUrl);
@@ -89,7 +89,7 @@ router.get("/awx", async (_req, res) => {
   }
 });
 
-router.post("/awx/test", requireRole("admin"), async (req, res) => {
+router.post("/awx/test", requireRole("platform_admin"), async (req, res) => {
   try {
     const { encryptSecret: enc } = await import("../services/secrets");
     const { AwxRunner } = await import("../services/awx-runner");

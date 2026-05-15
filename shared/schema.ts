@@ -19,7 +19,7 @@ export const users = pgTable("users", {
   orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  role: text("role").notNull().default("viewer"), // admin, operator, viewer
+  role: text("role").notNull().default("viewer"), // platform_admin, admin, operator, viewer
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

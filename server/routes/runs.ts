@@ -1,5 +1,5 @@
 import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
+import type { Request } from "express";
 import { storage } from "../storage";
 
 interface AuthRequest extends Request {
@@ -31,13 +31,14 @@ router.get("/", async (req: AuthRequest, res) => {
     const typeFilter = type && type !== "_all" ? (type as string) : null;
     const statusFilter = status && status !== "_all" ? (status as string) : null;
 
+    // All three data sources are org-scoped — org-A cannot see org-B's runs
     const [jobRunsData, pipelineRunsData, syncRunsData, pipelinesData, providersData] =
       await Promise.all([
-        storage.getJobRuns({}, 1, 100),
-        storage.getAllPipelineRuns(100),
-        storage.getAllSyncRuns(100),
-        storage.getPipelines(),
-        storage.getProviders(),
+        storage.getJobRuns({}, 1, 100, req.orgId),
+        storage.getAllPipelineRuns(100, req.orgId),
+        storage.getAllSyncRuns(100, req.orgId),
+        storage.getPipelines(req.orgId),
+        storage.getProviders(req.orgId),
       ]);
 
     const pipelineNameMap = new Map(
@@ -129,8 +130,10 @@ router.get("/", async (req: AuthRequest, res) => {
 router.get("/:id", async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    const orgId = req.orgId;
 
-    const jobRun = await storage.getJobRun(id, req.orgId);
+    // org-scoped lookup for job runs — returns undefined if wrong org
+    const jobRun = await storage.getJobRun(id, orgId);
     if (jobRun) {
       return res.json({
         ...jobRun,
@@ -140,9 +143,10 @@ router.get("/:id", async (req: AuthRequest, res) => {
       });
     }
 
-    const pipelineRun = await storage.getPipelineRun(id);
+    // org-scoped pipeline run lookup — verifies via pipeline ownership
+    const pipelineRun = await storage.getPipelineRun(id, orgId);
     if (pipelineRun) {
-      const pipeline = await storage.getPipeline(pipelineRun.pipelineId);
+      const pipeline = await storage.getPipeline(pipelineRun.pipelineId, orgId);
       return res.json({
         ...pipelineRun,
         runType: "bdp-sync",
@@ -151,9 +155,10 @@ router.get("/:id", async (req: AuthRequest, res) => {
       });
     }
 
-    const syncRun = await storage.getSyncRun(id);
+    // org-scoped sync run lookup — verifies via provider ownership
+    const syncRun = await storage.getSyncRun(id, orgId);
     if (syncRun) {
-      const provider = await storage.getProvider(syncRun.providerAccountId);
+      const provider = await storage.getProvider(syncRun.providerAccountId, orgId);
       return res.json({
         ...syncRun,
         runType: "provider-sync",

@@ -10,6 +10,7 @@ import { AwxRunner } from "./awx-runner";
 import { LocalRunner } from "./local-runner";
 import { decryptSecret } from "./secrets";
 import { resolveSafePlaybookPath, validatePlaybookPathSyntax } from "./safe-playbook-path";
+import { createInventoryForRun } from "./inventory-generator";
 import type { JobRun } from "../../shared/schema";
 
 export interface RunResult {
@@ -109,10 +110,8 @@ async function runLocally(
     template.playbook
   );
 
-  // Generate a per-org/run inventory path — never accept a path from the client.
-  const inventoryPath = run.orgId
-    ? `runtime/inventories/${run.orgId}/${run.id}/inventory.yml`
-    : `runtime/inventories/default/${run.id}/inventory.yml`;
+  // Generate and write a per-org/run inventory file — never accept a path from the client.
+  const inventoryPath = await createInventoryForRun(run.orgId, run.id);
 
   const runner = new LocalRunner();
   const result = await runner.execute(

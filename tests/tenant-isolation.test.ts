@@ -10,7 +10,19 @@
  * Routes return 404 — not 403 — when an org-scoped lookup finds nothing.
  * This is intentional: leaking the existence of a resource to another org
  * would itself be an information disclosure.
+ *
+ * REQUIRES: DATABASE_URL environment variable pointing at a real PostgreSQL DB.
+ * Run with: npm run test:integration
  */
+
+// ── Guard: fail immediately with a clear message if DATABASE_URL is missing ──
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "\n[tenant-isolation] DATABASE_URL is required for integration tests.\n" +
+    "  Run with:  npm run test:integration\n" +
+    "  These tests require a real PostgreSQL database and do NOT run as part of npm test.\n"
+  );
+}
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert";
@@ -20,7 +32,7 @@ import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import { registerRoutes } from "../server/routes";
 import { db } from "../server/db";
-import { organizations } from "../shared/schema";
+import { organizations, users } from "../shared/schema";
 import { eq } from "drizzle-orm";
 import type { Server } from "http";
 
@@ -44,6 +56,10 @@ let req: ReturnType<typeof supertest>;
 const tokenA = makeToken(ORG_A_ID);
 const tokenB = makeToken(ORG_B_ID);
 
+// Derived user IDs must match the `userId` claim embedded in the JWTs below
+const USER_A_ID = `test-${ORG_A_ID}`;
+const USER_B_ID = `test-${ORG_B_ID}`;
+
 before(async () => {
   // Ensure test organizations exist (FK references on orgId columns)
   await db
@@ -51,6 +67,16 @@ before(async () => {
     .values([
       { id: ORG_A_ID, name: "Test Org Alpha", slug: "test-org-alpha-isolation" },
       { id: ORG_B_ID, name: "Test Org Beta", slug: "test-org-beta-isolation" },
+    ])
+    .onConflictDoNothing();
+
+  // Insert test users so that job_runs.user_id FK constraints are satisfied.
+  // Passwords use a deterministic dummy hash — these accounts are never used for auth.
+  await db
+    .insert(users)
+    .values([
+      { id: USER_A_ID, username: `user-${ORG_A_ID}`, password: "test-no-auth", role: "admin", orgId: ORG_A_ID },
+      { id: USER_B_ID, username: `user-${ORG_B_ID}`, password: "test-no-auth", role: "admin", orgId: ORG_B_ID },
     ])
     .onConflictDoNothing();
 
@@ -272,5 +298,85 @@ describe("Cross-tenant isolation — list endpoints", () => {
     const ids: string[] = res.body.map((n: { id: string }) => n.id);
     assert.ok(!ids.includes(notifIdA), "org-B list must not include org-A notification");
     assert.ok(ids.includes(notifIdB), "org-B list must include org-B notification");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Job runs — org-A runs must not be visible to org-B
+// ---------------------------------------------------------------------------
+
+describe("Cross-tenant isolation — job runs", () => {
+  let projectId: string;
+  let templateId: string;
+  let runId: string;
+
+  test("org-A creates a project and template", async () => {
+    const projRes = await req
+      .post("/api/projects")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ name: "Isolation Test Project", gitUrl: "https://github.com/test/repo.git", gitRef: "main" })
+      .expect(200);
+    projectId = projRes.body.id;
+    assert.ok(projectId, "Project id must be set");
+
+    const tmplRes = await req
+      .post("/api/templates")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ name: "Isolation Template", projectId, playbook: "site.yml" })
+      .expect(200);
+    templateId = tmplRes.body.id;
+    assert.ok(templateId, "Template id must be set");
+  });
+
+  test("org-A launches a job — run is created with org-A scope", async () => {
+    const launchRes = await req
+      .post(`/api/templates/${templateId}/launch`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(200);
+
+    runId = launchRes.body.id;
+    assert.ok(runId, "Run id must be set");
+    assert.equal(launchRes.body.orgId, ORG_A_ID, "Run must be scoped to org-A");
+
+    // Allow the setImmediate dispatch (local runner + notifications) to complete
+    // before the test ends, so no async activity leaks past this test boundary.
+    await new Promise((r) => setTimeout(r, 500));
+  });
+
+  test("org-B cannot GET org-A job run by id", async () => {
+    await req
+      .get(`/api/runs/${runId}`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(404);
+  });
+
+  test("org-B run list does not contain org-A job run", async () => {
+    const res = await req
+      .get("/api/runs")
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(200);
+
+    const ids: string[] = res.body.map((r: { id: string }) => r.id);
+    assert.ok(!ids.includes(runId), "org-B run list must not include org-A job run");
+  });
+
+  test("org-A can still GET its own job run", async () => {
+    const res = await req
+      .get(`/api/runs/${runId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(200);
+
+    assert.equal(res.body.id, runId);
+    assert.equal(res.body.orgId, ORG_A_ID);
+  });
+
+  test("org-A run list contains its own job run", async () => {
+    const res = await req
+      .get("/api/runs")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(200);
+
+    const ids: string[] = res.body.map((r: { id: string }) => r.id);
+    assert.ok(ids.includes(runId), "org-A run list must include its own job run");
   });
 });

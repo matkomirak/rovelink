@@ -22,7 +22,7 @@ import {
   type PipelineRun, type InsertPipelineRun,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, lte, and, lt, sql } from "drizzle-orm";
+import { eq, desc, gte, lte, and, lt, sql, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -78,7 +78,7 @@ export interface IStorage {
 
   // Sync Run operations
   createSyncRun(run: InsertSyncRun): Promise<SyncRun>;
-  getSyncRun(id: string): Promise<SyncRun | undefined>;
+  getSyncRun(id: string, orgId?: string | null): Promise<SyncRun | undefined>;
   updateSyncRun(id: string, data: Partial<SyncRun>): Promise<SyncRun | undefined>;
   getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]>;
   getLastFailedSyncRuns(): Promise<SyncRun[]>;
@@ -127,14 +127,13 @@ export interface IStorage {
 
   // Pipeline Run operations
   getPipelineRuns(pipelineId: string, limit?: number): Promise<PipelineRun[]>;
-  getAllPipelineRuns(limit?: number): Promise<PipelineRun[]>;
-  getPipelineRun(id: string): Promise<PipelineRun | undefined>;
+  getAllPipelineRuns(limit?: number, orgId?: string | null): Promise<PipelineRun[]>;
+  getPipelineRun(id: string, orgId?: string | null): Promise<PipelineRun | undefined>;
   createPipelineRun(run: InsertPipelineRun): Promise<PipelineRun>;
   updatePipelineRun(id: string, data: Partial<PipelineRun>): Promise<PipelineRun | undefined>;
 
-  // Sync Run operations
-  getAllSyncRuns(limit?: number): Promise<SyncRun[]>;
-  getSyncRun(id: string): Promise<SyncRun | undefined>;
+  // Sync Run (unified) operations
+  getAllSyncRuns(limit?: number, orgId?: string | null): Promise<SyncRun[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -416,9 +415,15 @@ export class DatabaseStorage implements IStorage {
     return run;
   }
 
-  async getSyncRun(id: string): Promise<SyncRun | undefined> {
+  async getSyncRun(id: string, orgId?: string | null): Promise<SyncRun | undefined> {
     const [run] = await db.select().from(syncRuns).where(eq(syncRuns.id, id));
-    return run || undefined;
+    if (!run) return undefined;
+    if (orgId) {
+      // Verify the run's provider belongs to this org
+      const provider = await this.getProvider(run.providerAccountId, orgId);
+      if (!provider) return undefined;
+    }
+    return run;
   }
 
   async updateSyncRun(id: string, data: Partial<SyncRun>): Promise<SyncRun | undefined> {
@@ -736,9 +741,15 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  async getPipelineRun(id: string): Promise<PipelineRun | undefined> {
+  async getPipelineRun(id: string, orgId?: string | null): Promise<PipelineRun | undefined> {
     const [run] = await db.select().from(pipelineRuns).where(eq(pipelineRuns.id, id));
-    return run || undefined;
+    if (!run) return undefined;
+    if (orgId) {
+      // Verify the run's pipeline belongs to this org
+      const pipeline = await this.getPipeline(run.pipelineId, orgId);
+      if (!pipeline) return undefined;
+    }
+    return run;
   }
 
   async createPipelineRun(insertRun: InsertPipelineRun): Promise<PipelineRun> {
@@ -758,8 +769,20 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
-  // All pipeline runs (not filtered by pipeline)
-  async getAllPipelineRuns(limit: number = 100): Promise<PipelineRun[]> {
+  // All pipeline runs, optionally scoped to an org via pipeline ownership
+  async getAllPipelineRuns(limit: number = 100, orgId?: string | null): Promise<PipelineRun[]> {
+    if (orgId) {
+      const orgPipelineIds = db
+        .select({ id: pipelines.id })
+        .from(pipelines)
+        .where(eq(pipelines.orgId, orgId));
+      return await db
+        .select()
+        .from(pipelineRuns)
+        .where(inArray(pipelineRuns.pipelineId, orgPipelineIds))
+        .orderBy(desc(pipelineRuns.createdAt))
+        .limit(limit);
+    }
     return await db
       .select()
       .from(pipelineRuns)
@@ -767,8 +790,20 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  // All sync runs (not filtered by provider)
-  async getAllSyncRuns(limit: number = 100): Promise<SyncRun[]> {
+  // All sync runs, optionally scoped to an org via provider ownership
+  async getAllSyncRuns(limit: number = 100, orgId?: string | null): Promise<SyncRun[]> {
+    if (orgId) {
+      const orgProviderIds = db
+        .select({ id: providerAccounts.id })
+        .from(providerAccounts)
+        .where(eq(providerAccounts.orgId, orgId));
+      return await db
+        .select()
+        .from(syncRuns)
+        .where(inArray(syncRuns.providerAccountId, orgProviderIds))
+        .orderBy(desc(syncRuns.createdAt))
+        .limit(limit);
+    }
     return await db
       .select()
       .from(syncRuns)

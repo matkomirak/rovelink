@@ -31,28 +31,28 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
 
   // Project operations
-  getProjects(): Promise<Project[]>;
+  getProjects(orgId?: string | null): Promise<Project[]>;
   getProject(id: string): Promise<Project | undefined>;
   createProject(project: InsertProject): Promise<Project>;
   updateProject(id: string, data: Partial<Project>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<void>;
 
   // Credential operations
-  getCredentials(): Promise<Credential[]>;
+  getCredentials(orgId?: string | null): Promise<Credential[]>;
   getCredential(id: string): Promise<Credential | undefined>;
   createCredential(credential: InsertCredential): Promise<Credential>;
   updateCredential(id: string, data: Partial<Credential>): Promise<Credential | undefined>;
   deleteCredential(id: string): Promise<void>;
 
   // Job Template operations
-  getJobTemplates(): Promise<JobTemplate[]>;
+  getJobTemplates(orgId?: string | null): Promise<JobTemplate[]>;
   getJobTemplate(id: string): Promise<JobTemplate | undefined>;
   createJobTemplate(template: InsertJobTemplate): Promise<JobTemplate>;
   updateJobTemplate(id: string, data: Partial<JobTemplate>): Promise<JobTemplate | undefined>;
   deleteJobTemplate(id: string): Promise<void>;
 
   // Job Run operations
-  getJobRuns(filters?: any, page?: number, pageSize?: number): Promise<JobRun[]>;
+  getJobRuns(filters?: any, page?: number, pageSize?: number, orgId?: string | null): Promise<JobRun[]>;
   getJobRun(id: string): Promise<JobRun | undefined>;
   createJobRun(run: InsertJobRun): Promise<JobRun>;
   updateJobRun(id: string, data: Partial<JobRun>): Promise<JobRun | undefined>;
@@ -70,7 +70,7 @@ export interface IStorage {
   deleteNotification(id: string): Promise<void>;
 
   // Provider operations
-  getProviders(): Promise<ProviderAccount[]>;
+  getProviders(orgId?: string | null): Promise<ProviderAccount[]>;
   getProvider(id: string): Promise<ProviderAccount | undefined>;
   createProvider(provider: InsertProviderAccount): Promise<ProviderAccount>;
   updateProvider(id: string, data: Partial<ProviderAccount>): Promise<ProviderAccount | undefined>;
@@ -97,21 +97,21 @@ export interface IStorage {
   deleteAllNetboxVms(): Promise<void>;
 
   // NetBox Inventory Source operations
-  getNetboxInventorySources(): Promise<NetboxInventorySource[]>;
+  getNetboxInventorySources(orgId?: string | null): Promise<NetboxInventorySource[]>;
   getNetboxInventorySource(id: string): Promise<NetboxInventorySource | undefined>;
   createNetboxInventorySource(source: InsertNetboxInventorySource): Promise<NetboxInventorySource>;
   updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>): Promise<NetboxInventorySource | undefined>;
   deleteNetboxInventorySource(id: string): Promise<void>;
 
   // CMDB operations
-  getCmdbAccounts(): Promise<CmdbAccount[]>;
+  getCmdbAccounts(orgId?: string | null): Promise<CmdbAccount[]>;
   getCmdbAccount(id: string): Promise<CmdbAccount | undefined>;
   createCmdbAccount(account: InsertCmdbAccount): Promise<CmdbAccount>;
   updateCmdbAccount(id: string, data: Partial<CmdbAccount>): Promise<CmdbAccount | undefined>;
   deleteCmdbAccount(id: string): Promise<void>;
 
   // Pipeline operations
-  getPipelines(): Promise<Pipeline[]>;
+  getPipelines(orgId?: string | null): Promise<Pipeline[]>;
   getPipeline(id: string): Promise<Pipeline | undefined>;
   createPipeline(pipeline: InsertPipeline): Promise<Pipeline>;
   updatePipeline(id: string, data: Partial<Pipeline>): Promise<Pipeline | undefined>;
@@ -158,7 +158,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Project operations
-  async getProjects(): Promise<Project[]> {
+  async getProjects(orgId?: string | null): Promise<Project[]> {
+    if (orgId) {
+      return await db.select().from(projects).where(eq(projects.orgId, orgId)).orderBy(desc(projects.createdAt));
+    }
     return await db.select().from(projects).orderBy(desc(projects.createdAt));
   }
 
@@ -189,7 +192,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Credential operations
-  async getCredentials(): Promise<Credential[]> {
+  async getCredentials(orgId?: string | null): Promise<Credential[]> {
+    if (orgId) {
+      return await db.select().from(credentials).where(eq(credentials.orgId, orgId)).orderBy(desc(credentials.createdAt));
+    }
     return await db.select().from(credentials).orderBy(desc(credentials.createdAt));
   }
 
@@ -220,7 +226,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Job Template operations
-  async getJobTemplates(): Promise<JobTemplate[]> {
+  async getJobTemplates(orgId?: string | null): Promise<JobTemplate[]> {
+    if (orgId) {
+      return await db.select().from(jobTemplates).where(eq(jobTemplates.orgId, orgId)).orderBy(desc(jobTemplates.createdAt));
+    }
     return await db.select().from(jobTemplates).orderBy(desc(jobTemplates.createdAt));
   }
 
@@ -251,9 +260,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Job Run operations
-  async getJobRuns(filters: any = {}, page: number = 1, pageSize: number = 50): Promise<JobRun[]> {
+  async getJobRuns(filters: any = {}, page: number = 1, pageSize: number = 50, orgId?: string | null): Promise<JobRun[]> {
     let query = db.select().from(jobRuns);
     
+    if (orgId) {
+      query = query.where(eq(jobRuns.orgId, orgId)) as any;
+    }
     if (filters.status) {
       query = query.where(eq(jobRuns.status, filters.status)) as any;
     }
@@ -353,7 +365,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Provider operations
-  async getProviders(): Promise<ProviderAccount[]> {
+  async getProviders(orgId?: string | null): Promise<ProviderAccount[]> {
+    if (orgId) {
+      return await db.select().from(providerAccounts).where(eq(providerAccounts.orgId, orgId)).orderBy(desc(providerAccounts.createdAt));
+    }
     return await db.select().from(providerAccounts).orderBy(desc(providerAccounts.createdAt));
   }
 
@@ -559,7 +574,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // NetBox Inventory Source operations
-  async getNetboxInventorySources(): Promise<NetboxInventorySource[]> {
+  async getNetboxInventorySources(orgId?: string | null): Promise<NetboxInventorySource[]> {
+    if (orgId) {
+      return await db.select().from(netboxInventorySources).where(eq(netboxInventorySources.orgId, orgId)).orderBy(desc(netboxInventorySources.createdAt));
+    }
     return await db.select().from(netboxInventorySources).orderBy(desc(netboxInventorySources.createdAt));
   }
 
@@ -590,7 +608,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // CMDB operations
-  async getCmdbAccounts(): Promise<CmdbAccount[]> {
+  async getCmdbAccounts(orgId?: string | null): Promise<CmdbAccount[]> {
+    if (orgId) {
+      return await db.select().from(cmdbAccounts).where(eq(cmdbAccounts.orgId, orgId)).orderBy(desc(cmdbAccounts.createdAt));
+    }
     return await db.select().from(cmdbAccounts).orderBy(desc(cmdbAccounts.createdAt));
   }
 
@@ -627,7 +648,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Pipeline operations
-  async getPipelines(): Promise<Pipeline[]> {
+  async getPipelines(orgId?: string | null): Promise<Pipeline[]> {
+    if (orgId) {
+      return await db.select().from(pipelines).where(eq(pipelines.orgId, orgId)).orderBy(desc(pipelines.createdAt));
+    }
     return await db.select().from(pipelines).orderBy(desc(pipelines.createdAt));
   }
 

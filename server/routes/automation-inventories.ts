@@ -478,8 +478,9 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
 
     // Decrypt secrets before passing to adapter
     const decryptedRefreshCfg = decryptCmdbConfig(cmdb.config as Record<string, any>);
-    // Fetch VMs from NetBox
+    // Fetch VMs from NetBox (ensure automatable custom field exists — idempotent)
     const adapter = new NetBoxAdapter(decryptedRefreshCfg as any);
+    await adapter.ensureAutomatableCustomField().catch(() => {}); // non-fatal
     const vms = await adapter.listAllVms();
 
     // ================================================================

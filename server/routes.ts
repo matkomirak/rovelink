@@ -57,6 +57,7 @@ const loginRateLimiter = rateLimit({
 // Auth middleware
 interface AuthRequest extends Request {
   userId?: string;
+  orgId?: string;
   user?: any;
 }
 
@@ -75,9 +76,10 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; orgId?: string };
     req.userId = decoded.userId;
     req.user = await storage.getUser(decoded.userId);
+    req.orgId = req.user?.orgId ?? decoded.orgId ?? undefined;
     next();
   } catch (error) {
     res.status(401).json({ message: "Invalid token" });
@@ -129,9 +131,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         role: "viewer",
       });
 
-      const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      const token = jwt.sign({ userId: user.id, username: user.username, role: user.role, orgId: user.orgId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       setAuthCookie(res, token);
-      res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+      res.json({ token, user: { id: user.id, username: user.username, role: user.role, orgId: user.orgId } });
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Signup failed" });
     }
@@ -146,8 +148,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(403).json({ message: "AUTH_DISABLE is not permitted in production." });
         }
         // Development-only stub login
-        const stubUser = { id: "stub-admin-id", username: "admin", role: "admin" };
-        const token = jwt.sign({ userId: stubUser.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        const stubUser = { id: "stub-admin-id", username: "admin", role: "admin", orgId: null as null };
+        const token = jwt.sign({ userId: stubUser.id, username: stubUser.username, role: stubUser.role, orgId: stubUser.orgId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
         setAuthCookie(res, token);
         return res.json({ token, user: stubUser });
       }
@@ -164,9 +166,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      const token = jwt.sign({ userId: user.id, username: user.username, role: user.role, orgId: user.orgId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       setAuthCookie(res, token);
-      res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+      res.json({ token, user: { id: user.id, username: user.username, role: user.role, orgId: user.orgId } });
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Login failed" });
     }
@@ -225,9 +227,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Projects routes
-  app.get("/api/projects", authMiddleware, async (req, res) => {
+  app.get("/api/projects", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const projects = await storage.getProjects();
+      const projects = await storage.getProjects(req.orgId);
       res.json(projects);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch projects" });
@@ -295,9 +297,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Credentials routes
-  app.get("/api/credentials", authMiddleware, async (req, res) => {
+  app.get("/api/credentials", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const credentials = await storage.getCredentials();
+      const credentials = await storage.getCredentials(req.orgId);
       res.json(credentials);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch credentials" });
@@ -337,9 +339,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Templates routes
-  app.get("/api/templates", authMiddleware, async (req, res) => {
+  app.get("/api/templates", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const templates = await storage.getJobTemplates();
+      const templates = await storage.getJobTemplates(req.orgId);
       res.json(templates);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch templates" });
@@ -1339,6 +1341,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await db.delete(organizations).where(eq(organizations.id, req.params.id));
       res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Admin org endpoints (spec §6.5) ─────────────────────────────────────
+  app.get("/api/admin/organizations", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const orgs = await db.select().from(organizations);
+      res.json(orgs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/organizations", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const data = insertOrganizationSchema.parse(req.body);
+      const [org] = await db.insert(organizations).values(data).returning();
+      res.status(201).json(org);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // GET /api/org/current — returns the org for the logged-in user
+  app.get("/api/org/current", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      if (!req.orgId) return res.status(404).json({ message: "No organisation assigned" });
+      const [org] = await db.select().from(organizations).where(eq(organizations.id, req.orgId));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+      res.json(org);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // PUT /api/org/current — update the org name/slug for the logged-in user
+  app.put("/api/org/current", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
+    try {
+      if (!req.orgId) return res.status(404).json({ message: "No organisation assigned" });
+      const { name, slug } = req.body;
+      const [org] = await db
+        .update(organizations)
+        .set({ ...(name && { name }), ...(slug && { slug }) })
+        .where(eq(organizations.id, req.orgId))
+        .returning();
+      res.json(org);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

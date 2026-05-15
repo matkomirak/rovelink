@@ -7,6 +7,7 @@ import { storage } from "../storage";
 import { insertPipelineSchema, insertPipelineRunSchema } from "@shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
 import { IdoitAdapter } from "../services/idoit-adapter";
+import { ServiceNowAdapter } from "../services/servicenow-adapter";
 import { decryptCmdbConfig, decryptProviderConfig } from "../services/secrets";
 import { rulesEngine } from "../services/rules-engine";
 import { getSamples, getObjectTypes } from "../services/sample-fixtures";
@@ -54,6 +55,8 @@ async function getCmdbAdapter(cmdbAccountId: string) {
     return new NetBoxAdapter(config as { url: string; token: string });
   } else if (cmdb.kind === "idoit") {
     return new IdoitAdapter(config as { url: string; apiKey: string });
+  } else if (cmdb.kind === "servicenow") {
+    return new ServiceNowAdapter(config as { url: string; username: string; password: string });
   } else {
     throw new Error(`Unsupported CMDB kind: ${cmdb.kind}`);
   }

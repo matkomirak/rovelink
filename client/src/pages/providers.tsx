@@ -33,6 +33,12 @@ const providerFormSchema = insertProviderAccountSchema.extend({
   client_id: z.string().optional(),
   client_secret: z.string().optional(),
   resource_groups: z.string().optional(),
+  // vCenter provider fields
+  vcenter_url: z.string().optional(),
+  vcenter_username: z.string().optional(),
+  vcenter_password: z.string().optional(),
+  vcenter_datacenter: z.string().optional(),
+  vcenter_cluster: z.string().optional(),
   // Fake provider fields
   variant: z.enum(["proxmox", "vsphere", "azure", "aws"]).optional(),
   seed: z.number().optional(),
@@ -433,7 +439,7 @@ export default function Providers() {
                           <SelectItem value="proxmox">Proxmox</SelectItem>
                           <SelectItem value="fake">Fake (Generator)</SelectItem>
                           <SelectItem value="azure">Azure</SelectItem>
-                          <SelectItem value="vmware" disabled>VMware (Coming Soon)</SelectItem>
+                          <SelectItem value="vcenter">VMware vCenter</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -920,6 +926,98 @@ export default function Providers() {
                           </FormControl>
                           <FormDescription>Comma-separated list of resource groups to scope. Leave blank to sync all.</FormDescription>
                           <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                )}
+
+                {(selectedKind === "vcenter" || form.watch("kind") === "vcenter") && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="vcenter_url"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>vCenter URL</FormLabel>
+                          <FormControl>
+                            <Input placeholder="https://vcenter.example.com" {...field} data-testid="input-vcenter-url" />
+                          </FormControl>
+                          <FormDescription>Base URL of the vCenter server (no trailing slash)</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="vcenter_username"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Username</FormLabel>
+                            <FormControl>
+                              <Input placeholder="administrator@vsphere.local" {...field} data-testid="input-vcenter-username" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="vcenter_password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Password</FormLabel>
+                            <FormControl>
+                              <Input type="password" placeholder={editingProvider ? "Leave blank to keep existing" : "••••••••"} {...field} data-testid="input-vcenter-password" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="vcenter_datacenter"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Datacenter (optional)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="Datacenter" {...field} data-testid="input-vcenter-datacenter" />
+                            </FormControl>
+                            <FormDescription>Filter by datacenter name</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="vcenter_cluster"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Cluster (optional)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="cluster-prod" {...field} data-testid="input-vcenter-cluster" />
+                            </FormControl>
+                            <FormDescription>Filter by cluster name</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <FormField
+                      control={form.control}
+                      name="verify_ssl"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center justify-between">
+                          <div>
+                            <FormLabel>Verify SSL</FormLabel>
+                            <FormDescription>Disable for self-signed certificates</FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch checked={!!field.value} onCheckedChange={field.onChange} data-testid="switch-vcenter-verify-ssl" />
+                          </FormControl>
                         </FormItem>
                       )}
                     />

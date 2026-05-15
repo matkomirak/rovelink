@@ -1028,4 +1028,34 @@ export class NetBoxAdapter {
       return null;
     }
   }
+
+  /**
+   * Ensure the `automatable` boolean custom field exists in NetBox.
+   * Idempotent — safe to call on every sync.
+   */
+  async ensureAutomatableCustomField(): Promise<void> {
+    try {
+      const checkRes = await this.client.get('/extras/custom-fields/', {
+        params: { name: 'automatable' },
+      });
+      if ((checkRes.data?.count ?? 0) > 0) return;
+
+      await this.client.post('/extras/custom-fields/', {
+        name: 'automatable',
+        label: 'Automatable',
+        type: 'boolean',
+        object_types: ['virtualization.virtualmachine'],
+        required: false,
+        description: 'Set to true to allow Rovelink automation gate to pass for this VM.',
+        default: false,
+        ui_visible: 'always',
+        ui_editable: 'yes',
+        group_name: 'Rovelink',
+        weight: 100,
+      });
+    } catch (error: any) {
+      // Non-fatal — log and continue; the tag fallback remains active
+      console.warn(`[netbox] Could not ensure automatable custom field: ${error.message}`);
+    }
+  }
 }

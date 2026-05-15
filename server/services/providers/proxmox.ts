@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from "axios";
 import https from "https";
-import { IProviderCollector, NormalizedVm, TestConnectionResult } from "./types";
+import { IProviderCollector, NormalizedVm, TestConnectionResult, ProviderOutput } from "./types";
 
 interface ProxmoxConfig {
   base_url: string;
@@ -180,6 +180,29 @@ export class ProxmoxCollector implements IProviderCollector {
       }
       throw error;
     }
+  }
+
+  async listVmsWithHints(): Promise<ProviderOutput[]> {
+    const vms = await this.listVms();
+    return vms.map((vm) => ({
+      observed: {
+        provider_id: vm.externalId,
+        name: vm.name,
+        provider: "proxmox",
+        status: vm.status ?? "running",
+        last_seen_at: new Date(),
+        primaryIp4: vm.primaryIp4,
+        vcpus: vm.vcpus,
+        memory: vm.memory,
+        platform: vm.platform,
+        cluster: undefined,
+        site: undefined,
+      },
+      hints: {
+        provider_tags: vm.tags,
+        raw: vm.raw,
+      },
+    }));
   }
 }
 

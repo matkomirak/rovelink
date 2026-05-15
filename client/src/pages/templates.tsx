@@ -141,6 +141,8 @@ export default function Templates() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
+  const [runnerMode, setRunnerMode] = useState<string>("local");
+
   const form = useForm<InsertJobTemplate>({
     resolver: zodResolver(insertJobTemplateSchema),
     defaultValues: {
@@ -153,6 +155,9 @@ export default function Templates() {
       extraVars: {},
       checkMode: false,
       diffMode: false,
+      runnerMode: "local",
+      awxTemplateId: undefined,
+      awxInventoryId: undefined,
     },
   });
 
@@ -597,6 +602,83 @@ export default function Templates() {
                     )}
                   />
                 </div>
+
+                {/* Runner Mode */}
+                <FormField
+                  control={form.control}
+                  name="runnerMode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Runner Mode</FormLabel>
+                      <Select
+                        onValueChange={(v) => { field.onChange(v); setRunnerMode(v); }}
+                        defaultValue={field.value ?? "local"}
+                      >
+                        <FormControl>
+                          <SelectTrigger data-testid="select-runner-mode">
+                            <SelectValue placeholder="Select runner" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="local">Local (ansible-playbook)</SelectItem>
+                          <SelectItem value="awx">AWX / Controller</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Local runs ansible-playbook on the Rovelink host. AWX delegates to an AWX job template.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {(runnerMode === "awx" || form.watch("runnerMode") === "awx") && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="awxTemplateId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>AWX Template ID</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              placeholder="e.g. 42"
+                              data-testid="input-awx-template-id"
+                              {...field}
+                              value={field.value ?? ""}
+                              onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                            />
+                          </FormControl>
+                          <FormDescription>Numeric ID from AWX job templates list</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="awxInventoryId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>AWX Inventory ID (optional)</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              placeholder="e.g. 7"
+                              data-testid="input-awx-inventory-id"
+                              {...field}
+                              value={field.value ?? ""}
+                              onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                            />
+                          </FormControl>
+                          <FormDescription>Override the AWX template's default inventory</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
+
                 <Button type="submit" className="w-full" disabled={createMutation.isPending} data-testid="button-submit">
                   {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Create Template

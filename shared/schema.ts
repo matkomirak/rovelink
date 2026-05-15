@@ -4,9 +4,19 @@ import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Organizations table for multi-tenancy
+export const organizations = pgTable("organizations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  plan: text("plan").notNull().default("free"), // "free" | "pro" | "enterprise"
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Users table with role-based access control
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   role: text("role").notNull().default("viewer"), // admin, operator, viewer
@@ -20,6 +30,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 // Projects (Git repositories with playbooks)
 export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   gitUrl: text("git_url").notNull(),
   gitRef: text("git_ref").notNull().default("main"),
@@ -37,6 +48,7 @@ export const projectsRelations = relations(projects, ({ many }) => ({
 // Credentials (mocked, no real secrets stored)
 export const credentials = pgTable("credentials", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   kind: text("kind").notNull(), // ssh_key, winrm, sudo, vault
   metadata: jsonb("metadata").default({}), // Non-secret metadata (username, etc.)
@@ -51,6 +63,7 @@ export const credentialsRelations = relations(credentials, ({ many }) => ({
 // Job Templates
 export const jobTemplates = pgTable("job_templates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   projectId: varchar("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   playbook: text("playbook").notNull(),
@@ -60,6 +73,9 @@ export const jobTemplates = pgTable("job_templates", {
   extraVars: jsonb("extra_vars").default({}), // JSON extra variables
   checkMode: boolean("check_mode").default(false),
   diffMode: boolean("diff_mode").default(false),
+  runnerMode: text("runner_mode").notNull().default("local"), // "local" | "awx"
+  awxTemplateId: integer("awx_template_id"),
+  awxInventoryId: integer("awx_inventory_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -78,6 +94,7 @@ export const jobTemplatesRelations = relations(jobTemplates, ({ one, many }) => 
 // Job Runs with logs and results
 export const jobRuns = pgTable("job_runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   templateId: varchar("template_id").notNull().references(() => jobTemplates.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("queued"), // queued, running, ok, failed
@@ -138,6 +155,7 @@ export const notificationRelations = relations(notifications, () => ({}));
 // Provider Accounts (Azure, VMware, Proxmox, etc.)
 export const providerAccounts = pgTable("provider_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(), // azure, vmware, proxmox
   name: text("name").notNull(),
   enabled: boolean("enabled").notNull().default(true),
@@ -212,6 +230,7 @@ export const groupCacheRelations = relations(groupCache, () => ({}));
 // CMDB Accounts (NetBox, i-doit, ServiceNow targets)
 export const cmdbAccounts = pgTable("cmdb_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(), // netbox, idoit, servicenow
   name: text("name").notNull(),
   enabled: boolean("enabled").notNull().default(true),
@@ -229,6 +248,7 @@ export const cmdbAccountsRelations = relations(cmdbAccounts, ({ many }) => ({
 // Pipelines (RDP mapping configurations)
 export const pipelines = pgTable("pipelines", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   providerAccountId: varchar("provider_account_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
   cmdbAccountId: varchar("cmdb_account_id").notNull().references(() => cmdbAccounts.id, { onDelete: "cascade" }),
@@ -318,6 +338,7 @@ export const pipelineRunsRelations = relations(pipelineRuns, ({ one }) => ({
 // Automation Inventories - unified inventory sources for Ansible
 export const automationInventories = pgTable("automation_inventories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   type: text("type").notNull(), // "linked", "file", "script"
   // For linked inventories
@@ -354,6 +375,7 @@ export const automationInventoriesRelations = relations(automationInventories, (
 // NetBox Inventory Sources (multiple NetBox instances)
 export const netboxInventorySources = pgTable("netbox_inventory_sources", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   url: text("url").notNull(),
   token: text("token").notNull(),
@@ -604,3 +626,11 @@ export const insertGateDecisionSchema = createInsertSchema(gateDecisions).omit({
 
 export type InsertGateDecision = z.infer<typeof insertGateDecisionSchema>;
 export type GateDecision = typeof gateDecisions.$inferSelect;
+
+// Organization insert schema and types
+export const insertOrganizationSchema = createInsertSchema(organizations).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertOrganization = z.infer<typeof insertOrganizationSchema>;
+export type Organization = typeof organizations.$inferSelect;

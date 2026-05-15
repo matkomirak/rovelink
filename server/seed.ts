@@ -3,8 +3,8 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { db } from "./db";
-import { users } from "../shared/schema";
-import { eq } from "drizzle-orm";
+import { users, organizations } from "../shared/schema";
+import { eq, isNull } from "drizzle-orm";
 
 async function seed() {
   console.log("Seeding database...");
@@ -13,6 +13,30 @@ async function seed() {
   const isProduction = process.env.NODE_ENV === "production";
 
   try {
+    // ── 1. Ensure default organization exists ──────────────────────────────
+    let defaultOrg = await db.query.organizations
+      .findFirst({ where: eq(organizations.slug, "default") })
+      .catch(() => undefined);
+
+    if (!defaultOrg) {
+      const [created] = await db
+        .insert(organizations)
+        .values({ name: "Default Organization", slug: "default", plan: "free" })
+        .returning();
+      defaultOrg = created;
+      console.log(`Default organization created (id: ${defaultOrg.id})`);
+    } else {
+      console.log(`Default organization already exists (id: ${defaultOrg.id})`);
+    }
+
+    // ── 2. Associate any existing orgId-less records with the default org ──
+    // Users
+    await db
+      .update(users)
+      .set({ orgId: defaultOrg.id })
+      .where(isNull(users.orgId));
+
+    // ── 3. Ensure admin user exists ────────────────────────────────────────
     const [existingAdmin] = await db
       .select()
       .from(users)
@@ -25,12 +49,12 @@ async function seed() {
 
     const providedPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
     const adminPassword = providedPassword || crypto.randomBytes(16).toString("hex");
-
     const hashedPassword = await bcrypt.hash(adminPassword, 12);
 
     const [admin] = await db
       .insert(users)
       .values({
+        orgId: defaultOrg.id,
         username: adminUsername,
         password: hashedPassword,
         role: "admin",
@@ -41,20 +65,18 @@ async function seed() {
 
     if (!providedPassword) {
       if (isProduction) {
-        // In production write the one-time password to a file instead of stdout
-        // so it doesn't appear in log aggregators.
         const credFile = path.resolve(process.cwd(), "bootstrap-credentials.txt");
-        const content = [
-          "Rovelink bootstrap credentials — delete this file after first login",
-          `Username: ${adminUsername}`,
-          `Password: ${adminPassword}`,
-          `Generated: ${new Date().toISOString()}`,
-        ].join("\n") + "\n";
+        const content =
+          [
+            "Rovelink bootstrap credentials — delete this file after first login",
+            `Username: ${adminUsername}`,
+            `Password: ${adminPassword}`,
+            `Generated: ${new Date().toISOString()}`,
+          ].join("\n") + "\n";
         fs.writeFileSync(credFile, content, { mode: 0o600 });
         console.log(`One-time credentials written to: ${credFile}`);
         console.log("Delete this file and change the password immediately after first login.");
       } else {
-        // In development, print to stdout as before (no log aggregators)
         console.log(`One-time password: ${adminPassword}`);
         console.log("Change this password immediately after first login.");
       }

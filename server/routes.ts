@@ -7,12 +7,12 @@ import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { netboxService } from "./services/netbox";
-import { fakeRunner } from "./services/fake-runner";
+import { dispatchRun } from "./services/runner-dispatcher";
 import { notificationService } from "./services/notificationService";
 import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
-import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms } from "@shared/schema";
+import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 import {
@@ -397,7 +397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
 
           let logs = "";
-          const result = await fakeRunner.executeRun(run, (log) => {
+          const result = await dispatchRun(run, (log) => {
             logs += log;
             // Broadcast to WebSocket clients
             const wsClients = (global as any).wsClients?.get(run.id);
@@ -1298,6 +1298,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(stats);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get provider stats" });
+    }
+  });
+
+  // ─── Organizations ─────────────────────────────────────────────────────────
+  app.get("/api/organizations", authMiddleware, async (req, res) => {
+    try {
+      const orgs = await db.select().from(organizations);
+      res.json(orgs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/organizations", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const data = insertOrganizationSchema.parse(req.body);
+      const [org] = await db.insert(organizations).values(data).returning();
+      res.status(201).json(org);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/organizations/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const [org] = await db
+        .update(organizations)
+        .set(req.body)
+        .where(eq(organizations.id, req.params.id))
+        .returning();
+      if (!org) return res.status(404).json({ message: "Organization not found" });
+      res.json(org);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/organizations/:id", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      await db.delete(organizations).where(eq(organizations.id, req.params.id));
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── AWX settings test ─────────────────────────────────────────────────────
+  app.post("/api/settings/awx/test", authMiddleware, requireRole("admin"), async (req, res) => {
+    try {
+      const { encryptSecret: enc } = await import("./services/secrets");
+      const { AwxRunner } = await import("./services/awx-runner");
+      const { url, token, verify_ssl } = req.body as {
+        url: string;
+        token: string;
+        verify_ssl?: boolean;
+      };
+      if (!url || !token) {
+        return res.status(400).json({ message: "url and token are required" });
+      }
+      const runner = new AwxRunner({ url, token, verifySsl: verify_ssl !== false });
+      const result = await runner.testConnection();
+      if (result.ok) {
+        // Persist to settings table (token stored encrypted)
+        await storage.setSetting("awx_url", url);
+        await storage.setSetting("awx_token", enc(token));
+        await storage.setSetting("awx_verify_ssl", String(verify_ssl !== false));
+      }
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/settings/awx", authMiddleware, async (req, res) => {
+    try {
+      const url = await storage.getSetting("awx_url");
+      const verifySsl = await storage.getSetting("awx_verify_ssl");
+      res.json({
+        url: url?.value ?? "",
+        verify_ssl: verifySsl?.value !== "false",
+        token_set: !!(await storage.getSetting("awx_token")),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 

@@ -46,6 +46,7 @@ export interface NetBoxVmForGate {
   tenant?: { name: string; id?: number } | string | null;
   role?: { name: string; id?: number } | string | null;
   tags?: Array<{ name: string } | string>;
+  custom_fields?: Record<string, any>;
 }
 
 /**
@@ -96,10 +97,12 @@ export class GateEvaluator {
       missing.push("role");
     }
 
-    // Check automatable tag - MUST come from CMDB only
-    const hasAutomatableTag = this.hasTag(netboxVm.tags, "automatable");
-    if (!hasAutomatableTag) {
-      missing.push("tag:automatable");
+    // Check automatable — prefer custom field (boolean), fall back to tag
+    const automatableByField = netboxVm.custom_fields?.["automatable"] === true;
+    const automatableByTag = this.hasTag(netboxVm.tags, "automatable");
+    const hasAutomatable = automatableByField || automatableByTag;
+    if (!hasAutomatable) {
+      missing.push("automatable");
     }
 
     const allowed = missing.length === 0;
@@ -108,7 +111,7 @@ export class GateEvaluator {
     let failureType: GateFailureType | undefined;
     
     if (allowed) {
-      reason = `VM has all required governance: tenant=${tenantName}, role=${roleName}, tag=automatable`;
+      reason = `VM has all required governance: tenant=${tenantName}, role=${roleName}, automatable=true`;
     } else {
       // This is a GOVERNANCE failure - normal, visible, non-fatal
       failureType = "governance";

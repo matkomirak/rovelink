@@ -8,10 +8,10 @@ import { decryptProviderConfig } from "./secrets";
 /**
  * ARCHITECTURE NOTE
  * -----------------
- * Provider sync  = collect and cache source inventory inside Custora (external_objects).
+ * Provider sync  = collect and cache source inventory inside Rovelink (external_objects).
  *                  It does NOT write to any CMDB or NetBox.
  *
- * Pipeline sync  = move approved/transformed source data from Custora into the target CMDB.
+ * Pipeline sync  = move approved/transformed source data from Rovelink into the target CMDB.
  *                  It is the ONLY supported path for CMDB writes (server/routes/pipelines.ts).
  */
 
@@ -96,23 +96,23 @@ export class SyncWorker {
         this.log(`Collected ${vms.length} VMs from provider`);
 
         // ─────────────────────────────────────────────────────────────────────
-        // PHASE 3: Custora Cache Update
-        // Provider data is stored only in Custora (external_objects).
+        // PHASE 3: Rovelink Cache Update
+        // Provider data is stored only in Rovelink (external_objects).
         // No data is written to NetBox or any CMDB here.
         // Use pipeline sync (/api/pipelines/:id/sync) to push data into a CMDB.
         // ─────────────────────────────────────────────────────────────────────
-        this.log(`=== Phase 3: Custora Cache Update ===`);
+        this.log(`=== Phase 3: Rovelink Cache Update ===`);
         const isAzure = syncRun.providerAccount.kind === "azure";
 
         if (isAzure && collector instanceof AzureCollector) {
-          // ─── Azure: run full discovery and cache results in Custora ──────────
+          // ─── Azure: run full discovery and cache results in Rovelink ──────────
           this.log(`Azure provider detected — running full subscription discovery...`);
           this.log(`Collecting VMs, VNets, Subnets, NICs, and Public IPs...`);
 
           const discovery = await collector.discoverAll();
           this.log(`Discovery complete: ${discovery.vms.length} VMs, ${discovery.vnets.length} VNets, ${discovery.nics.length} NICs, ${discovery.publicIps.length} Public IPs`);
 
-          this.log(`Caching ${discovery.vms.length} Azure VMs in Custora...`);
+          this.log(`Caching ${discovery.vms.length} Azure VMs in Rovelink...`);
 
           const seenExternalIds = new Set<string>();
 
@@ -159,7 +159,7 @@ export class SyncWorker {
             }
           }
 
-          // Detect removed Azure VMs (in Custora cache but no longer in provider)
+          // Detect removed Azure VMs (in Rovelink cache but no longer in provider)
           const existingObjects = await db.query.externalObjects.findMany({
             where: eq(externalObjects.providerAccountId, syncRun.providerAccountId),
           });
@@ -173,7 +173,7 @@ export class SyncWorker {
           this.log(`Azure cache summary: cached=${discovery.vms.length} VNets=${discovery.vnets.length} NICs=${discovery.nics.length} PublicIPs=${discovery.publicIps.length}`);
         } else {
           // ─── Standard providers (Proxmox / Fake / vSphere) ───────────────────
-          this.log(`Caching ${vms.length} provider objects in Custora...`);
+          this.log(`Caching ${vms.length} provider objects in Rovelink...`);
 
           const seenExternalIds = new Set<string>();
 
@@ -231,7 +231,7 @@ export class SyncWorker {
             }
           }
 
-          // Detect removed VMs (in Custora cache but no longer in provider)
+          // Detect removed VMs (in Rovelink cache but no longer in provider)
           const existingObjects = await db.query.externalObjects.findMany({
             where: eq(externalObjects.providerAccountId, syncRun.providerAccountId),
           });
@@ -289,7 +289,7 @@ export class SyncWorker {
 /**
  * Create a sync run record and execute it in the background using SyncWorker.
  *
- * This only caches provider inventory in Custora.
+ * This only caches provider inventory in Rovelink.
  * To push provider data into a CMDB, use pipeline sync instead.
  */
 export async function runProviderSyncWithWorker(providerAccountId: string): Promise<string> {

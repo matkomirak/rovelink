@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/logo_1775392789311.png";
+import rovelinkLogo from "@assets/logo_1775392789311.png";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -69,8 +69,8 @@ export default function Login() {
       <Card className="w-full max-w-md">
         <div className="rounded-t-lg overflow-hidden">
           <img
-            src={custoraLogo}
-            alt="Custora"
+            src={rovelinkLogo}
+            alt="Rovelink"
             style={{ width: "100%", height: "auto", display: "block" }}
           />
         </div>

@@ -1,4 +1,4 @@
-# Bridge App Design Guidelines
+# Rovelink Design Guidelines
 
 ## Design Approach
 

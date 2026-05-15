@@ -1,5 +1,5 @@
 /**
- * Preset RTC (Rules, Transforms, Conflicts) for BDP mappings
+ * Preset RTC (Rules, Transforms, Conflicts) for RDP mappings
  * These are pre-configured transformation rules for common provider → CMDB mappings
  */
 

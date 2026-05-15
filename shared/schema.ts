@@ -226,7 +226,7 @@ export const cmdbAccountsRelations = relations(cmdbAccounts, ({ many }) => ({
   pipelines: many(pipelines),
 }));
 
-// Pipelines (BDP mapping configurations)
+// Pipelines (RDP mapping configurations)
 export const pipelines = pgTable("pipelines", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -289,7 +289,7 @@ export const pipelineMappingsRelations = relations(pipelineMappings, ({ one }) =
   }),
 }));
 
-// Pipeline Runs (BDP sync execution history)
+// Pipeline Runs (RDP sync execution history)
 export const pipelineRuns = pgTable("pipeline_runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   pipelineId: varchar("pipeline_id").notNull().references(() => pipelines.id, { onDelete: "cascade" }),

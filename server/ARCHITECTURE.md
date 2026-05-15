@@ -1,4 +1,4 @@
-# Bridge Automation Architecture
+# Rovelink Automation Architecture
 
 ## Core Principle
 

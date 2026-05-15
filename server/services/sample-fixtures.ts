@@ -1,5 +1,5 @@
 /**
- * Sample normalized objects for testing BDP transformations
+ * Sample normalized objects for testing RDP transformations
  * These represent the output from provider collectors (Proxmox, vCenter, Azure)
  */
 

@@ -27,7 +27,7 @@ import {
   decryptNetboxToken,
 } from "./services/secrets";
 
-// Import modular BDP routes
+// Import modular RDP routes
 import pipelineRoutes from "./routes/pipelines";
 import pipelineMappingRoutes from "./routes/pipeline-mappings";
 import providerDiscoveryRoutes from "./routes/provider-discovery";
@@ -95,7 +95,7 @@ function requireRole(...roles: string[]) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Mount BDP modular routes with auth middleware
+  // Mount RDP modular routes with auth middleware
   app.use("/api/pipelines", authMiddleware, pipelineRoutes);
   app.use("/api/pipelines", authMiddleware, pipelineMappingRoutes);
   app.use("/api/providers", authMiddleware, providerDiscoveryRoutes);

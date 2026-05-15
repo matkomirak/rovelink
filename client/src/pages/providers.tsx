@@ -375,7 +375,7 @@ export default function Providers() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold" data-testid="text-providers-title">Providers</h1>
-          <p className="text-muted-foreground mt-1">Manage provider accounts and cache inventory in Custora. Use pipelines to push data into a CMDB.</p>
+          <p className="text-muted-foreground mt-1">Manage provider accounts and cache inventory in Rovelink. Use pipelines to push data into a CMDB.</p>
         </div>
         <Dialog open={open} onOpenChange={(isOpen) => {
           setOpen(isOpen);

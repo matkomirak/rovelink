@@ -45,7 +45,7 @@ async function seed() {
         // so it doesn't appear in log aggregators.
         const credFile = path.resolve(process.cwd(), "bootstrap-credentials.txt");
         const content = [
-          "Bridge bootstrap credentials — delete this file after first login",
+          "Rovelink bootstrap credentials — delete this file after first login",
           `Username: ${adminUsername}`,
           `Password: ${adminPassword}`,
           `Generated: ${new Date().toISOString()}`,

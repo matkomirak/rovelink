@@ -1,4 +1,4 @@
-import custoraLogo from "@assets/logo_1775392789311.png";
+import rovelinkLogo from "@assets/logo_1775392789311.png";
 import {
   Calendar,
   Settings,
@@ -106,8 +106,8 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border p-0 overflow-hidden">
         <img
-          src={custoraLogo}
-          alt="Custora"
+          src={rovelinkLogo}
+          alt="Rovelink"
           style={{ width: "100%", height: "auto", display: "block" }}
         />
       </SidebarHeader>

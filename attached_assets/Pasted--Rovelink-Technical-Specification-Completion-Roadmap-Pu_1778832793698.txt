@@ -1,0 +1,1620 @@
+# Rovelink — Technical Specification & Completion Roadmap
+
+> **Purpose of this document**: This is the authoritative engineering spec for completing
+> Rovelink from its current state to a production-ready open-source release. It is written
+> for the Replit AI agent. Every section describes the current state first, then the exact
+> changes required. Do not change anything not listed here.
+
+---
+
+## Table of Contents
+
+1. [Project rename: Custora → Rovelink](#1-project-rename)
+2. [Architecture overview](#2-architecture-overview)
+3. [Gap 1 — Real Ansible / AWX execution engine](#3-gap-1-real-ansible--awx-execution-engine)
+4. [Gap 2 — VMware vCenter provider](#4-gap-2-vmware-vcenter-provider)
+5. [Gap 3 — iDoIT CMDB full implementation](#5-gap-3-idoit-cmdb-full-implementation)
+6. [Gap 4 — Multi-tenancy foundation](#6-gap-4-multi-tenancy-foundation)
+7. [Gap 5 — Provider: NormalizedVm → ProviderOutput migration](#7-gap-5-provider-normalizedvm--provideroutput-migration)
+8. [Gap 6 — Gate: automatable custom field instead of tag](#8-gap-6-gate-automatable-custom-field-instead-of-tag)
+9. [Gap 7 — ServiceNow CMDB adapter](#9-gap-7-servicenow-cmdb-adapter)
+10. [Gap 8 — Docker Compose for self-hosting](#10-gap-8-docker-compose-for-self-hosting)
+11. [Gap 9 — README and CONTRIBUTING](#11-gap-9-readme-and-contributing)
+12. [Constraints and invariants that must never be broken](#12-constraints-and-invariants-that-must-never-be-broken)
+13. [Environment variable reference](#13-environment-variable-reference)
+
+---
+
+## 1. Project rename
+
+### Current state
+The codebase contains the name "Custora" and "Bridge" throughout:
+- `replit.md` title: `# Custora - Infrastructure Automation Platform`
+- Page titles, navbar, footer, README references
+- Internal comments referencing "Bridge App" and "BDP" (Bridge Data Pipelines)
+
+### Required changes
+
+**File: `replit.md`**
+- Replace `# Custora - Infrastructure Automation Platform` with `# Rovelink - Infrastructure Automation Platform`
+- Replace every instance of "Custora" with "Rovelink"
+- Replace "Bridge Data Pipelines" / "BDP" with "Rovelink Data Pipelines" / "RDP"
+
+**File: `client/index.html`**
+- Replace `<title>` content with `Rovelink`
+- Replace any meta description referencing Custora
+
+**File: `client/src/components/app-sidebar.tsx`**
+- Replace the product name displayed in the sidebar nav header
+
+**File: `package.json`**
+- Set `"name": "rovelink"`
+- Set `"description": "Infrastructure automation platform governed by CMDB"`
+
+**File: `server/seed.ts`**
+- Update any seeded display names from "Custora" to "Rovelink"
+
+**Search and replace globally** (all `.ts`, `.tsx`, `.md` files):
+- `Custora` → `Rovelink`
+- `custora` → `rovelink`
+- `Bridge App` → `Rovelink`
+- `bridge app` → `rovelink`
+
+Do **not** rename any database table names, column names, or API route paths — these are internal and breaking them requires a migration.
+
+---
+
+## 2. Architecture overview
+
+Understanding this before making changes is mandatory.
+
+```
+Providers (Azure, Proxmox, vCenter)
+    │
+    ▼  listVms() / listVmsWithHints()
+External Objects table  ←── SyncWorker caches provider data here
+    │
+    ▼  Pipeline sync (server/routes/pipelines.ts)
+CMDB Accounts (NetBox, iDoIT, ServiceNow)
+    │
+    ▼  NetBoxAdapter / IdoitAdapter upsert
+CMDB stores governance data (tenant, role, automatable)
+    │
+    ▼  GateEvaluator reads CMDB ONLY
+Automation GATE  ──── BLOCK → write reason back to CMDB
+    │
+    ▼  PASS only
+Automation Inventories (Ansible-consumable host lists)
+    │
+    ▼  Job Templates
+AWX / Ansible runner execution
+    │
+    ▼  WebSocket log stream
+Frontend run console
+```
+
+### Key files to know before editing
+
+| File | Role |
+|------|------|
+| `shared/schema.ts` | Single source of truth for all DB tables and Zod types |
+| `server/storage.ts` | All DB queries — no raw SQL elsewhere |
+| `server/routes.ts` | Main route file (most routes live here) |
+| `server/routes/pipelines.ts` | BDP pipeline sync logic |
+| `server/routes/automation-inventories.ts` | Ansible inventory build logic |
+| `server/routes/gate.ts` | Gate read-only endpoints |
+| `server/services/providers/types.ts` | `IProviderCollector` interface — all providers must implement this |
+| `server/services/providers/registry.ts` | Provider factory registry — register new providers here |
+| `server/services/gate-evaluator.ts` | All gate logic — DO NOT modify gate invariants |
+| `server/services/gate-store.ts` | Ephemeral in-memory gate decisions |
+| `server/services/secrets.ts` | AES-256-GCM encryption — do not change the format |
+| `server/services/fake-runner.ts` | Current stub — to be replaced by real runner |
+
+---
+
+## 3. Gap 1 — Real Ansible / AWX execution engine
+
+### Current state
+`server/services/fake-runner.ts` contains `FakeRunner`, a class that simulates playbook runs
+with canned log output and a random 20% failure rate. It does not call Ansible or AWX.
+It is used in `server/routes.ts` for all job run endpoints.
+
+### Goal
+Replace `FakeRunner` with a real execution engine that supports two modes:
+- **Mode A — AWX/Controller**: Call the AWX REST API to launch a job template and stream its output.
+- **Mode B — Local Ansible**: Spawn `ansible-playbook` as a child process and stream stdout.
+
+The mode is selected per-job-template via a new `runnerMode` field.
+
+---
+
+### 3.1 Schema changes
+
+**File: `shared/schema.ts`**
+
+Add `runnerMode` and `awxTemplateId` to `jobTemplates`:
+
+```typescript
+export const jobTemplates = pgTable("job_templates", {
+  // ... existing fields unchanged ...
+  runnerMode: text("runner_mode").notNull().default("local"), // "local" | "awx"
+  awxTemplateId: integer("awx_template_id"),   // AWX job template ID (required when runnerMode=awx)
+  awxInventoryId: integer("awx_inventory_id"), // Optional: override AWX inventory
+});
+```
+
+Add AWX connection to `settings` table (or a new `awxConnections` table if multiple AWX instances are needed — for v1 use settings):
+
+```typescript
+// In the existing settings table, these keys will be stored:
+// awx_url        — https://your-awx.example.com
+// awx_token      — AWX personal access token (encrypted at rest via encryptSecret)
+// awx_verify_ssl — "true" | "false"
+```
+
+After modifying the schema run: `npm run db:push`
+
+---
+
+### 3.2 AWX runner service
+
+**Create: `server/services/awx-runner.ts`**
+
+```typescript
+/**
+ * AWX Runner — launches AWX job templates via REST API and streams output.
+ *
+ * AWX API reference: https://docs.ansible.com/automation-controller/latest/html/controllerapi/
+ *
+ * Flow:
+ *   1. POST /api/v2/job_templates/:id/launch/  → returns { job: { id } }
+ *   2. Poll GET /api/v2/jobs/:jobId/            → wait for status != "pending" | "waiting" | "running"
+ *   3. Stream GET /api/v2/jobs/:jobId/stdout/?format=txt  → pipe to onLog callback
+ *   4. Return final status and summary
+ */
+
+import axios, { AxiosInstance } from "axios";
+import https from "https";
+
+export interface AwxConfig {
+  url: string;          // Base URL, e.g. https://awx.example.com
+  token: string;        // Personal access token
+  verifySsl: boolean;
+}
+
+export interface AwxLaunchOptions {
+  templateId: number;
+  inventoryId?: number;   // Override AWX inventory
+  limitExpr?: string;     // --limit expression
+  extraVars?: Record<string, any>;
+  checkMode?: boolean;
+}
+
+export interface AwxRunResult {
+  status: "ok" | "failed" | "error" | "cancelled";
+  jobId: number;
+  summary: {
+    hosts: number;
+    ok: number;
+    changed: number;
+    failed: number;
+    unreachable: number;
+  };
+  logs: string;
+}
+
+export class AwxRunner {
+  private client: AxiosInstance;
+
+  constructor(config: AwxConfig) {
+    this.client = axios.create({
+      baseURL: config.url.replace(/\/$/, ""),
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        "Content-Type": "application/json",
+      },
+      httpsAgent: new https.Agent({ rejectUnauthorized: config.verifySsl }),
+      timeout: 30000,
+    });
+  }
+
+  async testConnection(): Promise<{ ok: boolean; version?: string; error?: string }> {
+    try {
+      const res = await this.client.get("/api/v2/ping/");
+      return { ok: true, version: res.data?.version };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async launch(options: AwxLaunchOptions, onLog: (line: string) => void): Promise<AwxRunResult> {
+    // Step 1: Launch the job
+    const payload: Record<string, any> = {};
+    if (options.inventoryId) payload.inventory = options.inventoryId;
+    if (options.limitExpr) payload.limit = options.limitExpr;
+    if (options.extraVars) payload.extra_vars = JSON.stringify(options.extraVars);
+    if (options.checkMode) payload.job_type = "check";
+
+    const launchRes = await this.client.post(
+      `/api/v2/job_templates/${options.templateId}/launch/`,
+      payload
+    );
+    const jobId: number = launchRes.data.job;
+    onLog(`[rovelink] AWX job ${jobId} launched\n`);
+
+    // Step 2: Poll until finished
+    const terminalStatuses = new Set(["successful", "failed", "error", "canceled"]);
+    let jobData: any;
+    while (true) {
+      await new Promise((r) => setTimeout(r, 3000)); // poll every 3s
+      const statusRes = await this.client.get(`/api/v2/jobs/${jobId}/`);
+      jobData = statusRes.data;
+      if (terminalStatuses.has(jobData.status)) break;
+    }
+
+    // Step 3: Stream stdout
+    try {
+      const stdoutRes = await this.client.get(`/api/v2/jobs/${jobId}/stdout/`, {
+        params: { format: "txt" },
+        responseType: "text",
+      });
+      const lines: string[] = (stdoutRes.data as string).split("\n");
+      for (const line of lines) {
+        onLog(line + "\n");
+      }
+    } catch {
+      onLog("[rovelink] Could not retrieve job stdout\n");
+    }
+
+    // Step 4: Build result
+    const hostSummary = jobData.summary_fields?.hosts || {};
+    const totals = Object.values(hostSummary as Record<string, any>).reduce(
+      (acc: any, h: any) => {
+        acc.ok += h.ok || 0;
+        acc.changed += h.changed || 0;
+        acc.failed += h.failures || 0;
+        acc.unreachable += h.unreachable || 0;
+        acc.hosts += 1;
+        return acc;
+      },
+      { hosts: 0, ok: 0, changed: 0, failed: 0, unreachable: 0 }
+    );
+
+    const statusMap: Record<string, AwxRunResult["status"]> = {
+      successful: "ok",
+      failed: "failed",
+      error: "error",
+      canceled: "cancelled",
+    };
+
+    return {
+      status: statusMap[jobData.status] ?? "error",
+      jobId,
+      summary: totals,
+      logs: "", // already streamed via onLog
+    };
+  }
+}
+```
+
+---
+
+### 3.3 Local Ansible runner service
+
+**Create: `server/services/local-runner.ts`**
+
+```typescript
+/**
+ * Local Ansible runner — spawns ansible-playbook as a child process.
+ *
+ * Requirements on the host:
+ *   - ansible-playbook must be in PATH
+ *   - The inventory file referenced in the job template must exist
+ *   - SSH keys / credentials must be pre-configured on the host
+ *
+ * Security note: limitExpr and extraVars are shell-escaped before use.
+ * Never interpolate user input directly into the command string.
+ */
+
+import { spawn } from "child_process";
+import { escapeShellArg } from "../utils/shell";  // create this utility — see below
+
+export interface LocalRunOptions {
+  playbookPath: string;     // Absolute or relative path to playbook file
+  inventoryPath: string;    // Path to inventory file or directory
+  limitExpr?: string;
+  extraVars?: Record<string, any>;
+  checkMode?: boolean;
+  diffMode?: boolean;
+  credentialPath?: string;  // Path to SSH private key
+}
+
+export interface LocalRunResult {
+  status: "ok" | "failed" | "error";
+  exitCode: number;
+  logs: string;
+  summary: {
+    hosts: number;
+    ok: number;
+    changed: number;
+    failed: number;
+    unreachable: number;
+  };
+}
+
+export class LocalRunner {
+  async execute(options: LocalRunOptions, onLog: (line: string) => void): Promise<LocalRunResult> {
+    const args: string[] = ["-i", options.inventoryPath, options.playbookPath];
+
+    if (options.limitExpr) args.push("--limit", options.limitExpr);
+    if (options.checkMode) args.push("--check");
+    if (options.diffMode) args.push("--diff");
+    if (options.credentialPath) args.push("--private-key", options.credentialPath);
+    if (options.extraVars) {
+      args.push("--extra-vars", JSON.stringify(options.extraVars));
+    }
+
+    return new Promise((resolve) => {
+      const logs: string[] = [];
+      // Simple PLAY RECAP parser
+      const summary = { hosts: 0, ok: 0, changed: 0, failed: 0, unreachable: 0 };
+
+      const proc = spawn("ansible-playbook", args, {
+        env: { ...process.env, ANSIBLE_FORCE_COLOR: "0", ANSIBLE_NOCOLOR: "1" },
+      });
+
+      const handleLine = (line: string) => {
+        logs.push(line);
+        onLog(line + "\n");
+        // Parse PLAY RECAP lines:  hostname : ok=N  changed=N  unreachable=N  failed=N
+        const recapMatch = line.match(/^(\S+)\s+:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)/);
+        if (recapMatch) {
+          summary.hosts += 1;
+          summary.ok += parseInt(recapMatch[2], 10);
+          summary.changed += parseInt(recapMatch[3], 10);
+          summary.unreachable += parseInt(recapMatch[4], 10);
+          summary.failed += parseInt(recapMatch[5], 10);
+        }
+      };
+
+      proc.stdout.on("data", (chunk: Buffer) => {
+        chunk.toString().split("\n").filter(Boolean).forEach(handleLine);
+      });
+      proc.stderr.on("data", (chunk: Buffer) => {
+        chunk.toString().split("\n").filter(Boolean).forEach((l) => handleLine(`[stderr] ${l}`));
+      });
+
+      proc.on("close", (code) => {
+        resolve({
+          status: code === 0 ? "ok" : "failed",
+          exitCode: code ?? 1,
+          logs: logs.join("\n"),
+          summary,
+        });
+      });
+
+      proc.on("error", (err) => {
+        onLog(`[rovelink] Failed to start ansible-playbook: ${err.message}\n`);
+        resolve({ status: "error", exitCode: -1, logs: err.message, summary });
+      });
+    });
+  }
+}
+```
+
+**Create: `server/utils/shell.ts`**
+
+```typescript
+/** Shell-escapes a single argument to prevent injection */
+export function escapeShellArg(arg: string): string {
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+```
+
+---
+
+### 3.4 Runner dispatcher
+
+**Create: `server/services/runner-dispatcher.ts`**
+
+```typescript
+/**
+ * Runner Dispatcher — selects AWX or local runner based on job template config.
+ * This replaces FakeRunner in all route handlers.
+ */
+
+import { db } from "../db";
+import { jobTemplates, settings } from "../../shared/schema";
+import { eq } from "drizzle-orm";
+import { AwxRunner } from "./awx-runner";
+import { LocalRunner } from "./local-runner";
+import { decryptSecret } from "./secrets";
+import type { JobRun } from "../../shared/schema";
+
+export interface RunResult {
+  status: "ok" | "failed" | "error" | "cancelled";
+  summary: { hosts: number; ok: number; changed: number; failed: number };
+  logs: string;
+}
+
+export async function dispatchRun(run: JobRun, onLog: (line: string) => void): Promise<RunResult> {
+  // Load template to get runnerMode
+  const template = await db.query.jobTemplates.findFirst({
+    where: eq(jobTemplates.id, run.templateId),
+  });
+  if (!template) throw new Error(`Job template ${run.templateId} not found`);
+
+  if (template.runnerMode === "awx") {
+    return runViaAwx(run, template, onLog);
+  }
+  return runLocally(run, template, onLog);
+}
+
+async function runViaAwx(run: JobRun, template: any, onLog: (line: string) => void): Promise<RunResult> {
+  // Load AWX credentials from settings
+  const rows = await db.query.settings.findMany();
+  const settingsMap = Object.fromEntries(rows.map((r: any) => [r.key, r.value]));
+
+  const awxUrl = settingsMap["awx_url"];
+  const awxTokenEnc = settingsMap["awx_token"];
+  const verifySsl = settingsMap["awx_verify_ssl"] !== "false";
+
+  if (!awxUrl || !awxTokenEnc) {
+    throw new Error("AWX not configured. Set awx_url and awx_token in Settings.");
+  }
+
+  const runner = new AwxRunner({
+    url: awxUrl,
+    token: decryptSecret(awxTokenEnc),
+    verifySsl,
+  });
+
+  const result = await runner.launch(
+    {
+      templateId: template.awxTemplateId,
+      inventoryId: template.awxInventoryId ?? undefined,
+      limitExpr: run.limitExpr ?? undefined,
+      extraVars: (template.extraVars as Record<string, any>) ?? {},
+      checkMode: template.checkMode ?? false,
+    },
+    onLog
+  );
+
+  return {
+    status: result.status === "cancelled" ? "failed" : result.status,
+    summary: result.summary,
+    logs: result.logs,
+  };
+}
+
+async function runLocally(run: JobRun, template: any, onLog: (line: string) => void): Promise<RunResult> {
+  const runner = new LocalRunner();
+  const result = await runner.execute(
+    {
+      playbookPath: template.playbook,
+      inventoryPath: "inventory/netbox.yml", // default inventory path
+      limitExpr: run.limitExpr ?? undefined,
+      extraVars: (template.extraVars as Record<string, any>) ?? {},
+      checkMode: template.checkMode ?? false,
+      diffMode: template.diffMode ?? false,
+    },
+    onLog
+  );
+
+  return {
+    status: result.status,
+    summary: result.summary,
+    logs: result.logs,
+  };
+}
+```
+
+---
+
+### 3.5 Wire into routes
+
+**File: `server/routes.ts`**
+
+Find every location that calls `fakeRunner.executeRun(run, onLog)` and replace with:
+
+```typescript
+import { dispatchRun } from "./services/runner-dispatcher";
+
+// Replace:
+const result = await fakeRunner.executeRun(run, onLog);
+// With:
+const result = await dispatchRun(run, onLog);
+```
+
+Remove the `fakeRunner` import. **Do not delete `fake-runner.ts`** yet — keep it as dead code until all references are removed, then remove it in a separate cleanup commit.
+
+---
+
+### 3.6 Settings UI additions
+
+**File: `client/src/pages/settings.tsx`**
+
+Add a new "Automation Engine" section below the existing settings sections with these fields:
+- **Runner mode** — select: `Local Ansible` / `AWX / Automation Controller`
+- **AWX URL** — text input (shown only when AWX selected)
+- **AWX Token** — password input (shown only when AWX selected)
+- **Verify SSL** — toggle (shown only when AWX selected)
+- **Test Connection** button — calls a new endpoint `POST /api/settings/awx/test`
+
+**Create endpoint: `POST /api/settings/awx/test`** in `server/routes.ts`:
+
+```typescript
+app.post("/api/settings/awx/test", requireAuth, async (req, res) => {
+  const { url, token, verifySsl } = req.body;
+  const runner = new AwxRunner({ url, token, verifySsl: verifySsl !== false });
+  const result = await runner.testConnection();
+  res.json(result);
+});
+```
+
+---
+
+### 3.7 Job template form additions
+
+**File: `client/src/pages/templates.tsx`** (and the template creation/edit forms)
+
+Add these fields to the job template form:
+- **Runner mode** — select: `Local` / `AWX` (default: Local)
+- **AWX Template ID** — number input (shown only when AWX selected)
+- **AWX Inventory ID** — number input, optional (shown only when AWX selected)
+
+---
+
+## 4. Gap 2 — VMware vCenter provider
+
+### Current state
+The provider registry (`server/services/providers/registry.ts`) has `proxmox`, `fake`, and `azure`.
+vCenter is referenced in the UI provider selection dropdown but has no implementation.
+`registry.ts` has a comment `// Future: vmware, etc.`
+
+### Goal
+Implement a full vCenter provider using the VMware vSphere REST API (not the legacy SOAP API).
+
+---
+
+### 4.1 Create the vCenter collector
+
+**Create: `server/services/providers/vcenter.ts`**
+
+```typescript
+/**
+ * VMware vCenter Provider
+ * Uses the vSphere REST API (available since vCenter 6.7u3+)
+ * API docs: https://developer.vmware.com/apis/vsphere-automation/latest/
+ *
+ * Authentication: session-based. Calls POST /api/session to get a session token,
+ * then sends it as vmware-api-session-id header.
+ */
+
+import axios, { AxiosInstance } from "axios";
+import https from "https";
+import { IProviderCollector, NormalizedVm, TestConnectionResult, ProviderOutput, ObservedAsset } from "./types";
+
+export interface VCenterConfig {
+  url: string;             // https://vcenter.example.com
+  username: string;        // administrator@vsphere.local
+  password: string;        // encrypted at rest, decrypted before use
+  verify_ssl: boolean;
+  datacenter?: string;     // Optional: filter by datacenter name
+  cluster?: string;        // Optional: filter by cluster name
+}
+
+interface VSphereVm {
+  vm: string;              // VM managed object reference, e.g. "vm-123"
+  name: string;
+  power_state: string;     // "POWERED_ON" | "POWERED_OFF" | "SUSPENDED"
+  cpu_count?: number;
+  memory_size_MiB?: number;
+}
+
+interface VSphereVmDetails {
+  identity?: { name?: string; instance_uuid?: string };
+  power_state?: { state?: string };
+  cpu?: { count?: number };
+  memory?: { size_MiB?: number };
+  guest_OS?: string;
+  nics?: Record<string, { mac_address?: string }>;
+}
+
+interface VSphereGuestInfo {
+  ip_address?: string;
+  host_name?: string;
+  family?: string;  // "WINDOWS" | "LINUX" etc.
+  full_name?: { default_message?: string };
+}
+
+export class VCenterCollector implements IProviderCollector {
+  private config: VCenterConfig;
+  private client: AxiosInstance;
+  private sessionToken?: string;
+
+  constructor(config: VCenterConfig) {
+    this.config = config;
+    this.client = axios.create({
+      baseURL: config.url.replace(/\/$/, ""),
+      httpsAgent: new https.Agent({ rejectUnauthorized: config.verify_ssl }),
+      timeout: 30000,
+    });
+  }
+
+  private async authenticate(): Promise<void> {
+    if (this.sessionToken) return;
+
+    const res = await this.client.post(
+      "/api/session",
+      {},
+      {
+        auth: { username: this.config.username, password: this.config.password },
+      }
+    );
+    // Response body is the session token string (with quotes — trim them)
+    this.sessionToken = (res.data as string).replace(/"/g, "");
+    this.client.defaults.headers.common["vmware-api-session-id"] = this.sessionToken;
+  }
+
+  private async refreshSession(): Promise<void> {
+    this.sessionToken = undefined;
+    await this.authenticate();
+  }
+
+  async testConnection(): Promise<TestConnectionResult> {
+    try {
+      await this.authenticate();
+      const res = await this.client.get("/api/vcenter/datacenter");
+      const datacenters = res.data as Array<{ name: string }>;
+      return {
+        ok: true,
+        details: `Connected. Datacenters: ${datacenters.map((d) => d.name).join(", ")}`,
+      };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async listVms(): Promise<NormalizedVm[]> {
+    const outputs = await this.listVmsWithHints?.() ?? [];
+    return outputs.map((o) => ({
+      externalId: o.observed.provider_id,
+      name: o.observed.name,
+      provider: "vcenter",
+      primaryIp4: o.observed.primaryIp4,
+      vcpus: o.observed.vcpus,
+      memory: o.observed.memory,
+      platform: o.observed.platform,
+      status: o.observed.status,
+      description: o.observed.description,
+      tags: [],
+      raw: o.hints?.raw,
+    }));
+  }
+
+  async listVmsWithHints(): Promise<ProviderOutput[]> {
+    await this.authenticate();
+
+    // Fetch VM list
+    const params: Record<string, string> = {};
+    const vmListRes = await this.client.get("/api/vcenter/vm", { params }).catch(async (e) => {
+      if (e.response?.status === 401) {
+        await this.refreshSession();
+        return this.client.get("/api/vcenter/vm", { params });
+      }
+      throw e;
+    });
+
+    const vms: VSphereVm[] = vmListRes.data;
+    const outputs: ProviderOutput[] = [];
+
+    for (const vm of vms) {
+      try {
+        // Fetch details (CPU, memory, OS)
+        const detailRes = await this.client.get(`/api/vcenter/vm/${vm.vm}`);
+        const detail: VSphereVmDetails = detailRes.data;
+
+        // Try to get guest info (IP address, hostname)
+        let guestIp: string | undefined;
+        let platform: string | undefined;
+        try {
+          const guestRes = await this.client.get(`/api/vcenter/vm/${vm.vm}/guest/identity`);
+          const guest: VSphereGuestInfo = guestRes.data;
+          guestIp = guest.ip_address;
+          platform = guest.family?.toLowerCase().includes("windows") ? "windows" : "linux";
+        } catch {
+          // Guest tools not running — acceptable
+        }
+
+        const powerMap: Record<string, string> = {
+          POWERED_ON: "running",
+          POWERED_OFF: "offline",
+          SUSPENDED: "staged",
+        };
+
+        const observed: ObservedAsset = {
+          provider_id: vm.vm,
+          name: vm.name,
+          provider: "vcenter",
+          status: powerMap[vm.power_state] ?? "offline",
+          last_seen_at: new Date(),
+          primaryIp4: guestIp,
+          vcpus: detail.cpu?.count ?? vm.cpu_count,
+          memory: detail.memory?.size_MiB ?? vm.memory_size_MiB,
+          platform,
+          cluster: this.config.cluster,
+          site: this.config.datacenter,
+        };
+
+        outputs.push({
+          observed,
+          hints: { raw: { vm, detail } },
+        });
+      } catch (err: any) {
+        // Log but continue — one bad VM should not abort the whole sync
+        console.error(`[vcenter] Failed to fetch details for VM ${vm.vm} (${vm.name}): ${err.message}`);
+      }
+    }
+
+    return outputs;
+  }
+}
+
+export function createVCenterCollector(config: any): IProviderCollector {
+  return new VCenterCollector(config as VCenterConfig);
+}
+```
+
+---
+
+### 4.2 Register vCenter
+
+**File: `server/services/providers/registry.ts`**
+
+```typescript
+import { createVCenterCollector } from "./vcenter";
+
+const providerRegistry: Record<string, ProviderFactory> = {
+  proxmox: createProxmoxCollector,
+  fake:    createFakeCollector,
+  azure:   createAzureCollector,
+  vcenter: createVCenterCollector,  // ADD THIS LINE
+};
+```
+
+---
+
+### 4.3 UI additions for vCenter config
+
+**File: `client/src/pages/providers.tsx`** (wherever provider config forms are rendered)
+
+When `kind === "vcenter"`, render these config fields:
+- **URL** — text input, e.g. `https://vcenter.example.com`
+- **Username** — text input, e.g. `administrator@vsphere.local`
+- **Password** — password input (encrypted on save)
+- **Verify SSL** — toggle (default: true)
+- **Datacenter** — text input, optional filter
+- **Cluster** — text input, optional filter
+
+The config object shape to store in `provider_accounts.config` (encrypted fields via `encryptProviderConfig`):
+```json
+{
+  "url": "https://vcenter.example.com",
+  "username": "administrator@vsphere.local",
+  "password": "enc:v1:...",
+  "verify_ssl": true,
+  "datacenter": "DC1",
+  "cluster": "Production"
+}
+```
+
+---
+
+## 5. Gap 3 — iDoIT CMDB full implementation
+
+### Current state
+`server/services/idoit-adapter.ts` exists with `objectTypes()` and `validate()` implemented,
+but `upsert()` throws `"i-doit upsert not implemented in Phase 3"` and `test()` returns a
+hardcoded stub version `"1.18.2"`. The adapter is never called from pipeline sync routes.
+
+### Goal
+Implement real iDoIT JSON-RPC API calls for `test()` and `upsert()`.
+
+---
+
+### 5.1 iDoIT API background
+iDoIT exposes a JSON-RPC 2.0 API at `/src/jsonrpc.php`. All calls are `POST` with:
+```json
+{
+  "version": "2.0",
+  "method": "<method_name>",
+  "params": { "apikey": "<your_key>", ... },
+  "id": 1
+}
+```
+
+---
+
+### 5.2 Update the adapter
+
+**File: `server/services/idoit-adapter.ts`** — replace the stub methods:
+
+```typescript
+import axios, { AxiosInstance } from "axios";
+
+export interface IdoitConfig {
+  url: string;     // https://idoit.example.com
+  apiKey: string;  // iDoIT API key
+  username?: string; // Optional: for session-based auth
+  password?: string;
+}
+
+export class IdoitAdapter {
+  private config: IdoitConfig;
+  private client: AxiosInstance;
+  private sessionId?: string;
+  private requestId = 1;
+
+  constructor(config: IdoitConfig) {
+    this.config = config;
+    this.client = axios.create({
+      baseURL: config.url.replace(/\/$/, ""),
+      headers: { "Content-Type": "application/json" },
+      timeout: 30000,
+    });
+  }
+
+  private async rpc(method: string, params: Record<string, any>): Promise<any> {
+    const body = {
+      version: "2.0",
+      method,
+      params: { apikey: this.config.apiKey, ...params },
+      id: this.requestId++,
+    };
+    const res = await this.client.post("/src/jsonrpc.php", body);
+    if (res.data.error) {
+      throw new Error(`iDoIT RPC error [${res.data.error.code}]: ${res.data.error.message}`);
+    }
+    return res.data.result;
+  }
+
+  async test(): Promise<{ ok: boolean; version?: string; error?: string }> {
+    try {
+      const result = await this.rpc("idoit.version", {});
+      return { ok: true, version: result?.version };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  /**
+   * Upsert a CI into iDoIT.
+   * Strategy: search by title first. If found, update. If not, create.
+   *
+   * @param targetType - iDoIT object type, e.g. "VirtualServer" → mapped to iDoIT type constant
+   * @param obj        - Fields to write. Must include `name`.
+   * @param matchBy    - Fields to match on (default: ["name"])
+   */
+  async upsert(targetType: string, obj: any, matchBy: string[] = ["name"]): Promise<any> {
+    const typeId = this.resolveTypeId(targetType);
+
+    // Search for existing object by name
+    const searchResult = await this.rpc("cmdb.objects.read", {
+      filter: { type: typeId, title: obj.name },
+    });
+
+    const existing = Array.isArray(searchResult) ? searchResult[0] : null;
+
+    if (existing) {
+      // Update: write category data
+      await this.writeCategoryData(existing.id, obj);
+      return { action: "updated", id: existing.id };
+    } else {
+      // Create new object
+      const created = await this.rpc("cmdb.object.create", {
+        type: typeId,
+        title: obj.name,
+      });
+      await this.writeCategoryData(created.id, obj);
+      return { action: "created", id: created.id };
+    }
+  }
+
+  private async writeCategoryData(objectId: number, obj: any): Promise<void> {
+    // Write to C__CATG__VIRTUAL_MACHINE category for VirtualServer objects
+    const catData: Record<string, any> = {};
+    if (obj.vcpus !== undefined)   catData.cpu_cores = obj.vcpus;
+    if (obj.memory !== undefined)  catData.memory_mb = obj.memory;
+    if (obj.platform !== undefined) catData.operating_system = obj.platform;
+    if (obj.primaryIp4)            catData.primary_ip = obj.primaryIp4;
+
+    if (Object.keys(catData).length > 0) {
+      await this.rpc("cmdb.category.save", {
+        object: objectId,
+        catconst: "C__CATG__VIRTUAL_MACHINE",
+        data: catData,
+      });
+    }
+  }
+
+  private resolveTypeId(targetType: string): number {
+    // iDoIT object type constants
+    const typeMap: Record<string, number> = {
+      VirtualServer:  1011,
+      PhysicalServer: 5,
+      Application:    58,
+      Interface:      76,
+      Site:           6,
+      Tenant:         1,
+    };
+    const id = typeMap[targetType];
+    if (!id) throw new Error(`Unknown iDoIT object type: ${targetType}`);
+    return id;
+  }
+
+  // objectTypes() and validate() remain unchanged
+}
+```
+
+---
+
+## 6. Gap 4 — Multi-tenancy foundation
+
+### Current state
+Every database table has no `organization_id` or `tenant_id` column. The application is
+hard-coded as single-organisation. The `users` table has a `role` field (`admin`, `operator`,
+`viewer`) but no organisation scoping.
+
+### Goal (v1 — minimal viable multi-org)
+Add an `organizations` table and scope all data to an organisation. This is the minimum needed
+to host Rovelink as a service for multiple clients without data leakage.
+
+> **Implementation order is critical.** Do database changes first, then storage layer,
+> then routes, then frontend. Do not skip steps.
+
+---
+
+### 6.1 Schema additions
+
+**File: `shared/schema.ts`**
+
+```typescript
+// Add at the TOP of the file, before all other tables:
+
+export const organizations = pgTable("organizations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(), // URL-safe identifier
+  plan: text("plan").notNull().default("free"), // "free" | "pro" | "enterprise"
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Modify the users table — add orgId:
+export const users = pgTable("users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),  // ADD
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+  role: text("role").notNull().default("viewer"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+```
+
+**Add `orgId` to ALL of the following tables** (same pattern — `varchar("org_id").references(() => organizations.id, { onDelete: "cascade" })`):
+- `projects`
+- `credentials`
+- `jobTemplates`
+- `jobRuns`
+- `providerAccounts`
+- `cmdbAccounts`
+- `pipelines`
+- `automationInventories`
+- `netboxInventorySources`
+- `notificationRules` (if exists)
+- `settings` (if this table exists as per-user settings)
+
+After adding all columns: `npm run db:push`
+
+---
+
+### 6.2 JWT token changes
+
+**File: `server/index.ts`** or wherever JWT is signed
+
+Add `orgId` to the JWT payload:
+```typescript
+const token = jwt.sign(
+  { userId: user.id, username: user.username, role: user.role, orgId: user.orgId },
+  JWT_SECRET,
+  { expiresIn: "7d" }
+);
+```
+
+**File: `server/routes.ts`** — `requireAuth` middleware
+
+Extract `orgId` from the verified token and attach to `req`:
+```typescript
+interface AuthenticatedRequest extends Request {
+  userId: string;
+  userRole: string;
+  orgId: string;  // ADD
+}
+
+// In requireAuth:
+(req as AuthenticatedRequest).orgId = payload.orgId;
+```
+
+---
+
+### 6.3 Storage layer scoping
+
+**File: `server/storage.ts`**
+
+Every query that reads or writes data must be scoped to `orgId`. Pattern:
+
+```typescript
+// BEFORE (unscoped):
+async getProviderAccounts() {
+  return db.select().from(providerAccounts);
+}
+
+// AFTER (scoped):
+async getProviderAccounts(orgId: string) {
+  return db.select().from(providerAccounts).where(eq(providerAccounts.orgId, orgId));
+}
+```
+
+Apply this pattern to **every method** in `storage.ts`. This is mechanical but mandatory.
+
+---
+
+### 6.4 Route handler scoping
+
+**File: `server/routes.ts`** and all sub-route files
+
+Pass `orgId` from `req` to every storage call:
+```typescript
+// BEFORE:
+const accounts = await storage.getProviderAccounts();
+
+// AFTER:
+const accounts = await storage.getProviderAccounts(req.orgId);
+```
+
+---
+
+### 6.5 Organisation management endpoints
+
+Add these endpoints to `server/routes.ts`:
+```
+POST /api/admin/organizations        Create a new organisation (admin only)
+GET  /api/admin/organizations        List all organisations (admin only)
+GET  /api/org/current                Get current user's organisation
+PUT  /api/org/current                Update org name/slug
+```
+
+---
+
+### 6.6 Seed update
+
+**File: `server/seed.ts`**
+
+Create a default organisation on first seed:
+```typescript
+const defaultOrg = await db.insert(organizations).values({
+  name: "Default Organisation",
+  slug: "default",
+  plan: "pro",
+}).returning();
+
+// Associate the admin user with this org:
+await db.insert(users).values({
+  orgId: defaultOrg[0].id,
+  username: "admin",
+  password: await bcrypt.hash(adminPassword, 12),
+  role: "admin",
+});
+```
+
+---
+
+## 7. Gap 5 — Provider: NormalizedVm → ProviderOutput migration
+
+### Current state
+`server/services/providers/types.ts` defines both `NormalizedVm` (legacy) and `ProviderOutput`
+(new, separation of observed facts vs hints). The comment in `types.ts` reads:
+`// TODO: Remove after full migration to ProviderOutput`
+
+The `ProxmoxCollector` implements only `listVms()` (returns `NormalizedVm[]`).
+The `AzureCollector` implements both `listVms()` and `discoverAll()` but not `listVmsWithHints()`.
+The new `VCenterCollector` (Gap 2) implements `listVmsWithHints()`.
+
+### Goal
+Implement `listVmsWithHints()` on `ProxmoxCollector` and `AzureCollector` so all providers
+use the new interface. Keep `listVms()` as a compatibility shim.
+
+---
+
+### 7.1 Proxmox
+
+**File: `server/services/providers/proxmox.ts`**
+
+Add `listVmsWithHints()` method to `ProxmoxCollector`:
+
+```typescript
+async listVmsWithHints(): Promise<ProviderOutput[]> {
+  const vms = await this.listVms(); // reuse existing logic
+  return vms.map((vm) => ({
+    observed: {
+      provider_id: vm.externalId,
+      name: vm.name,
+      provider: "proxmox",
+      status: vm.status ?? "running",
+      last_seen_at: new Date(),
+      primaryIp4: vm.primaryIp4,
+      vcpus: vm.vcpus,
+      memory: vm.memory,
+      platform: vm.platform,
+      cluster: undefined,
+      site: undefined,
+    },
+    hints: {
+      provider_tags: vm.tags,
+      raw: vm.raw,
+    },
+  }));
+}
+```
+
+---
+
+### 7.2 Azure
+
+**File: `server/services/providers/azure.ts`**
+
+Add `listVmsWithHints()` that wraps `listVms()` with the same pattern:
+
+```typescript
+async listVmsWithHints(): Promise<ProviderOutput[]> {
+  const vms = await this.listVms();
+  return vms.map((vm) => ({
+    observed: {
+      provider_id: vm.externalId,
+      name: vm.name,
+      provider: "azure",
+      status: vm.status ?? "running",
+      last_seen_at: new Date(),
+      primaryIp4: vm.primaryIp4,
+      vcpus: vm.vcpus,
+      memory: vm.memory,
+      platform: vm.platform,
+    },
+    hints: {
+      provider_tags: vm.tags,
+      provider_tenant: vm.tenant,
+      raw: vm.raw,
+    },
+  }));
+}
+```
+
+---
+
+## 8. Gap 6 — Gate: automatable custom field instead of tag
+
+### Current state
+`server/services/gate-evaluator.ts` checks for a NetBox **tag** named `automatable`:
+```typescript
+const hasAutomatableTag = this.hasTag(netboxVm.tags, "automatable");
+if (!hasAutomatableTag) missing.push("tag:automatable");
+```
+
+Using a tag is fragile — tags are freeform strings and can be added accidentally or typo'd.
+NetBox custom fields are the correct mechanism for boolean governance flags.
+
+### Goal
+Support both a **NetBox custom field** `automatable` (boolean, preferred) and the legacy tag
+as a fallback, so existing deployments are not broken.
+
+---
+
+### 8.1 Gate evaluator change
+
+**File: `server/services/gate-evaluator.ts`**
+
+Update the `NetBoxVmForGate` interface:
+```typescript
+export interface NetBoxVmForGate {
+  id?: number;
+  name: string;
+  tenant?: { name: string; id?: number } | string | null;
+  role?: { name: string; id?: number } | string | null;
+  tags?: Array<{ name: string } | string>;
+  custom_fields?: Record<string, any>; // ADD THIS
+}
+```
+
+Update the automatable check in `evaluateGate()`:
+```typescript
+// Check automatable — prefer custom field, fall back to tag
+const automatableByField = netboxVm.custom_fields?.["automatable"] === true;
+const automatableByTag   = this.hasTag(netboxVm.tags, "automatable");
+const hasAutomatable     = automatableByField || automatableByTag;
+
+if (!hasAutomatable) {
+  missing.push("automatable");  // was "tag:automatable" — update string too
+}
+```
+
+---
+
+### 8.2 NetBox adapter: ensure custom field exists
+
+**File: `server/services/netbox-adapter.ts`**
+
+Add a method `ensureAutomatableCustomField()` that creates the custom field if it doesn't exist,
+called once during the first sync:
+
+```typescript
+async ensureAutomatableCustomField(): Promise<void> {
+  // Check if custom field exists
+  try {
+    const res = await this.client.get("/extras/custom-fields/?name=automatable");
+    if (res.data.count > 0) return; // Already exists
+  } catch { return; }
+
+  // Create it
+  await this.client.post("/extras/custom-fields/", {
+    name: "automatable",
+    label: "Automatable",
+    type: "boolean",
+    object_types: ["virtualization.virtualmachine"],
+    default: false,
+    description: "Set to true to allow Rovelink automation for this VM",
+  });
+}
+```
+
+Call this in `server/routes/automation-inventories.ts` at the start of an inventory refresh.
+
+---
+
+## 9. Gap 7 — ServiceNow CMDB adapter
+
+### Current state
+`cmdbAccounts` supports `kind = "servicenow"` in the schema and the UI dropdown, but there is
+no `ServiceNowAdapter` class. The pipeline sync routes fall through to an error when
+`cmdbAccount.kind === "servicenow"`.
+
+### Goal
+Implement a minimal ServiceNow Table API adapter supporting `test()`, `objectTypes()`,
+`validate()`, and `upsert()`.
+
+---
+
+### 9.1 Create the adapter
+
+**Create: `server/services/servicenow-adapter.ts`**
+
+```typescript
+/**
+ * ServiceNow CMDB Adapter
+ * Uses the ServiceNow Table API: https://docs.servicenow.com/bundle/washingtondc-api-reference/page/integrate/inbound-rest/concept/c_TableAPI.html
+ *
+ * Authentication: Basic auth (username + password) or OAuth2.
+ * For v1 implement Basic auth. OAuth2 can be added later.
+ */
+
+import axios, { AxiosInstance } from "axios";
+
+export interface ServiceNowConfig {
+  url: string;       // https://myinstance.service-now.com
+  username: string;
+  password: string;  // encrypted at rest
+}
+
+export class ServiceNowAdapter {
+  private config: ServiceNowConfig;
+  private client: AxiosInstance;
+
+  constructor(config: ServiceNowConfig) {
+    this.config = config;
+    this.client = axios.create({
+      baseURL: config.url.replace(/\/$/, ""),
+      auth: { username: config.username, password: config.password },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      timeout: 30000,
+    });
+  }
+
+  objectTypes(): string[] {
+    return [
+      "cmdb_ci_vm_instance",    // Virtual Machine Instance
+      "cmdb_ci_server",         // Server
+      "cmdb_ci_network_adapter", // Network Adapter
+      "cmdb_ci_ip_address",     // IP Address
+    ];
+  }
+
+  async test(): Promise<{ ok: boolean; version?: string; error?: string }> {
+    try {
+      // Hit the now/table/sys_properties endpoint — available on all instances
+      const res = await this.client.get("/api/now/table/sys_properties", {
+        params: { sysparm_limit: 1, sysparm_fields: "name" },
+      });
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  /**
+   * Upsert a CI into ServiceNow.
+   * Uses GET to find by name, then PATCH or POST.
+   */
+  async upsert(targetType: string, obj: any, matchBy: string[] = ["name"]): Promise<any> {
+    const table = this.resolveTable(targetType);
+
+    // Search for existing CI
+    const query = matchBy.map((f) => `${f}=${encodeURIComponent(obj[f] ?? "")}`).join("^");
+    const searchRes = await this.client.get(`/api/now/table/${table}`, {
+      params: { sysparm_query: query, sysparm_limit: 1 },
+    });
+    const results = searchRes.data?.result ?? [];
+
+    const payload = this.mapToServiceNow(targetType, obj);
+
+    if (results.length > 0) {
+      const sysId: string = results[0].sys_id;
+      await this.client.patch(`/api/now/table/${table}/${sysId}`, payload);
+      return { action: "updated", sys_id: sysId };
+    } else {
+      const createRes = await this.client.post(`/api/now/table/${table}`, payload);
+      return { action: "created", sys_id: createRes.data?.result?.sys_id };
+    }
+  }
+
+  validate(targetType: string, obj: any): { errors: string[]; warnings: string[] } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    if (!obj.name) errors.push("name is required");
+    return { errors, warnings };
+  }
+
+  private resolveTable(targetType: string): string {
+    const map: Record<string, string> = {
+      cmdb_ci_vm_instance: "cmdb_ci_vm_instance",
+      cmdb_ci_server: "cmdb_ci_server",
+      cmdb_ci_network_adapter: "cmdb_ci_network_adapter",
+      cmdb_ci_ip_address: "cmdb_ci_ip_address",
+      VirtualMachine: "cmdb_ci_vm_instance", // friendly alias
+      Server: "cmdb_ci_server",
+    };
+    return map[targetType] ?? targetType;
+  }
+
+  private mapToServiceNow(targetType: string, obj: any): Record<string, any> {
+    const payload: Record<string, any> = { name: obj.name };
+    if (obj.vcpus !== undefined)  payload.cpu_core_count = obj.vcpus;
+    if (obj.memory !== undefined) payload.ram = obj.memory;
+    if (obj.platform)             payload.os = obj.platform;
+    if (obj.primaryIp4)           payload.ip_address = obj.primaryIp4;
+    if (obj.status)               payload.operational_status = obj.status === "running" ? "1" : "6";
+    return payload;
+  }
+}
+```
+
+---
+
+### 9.2 Wire into pipeline sync
+
+**File: `server/routes/pipelines.ts`**
+
+Find the section that instantiates the CMDB adapter based on `cmdbAccount.kind` and add:
+```typescript
+import { ServiceNowAdapter } from "../services/servicenow-adapter";
+
+// In the adapter-selection block:
+case "servicenow":
+  adapter = new ServiceNowAdapter(decryptedConfig);
+  break;
+```
+
+---
+
+## 10. Gap 8 — Docker Compose for self-hosting
+
+### Current state
+`DEPLOY.md` and `ubuntu-setup.sh` exist for bare-metal deployment on Ubuntu.
+There is no `docker-compose.yml` file, which is the expected self-hosting mechanism
+for most users.
+
+---
+
+### 10.1 Create docker-compose.yml
+
+**Create: `docker-compose.yml`** in the project root:
+
+```yaml
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rovelink
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: rovelink
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rovelink"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      DATABASE_URL: postgresql://rovelink:${POSTGRES_PASSWORD:-changeme}@db:5432/rovelink
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set — generate with: openssl rand -hex 32}
+      NODE_ENV: production
+      PORT: 5000
+    volumes:
+      - app_logs:/app/logs
+
+volumes:
+  postgres_data:
+  app_logs:
+```
+
+---
+
+### 10.2 Create Dockerfile
+
+**Create: `Dockerfile`** in the project root:
+
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS production
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/inventory ./inventory
+EXPOSE 5000
+CMD ["npm", "start"]
+```
+
+---
+
+### 10.3 Update .env.example
+
+**File: `.env.example`** — add the new variables:
+
+```bash
+# Required — generate with: openssl rand -hex 32
+ENCRYPTION_KEY=
+
+# Required — generate with: openssl rand -hex 32
+JWT_SECRET=change-me-in-production
+
+# Required
+SESSION_SECRET=change-me-in-production
+
+# Required
+DATABASE_URL=postgresql://rovelink:changeme@localhost:5432/rovelink
+
+# Optional — default: 5000
+PORT=5000
+
+# Optional — AWX connection (can also be set via Settings UI)
+# AWX_URL=https://awx.example.com
+# AWX_TOKEN=your-token-here
+```
+
+---
+
+## 11. Gap 9 — README and CONTRIBUTING
+
+### 11.1 Create README.md
+
+**Create: `README.md`** in the project root with these sections (content is the brief spec — write full markdown):
+
+1. **What is Rovelink** — 3 sentences maximum. "Rovelink is an open-source infrastructure automation platform that bridges cloud providers, CMDBs, and Ansible. It enforces governance before automation: no VM reaches Ansible unless it is assigned a tenant, a role, and explicitly marked automatable in your CMDB. Built by an infrastructure engineer who ran these systems for 8 years."
+
+2. **How it works** — 4-step numbered list matching the website
+
+3. **Quick start** — Docker only, 5 commands, copy-pasteable
+
+4. **Supported integrations** — two tables: Providers and CMDBs, each with a Status column (Stable / Planned)
+
+5. **The Automation GATE** — explain the invariant in plain language, 3 sentences
+
+6. **Configuration** — link to `.env.example`, document the 4 required env vars
+
+7. **Development setup** — `npm install`, `npm run db:push`, `npm run db:seed`, `npm run dev`
+
+8. **Contributing** — link to `CONTRIBUTING.md`
+
+9. **License** — MIT
+
+### 11.2 Create CONTRIBUTING.md
+
+**Create: `CONTRIBUTING.md`** with:
+- How to file a bug (GitHub Issues template)
+- How to add a provider (reference `server/services/providers/types.ts`, implement `IProviderCollector`, register in `registry.ts`)
+- How to add a CMDB adapter (implement `test()`, `objectTypes()`, `validate()`, `upsert()`)
+- The gate invariants section — explicitly state what must NEVER change
+- Code style: TypeScript strict, no `any` in new code, Zod for all external input validation
+
+---
+
+## 12. Constraints and invariants that must never be broken
+
+These are architectural decisions baked into the codebase. Any change that violates them
+will break the core security model of the product. **Do not modify these.**
+
+### GATE invariants (from `server/services/gate-design-principle.ts`)
+
+1. **Gate evaluation cannot be skipped.** There is no `--skip-gate` flag, no admin bypass, no environment variable that disables the gate.
+
+2. **Provider hints cannot grant automation access.** `GateEvaluator.evaluateGate()` takes a `providerHintsUsed: boolean` parameter. If `true`, it throws `INVARIANT VIOLATION`. Never pass `true`.
+
+3. **Gate runs as a first-class phase before inventory generation.** The `runGatePhase()` call must always precede `readAllowedAssets()`. Inventory generation reads from `gateStore`, never triggers evaluation.
+
+4. **Removing CMDB governance immediately removes automation access.** Gate decisions are ephemeral (in-memory). They are re-evaluated on every sync. There is no persistent "approved" state.
+
+5. **`asset_id` is the stable identity.** `asset_id = hash(providerId + vmName)`. VM names can change. `asset_id` does not.
+
+### Secret invariants (from `server/services/secrets.ts`)
+
+6. **The `enc:v1:` prefix is the format contract.** Never change the prefix or the format (`nonce:tag:ciphertext`). Changing it breaks all existing encrypted secrets in the database.
+
+7. **`ENCRYPTION_KEY` must be a 64-character hex string (32 bytes).** Any other length throws at startup.
+
+8. **Secrets are decrypted only immediately before use.** Never store decrypted secrets in variables that live beyond the scope of a single API call.
+
+### Architecture invariants
+
+9. **Provider sync does not write to CMDB.** `SyncWorker` caches to `external_objects` only. CMDB writes happen only through the pipeline sync path.
+
+10. **Provider tags are always namespaced.** Tags written to NetBox from a provider must be prefixed with `{provider_kind}_` (e.g. `proxmox_node/pve1`). They must never overwrite governance fields.
+
+---
+
+## 13. Environment variable reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `ENCRYPTION_KEY` | Yes (prod) | 64-char hex string for AES-256 secret encryption. Generate: `openssl rand -hex 32` |
+| `JWT_SECRET` | Yes | JWT signing secret. Generate: `openssl rand -hex 32` |
+| `SESSION_SECRET` | Yes | Session signing secret. Generate: `openssl rand -hex 32` |
+| `PORT` | No | HTTP port (default: 5000) |
+| `NODE_ENV` | No | `production` or `development` (default: development) |
+| `AUTH_DISABLE` | No | Dev only. Set to `true` to bypass authentication. Hard-fails with 403 in production. |
+| `AWX_URL` | No | AWX base URL. Can also be set via the Settings UI. |
+| `AWX_TOKEN` | No | AWX personal access token. Encrypted at rest if set via UI. |
+
+---
+
+*Document version: 1.0 — written against Rovelink codebase as of April 2026.*
+*All code examples use the existing TypeScript, Drizzle ORM, and Express.js patterns already present in the codebase.*

@@ -619,7 +619,7 @@ export default function NetBoxInventories() {
                   data-testid="input-vm-tags"
                 />
               </div>
-              {editingVm.customFields && Object.keys(editingVm.customFields).length > 0 && (
+              {!!(editingVm.customFields && Object.keys(editingVm.customFields).length > 0) && (
                 <div>
                   <label className="text-sm font-medium">Custom Fields (read-only)</label>
                   <div className="mt-2 p-3 bg-muted rounded-md">

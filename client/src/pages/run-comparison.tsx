@@ -153,7 +153,7 @@ export default function RunComparison() {
                     <span className="text-muted-foreground">Created</span>
                     <span>{new Date(run.createdAt).toLocaleString()}</span>
                   </div>
-                  {run.resultSummary && typeof run.resultSummary === 'object' && (
+                  {!!(run.resultSummary && typeof run.resultSummary === 'object') && (
                     <div className="pt-2 border-t">
                       <p className="text-sm font-medium mb-2">Results</p>
                       <div className="space-y-1 text-sm">

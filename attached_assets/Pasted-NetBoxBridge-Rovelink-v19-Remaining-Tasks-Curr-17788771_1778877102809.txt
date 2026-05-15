@@ -1,0 +1,359 @@
+NetBoxBridge / Rovelink — v19 Remaining Tasks
+=============================================
+
+Current validation from review:
+- npm run check: PASS
+- npm test: PASS, 110 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm ci timed out in the review sandbox, so verify clean install in Replit
+
+Main status:
+Automation inventory tenant isolation is now mostly fixed.
+Remaining work is narrower: audit risk, docs, linked-CMDB create behavior, integration coverage, and local Git/demo state.
+
+
+Task 1 — Fix linked-CMDB validation before creating automation inventory
+------------------------------------------------------------------------
+
+File:
+
+    server/routes/automation-inventories.ts
+
+Problem:
+
+POST /api/inventories inserts the automation inventory before validating that a linked CMDB sourceRef belongs to the current org.
+
+Current behavior:
+
+1. Insert inventory.
+2. If type is linked, query CMDB by sourceRef + orgId.
+3. If CMDB is not found, return 404.
+4. But the inventory may already exist with an invalid/cross-org sourceRef.
+
+Required fix:
+
+Validate linked CMDB before inserting linked inventories.
+
+Example flow:
+
+    const orgId = resolveOrgId(req);
+    const validated = insertAutomationInventorySchema.parse(req.body);
+
+    if (validated.type === "linked") {
+      if (!validated.sourceRef || !validated.sourceType) {
+        return res.status(400).json({
+          message: "Linked inventories require sourceRef and sourceType"
+        });
+      }
+
+      const [cmdb] = await db
+        .select()
+        .from(cmdbAccounts)
+        .where(
+          and(
+            eq(cmdbAccounts.id, validated.sourceRef),
+            eq(cmdbAccounts.orgId, orgId)
+          )
+        );
+
+      if (!cmdb) {
+        return res.status(404).json({ message: "Linked CMDB not found" });
+      }
+
+      // only now insert inventory
+    }
+
+Alternative:
+
+Wrap insert + linked CMDB validation + refresh in a database transaction and roll back on validation/fetch failure.
+
+Acceptance criteria:
+
+- Creating linked inventory with another org's CMDB ID returns 404.
+- No dangling inventory row is created.
+- Creating linked inventory with invalid CMDB ID returns 404.
+- No dangling inventory row is created.
+- Creating linked inventory with own org CMDB works.
+- Add/update tests for this specific behavior.
+- npm test passes.
+- npm run check passes.
+
+
+Task 2 — Add real route/integration tests for automation inventory isolation
+---------------------------------------------------------------------------
+
+Current tests:
+
+tests/automation-inventory-isolation.test.ts is useful, but it uses in-memory route-logic mirrors instead of the real Express routes/database.
+
+Required improvement:
+
+Add integration coverage for real automation inventory routes.
+
+Suggested file:
+
+    tests/automation-inventory-integration.test.ts
+
+Put it under:
+
+    npm run test:integration
+
+because it may require DATABASE_URL.
+
+Test cases:
+
+1. GET /api/inventories:
+   - Org A only sees Org A inventories.
+   - Org B inventories are not returned.
+
+2. GET /api/inventories/:id:
+   - Org A can read its own inventory.
+   - Org A gets 404 for Org B inventory.
+
+3. POST /api/inventories:
+   - Client-provided orgId is ignored.
+   - Created inventory uses req.orgId.
+   - Cross-org sourceRef is rejected.
+   - Cross-org sourceRef does not create a dangling row.
+
+4. PATCH /api/inventories/:id:
+   - Org A cannot update Org B inventory.
+   - orgId cannot be changed through PATCH.
+
+5. DELETE /api/inventories/:id:
+   - Org A cannot delete Org B inventory.
+
+6. POST /api/inventories/:id/refresh:
+   - Org A cannot refresh Org B inventory.
+
+7. Export/gate endpoints:
+   - Org A cannot access Org B automation.yml.
+   - Org A cannot access Org B blocked.json.
+   - Org A cannot access Org B gate-stats.
+
+Acceptance criteria:
+
+- Integration tests pass with a real DATABASE_URL.
+- Integration tests fail clearly without DATABASE_URL.
+- Default npm test remains DB-free and passing.
+
+
+Task 3 — Update PRODUCTION-HARDENING.md to v19
+----------------------------------------------
+
+File:
+
+    PRODUCTION-HARDENING.md
+
+Required changes:
+
+1. Change:
+
+    as of v18
+
+to:
+
+    as of v19
+
+2. Update automation inventory status:
+
+    Automation inventory tenant isolation: PASS / mostly fixed
+
+3. Add note for remaining linked-CMDB create behavior until Task 1 is fixed:
+
+    Linked inventory creation validates CMDB ownership after insert; should be moved before insert or wrapped in transaction.
+
+4. Keep Drizzle risk accurate:
+
+    npm audit --omit=dev reports 1 high vulnerability: drizzle-orm GHSA-gpj5-g38j-94v9.
+
+5. Keep integration test wording accurate:
+
+    Integration tests are available under npm run test:integration and require DATABASE_URL.
+    Last known status in configured DB environment: PASS if verified by Replit.
+
+Acceptance criteria:
+
+- Document says v19.
+- No stale v18 claim remains.
+- No claim says audit is clean.
+- Remaining known issues match current code.
+
+
+Task 4 — Update VERSION.md to v19
+---------------------------------
+
+File:
+
+    VERSION.md
+
+Required changes:
+
+Add a v19 section above v18.
+
+Include:
+
+- automation inventory routes are now org-scoped
+- automation inventory role checks use role hierarchy
+- automation inventory isolation tests included in npm test
+- default test suite now has 110 passing tests
+- Drizzle accepted risk remains
+- local Git/project sync remains demo-only
+- linked-CMDB pre-insert validation still needs hardening if not fixed yet
+
+Acceptance criteria:
+
+- VERSION.md reflects the current product state.
+- v18 is not presented as the latest version.
+- Remaining known gaps are clear.
+
+
+Task 5 — Resolve or continue formally tracking Drizzle vulnerability
+--------------------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    drizzle-orm <0.45.2
+    GHSA-gpj5-g38j-94v9
+    Severity: high
+
+Required action:
+
+Option A — Upgrade:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit
+
+or manually upgrade:
+
+    drizzle-orm >= 0.45.2
+
+Then fix any Zod/drizzle-zod compatibility issues.
+
+Run:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Option B — Keep accepted risk:
+
+Ensure PRODUCTION-HARDENING.md includes:
+
+    Risk ID
+    advisory ID
+    package
+    severity
+    owner
+    acceptance date
+    review date
+    mitigation
+    upgrade plan
+
+Acceptance criteria:
+
+- Either npm audit --omit=dev has no high vulnerabilities,
+  OR the vulnerability is formally accepted and documented.
+- Do not call project fully production-ready while this remains only temporarily accepted.
+
+
+Task 6 — Verify npm ci in Replit clean environment
+--------------------------------------------------
+
+Problem:
+
+npm ci timed out in the review sandbox, although node_modules was created and later checks passed.
+
+Required verification in Replit:
+
+Run from a clean workspace:
+
+    rm -rf node_modules
+    npm ci
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Acceptance criteria:
+
+- npm ci completes successfully in Replit.
+- No dependency install hangs.
+- All validation commands complete afterward.
+
+If npm ci hangs:
+
+- Run without --silent to identify the package/script causing delay.
+- Check postinstall scripts.
+- Check network/package registry logs.
+- Document the cause and fix it.
+
+
+Task 7 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current state:
+
+Project sync is still simulated:
+
+    site.yml
+    deploy.yml
+    rollback.yml
+
+This is acceptable only if clearly labeled as demo.
+
+Option A — keep demo:
+
+- UI button must continue to say Demo Sync.
+- API response must continue to say simulated repository.
+- Docs must say no real Git checkout is performed.
+- Local Ansible must fail safely without project.checkoutPath.
+
+Option B — implement real Git sync:
+
+- Clone/pull into:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Save project.checkoutPath.
+- Discover .yml/.yaml playbooks from real checkout.
+- Use credential store for private Git credentials.
+- Never log credentials.
+- Use spawn argument arrays, not shell interpolation.
+- Continue using resolveSafePlaybookPath before execution.
+
+Acceptance criteria:
+
+- Either real Git sync works safely,
+  OR demo sync is clearly labeled everywhere and local production execution remains disabled.
+
+
+Task 8 — Optional cleanup: reduce large route modules
+-----------------------------------------------------
+
+Not a production blocker, but still useful.
+
+Large files remain:
+
+    server/routes/automation-inventories.ts
+    server/routes.ts
+    server/routes/pipelines.ts
+
+Recommended split for automation inventories:
+
+    server/routes/automation-inventories/index.ts
+    server/routes/automation-inventories/crud.ts
+    server/routes/automation-inventories/refresh.ts
+    server/routes/automation-inventories/export.ts
+    server/routes/automation-inventories/policy.ts
+    server/routes/automation-inventories/parsing.ts
+
+Acceptance criteria:
+
+- Route behavior unchanged.
+- Auth/org checks remain in each module.
+- npm test passes.
+- npm run check passes.

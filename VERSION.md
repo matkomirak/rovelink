@@ -2,6 +2,39 @@
 
 ---
 
+## v19 — Linked-CMDB Pre-Insert Validation + Automation Inventory Integration Tests
+**Date:** 2026-05-15
+**Status:** Pre-production MVP
+
+### Security & Isolation
+- **Linked-CMDB validated before INSERT** — `POST /api/inventories` now performs an
+  org-scoped CMDB lookup (`WHERE id = ? AND orgId = ?`) *before* inserting the inventory
+  row. If the `sourceRef` belongs to another org or does not exist, the handler returns 404
+  without writing any row to the database. No dangling inventory records are created on
+  validation failure.
+
+### Test Coverage
+- **Automation inventory integration tests** added in
+  `tests/automation-inventory-integration.test.ts`. Tests real Express routes against a real
+  PostgreSQL database via supertest. Covers: list isolation, detail isolation, create
+  (orgId stamping, cross-org sourceRef rejection, no-dangling-row guarantee), update
+  isolation, delete isolation, refresh isolation, and all export/gate sub-routes.
+  Included in `npm run test:integration`.
+- `npm run test:integration` now covers: cross-tenant isolation (24 tests) + automation
+  inventory integration. Requires DATABASE_URL.
+- `npm test` (DB-free): 110 tests, 0 failures.
+
+### Drizzle Risk
+- `npm audit --omit=dev` still reports 1 high vulnerability: `drizzle-orm` GHSA-gpj5-g38j-94v9.
+  Formally accepted (see PRODUCTION-HARDENING.md ROVELINK-SEC-001). Upgrade blocked by
+  Zod v3 → v4 migration. Review date: 2026-06-15.
+
+### Local Ansible / Project Sync
+- Project sync remains demo-only. UI button reads "Demo Sync". No real Git clone.
+  `runLocally` fails closed without `project.checkoutPath`.
+
+---
+
 ## v18 — Automation Inventory Tenant Isolation
 **Date:** 2026-05-15
 **Status:** Pre-production MVP

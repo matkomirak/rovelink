@@ -107,6 +107,26 @@ router.post("/", async (req: AuthRequest, res: Response) => {
       }
     }
 
+    // For linked type: validate CMDB ownership BEFORE inserting.
+    // This prevents dangling inventory rows when the sourceRef belongs to another org
+    // or does not exist at all. No INSERT is performed if this check fails.
+    let linkedCmdb: any = null;
+    if (validated.type === "linked" && validated.sourceRef) {
+      const [preCmdb] = await db
+        .select()
+        .from(cmdbAccounts)
+        .where(
+          and(
+            eq(cmdbAccounts.id, validated.sourceRef),
+            eq(cmdbAccounts.orgId, orgId)
+          )
+        );
+      if (!preCmdb) {
+        return res.status(404).json({ message: "Linked CMDB not found" });
+      }
+      linkedCmdb = preCmdb;
+    }
+
     // If this is marked as default, unset other defaults within this org only
     if (validated.isDefault) {
       await db
@@ -136,20 +156,8 @@ router.post("/", async (req: AuthRequest, res: Response) => {
     // For linked inventories, fetch real data from CMDB
     if (newInventory.type === "linked" && newInventory.sourceRef) {
       try {
-        // Get the linked CMDB account — org-scoped to prevent cross-tenant linking
-        const [cmdb] = await db
-          .select()
-          .from(cmdbAccounts)
-          .where(
-            and(
-              eq(cmdbAccounts.id, newInventory.sourceRef),
-              eq(cmdbAccounts.orgId, orgId)
-            )
-          );
-
-        if (!cmdb) {
-          return res.status(404).json({ message: "Linked CMDB not found" });
-        }
+        // CMDB was already validated and fetched before insert — use cached reference
+        const cmdb = linkedCmdb!;
 
         // Decrypt secrets before passing to adapter
         const decryptedCmdbCfg = decryptCmdbConfig(cmdb.config as Record<string, any>);

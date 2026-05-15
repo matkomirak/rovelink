@@ -281,6 +281,98 @@ describe("PATCH /api/inventories/:id — update route isolation", async () => {
   });
 });
 
+// ─── PATCH linked-source validation ──────────────────────────────────────────
+
+describe("PATCH /api/inventories/:id — linked-source validation", async () => {
+  // Dedicated inventory for these tests so we never corrupt invAId's state
+  let patchTestInvId: string;
+
+  before(async () => {
+    const r = await req
+      .post("/api/inventories")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ name: "Patch Validation Subject", type: "file", fileContent: "all:\n  hosts:\n    vm1:\n", fileFormat: "yaml" });
+    assert.equal(r.status, 201, `patch-test inventory create failed: ${JSON.stringify(r.body)}`);
+    patchTestInvId = r.body.id;
+  });
+
+  after(async () => {
+    if (patchTestInvId) {
+      await db.delete(automationInventories).where(eq(automationInventories.id, patchTestInvId));
+    }
+  });
+
+  await test("PATCH cross-org CMDB sourceRef returns 404", async () => {
+    const r = await req
+      .patch(`/api/inventories/${patchTestInvId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ type: "linked", sourceRef: CMDB_B_ID, sourceType: "netbox" });
+    assert.equal(r.status, 404, "cross-org CMDB via PATCH must return 404");
+  });
+
+  await test("PATCH cross-org sourceRef does not change previous sourceRef", async () => {
+    // Verify the row is unchanged after the failed PATCH
+    const [row] = await db
+      .select()
+      .from(automationInventories)
+      .where(eq(automationInventories.id, patchTestInvId));
+    assert.equal(row.sourceRef, null, "sourceRef must remain null after failed cross-org PATCH");
+    assert.equal(row.type, "file", "type must remain 'file' after failed cross-org PATCH");
+  });
+
+  await test("PATCH to non-existent sourceRef returns 404", async () => {
+    const r = await req
+      .patch(`/api/inventories/${patchTestInvId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ type: "linked", sourceRef: "cmdb-ghost-does-not-exist", sourceType: "netbox" });
+    assert.equal(r.status, 404, "non-existent CMDB via PATCH must return 404");
+  });
+
+  await test("PATCH to type=linked without sourceRef returns 400", async () => {
+    const r = await req
+      .patch(`/api/inventories/${patchTestInvId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ type: "linked" });
+    assert.equal(r.status, 400, "switching to linked type without sourceRef must return 400");
+  });
+
+  await test("PATCH to type=linked without sourceType returns 400", async () => {
+    const r = await req
+      .patch(`/api/inventories/${patchTestInvId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ type: "linked", sourceRef: CMDB_A_ID });
+    assert.equal(r.status, 400, "switching to linked type without sourceType must return 400");
+  });
+
+  await test("PATCH to own org CMDB succeeds", async () => {
+    const r = await req
+      .patch(`/api/inventories/${patchTestInvId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ type: "linked", sourceRef: CMDB_A_ID, sourceType: "netbox" });
+    assert.equal(r.status, 200, `PATCH with own-org CMDB must succeed: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.sourceRef, CMDB_A_ID);
+    assert.equal(r.body.orgId, ORG_A_ID);
+  });
+
+  await test("orgId in PATCH body is ignored — orgId stays with original org", async () => {
+    const r = await req
+      .patch(`/api/inventories/${patchTestInvId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ orgId: ORG_B_ID, name: "OrgId Injection via PATCH" });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.orgId, ORG_A_ID, "orgId must not change after PATCH with injected orgId");
+  });
+
+  await test("id in PATCH body is ignored — row id stays the same", async () => {
+    const r = await req
+      .patch(`/api/inventories/${patchTestInvId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ id: "injected-fake-id", name: "Id Injection via PATCH" });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.id, patchTestInvId, "id must not change after PATCH with injected id");
+  });
+});
+
 // ─── Delete route ─────────────────────────────────────────────────────────────
 
 describe("DELETE /api/inventories/:id — delete route isolation", async () => {

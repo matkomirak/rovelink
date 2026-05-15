@@ -164,35 +164,23 @@ router.post("/", async (req: AuthRequest, res: Response) => {
         // Test connection and fetch VMs from NetBox
         const adapter = new NetBoxAdapter(decryptedCmdbCfg as any);
         
-        // First test the connection
+        // First test the connection.
+        // Throw on failure so the outer catch keeps the inventory row and returns 201 — API
+        // response and database state stay consistent regardless of external network outcome.
         const testResult = await adapter.test();
         if (!testResult.ok) {
-          return res.status(400).json({ 
-            message: `Failed to connect to NetBox: ${testResult.error}`,
-            hint: "Please verify the NetBox URL and API token are correct in the CMDB configuration."
-          });
+          throw new Error(`Failed to connect to NetBox: ${testResult.error}`);
         }
 
-        // Fetch VMs from NetBox
+        // Fetch VMs from NetBox — throw on failure for the same reason
         let vms;
         try {
           vms = await adapter.listAllVms();
         } catch (error: any) {
-          console.error("Failed to fetch VMs from NetBox:", error.message);
-          
-          if (error.message.includes("403")) {
-            return res.status(403).json({ 
-              message: `NetBox API access denied. The configured API token does not have permission to read virtualization resources.`,
-              hint: "The token needs 'virtualization.view_virtualmachine' permission in NetBox. Update the CMDB account with a valid token.",
-              cmdb_name: cmdb.name,
-              cmdb_url: (cmdb.config as any).url
-            });
-          }
-          
-          return res.status(500).json({ 
-            message: `Failed to fetch VMs from NetBox: ${error.message}`,
-            cmdb_name: cmdb.name
-          });
+          const fetchMsg = error.message.includes("403")
+            ? `NetBox API access denied (token needs 'virtualization.view_virtualmachine' permission)`
+            : `Failed to fetch VMs from NetBox: ${error.message}`;
+          throw new Error(fetchMsg);
         }
 
         // ================================================================
@@ -354,9 +342,12 @@ router.post("/", async (req: AuthRequest, res: Response) => {
               eq(automationInventories.orgId, orgId)
             )
           );
-        return res.status(201).json(updated);
+        return res.status(201).json({
+          inventory: updated,
+          sync: { status: "ok" },
+        });
       } catch (error: any) {
-        console.error("Error fetching NetBox data for linked inventory:", error.message);
+        console.error("Error during initial NetBox sync for linked inventory:", error.message);
         
         // Still create the inventory but with error state
         await db
@@ -388,8 +379,12 @@ router.post("/", async (req: AuthRequest, res: Response) => {
           );
         
         return res.status(201).json({
-          ...updated,
-          warning: `Inventory created but failed to fetch data: ${error.message}`
+          inventory: updated,
+          sync: {
+            status: "failed",
+            message: error.message,
+            retryable: true,
+          },
         });
       }
     }
@@ -759,6 +754,32 @@ router.patch("/:id", async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "Inventory not found" });
     }
 
+    // Validate linked source fields — prevent cross-org CMDB references via PATCH.
+    // Calculate the effective post-update values so a partial PATCH is handled correctly.
+    const effectiveType = (req.body.type ?? existing.type) as string;
+    const effectiveSourceRef = req.body.sourceRef ?? existing.sourceRef;
+    const effectiveSourceType = req.body.sourceType ?? existing.sourceType;
+
+    if (effectiveType === "linked") {
+      if (!effectiveSourceRef || !effectiveSourceType) {
+        return res.status(400).json({
+          message: "Linked inventories require sourceRef and sourceType",
+        });
+      }
+      const [patchCmdb] = await db
+        .select()
+        .from(cmdbAccounts)
+        .where(
+          and(
+            eq(cmdbAccounts.id, effectiveSourceRef),
+            eq(cmdbAccounts.orgId, orgId)
+          )
+        );
+      if (!patchCmdb) {
+        return res.status(404).json({ message: "Linked CMDB not found" });
+      }
+    }
+
     // Handle default flag toggle — only within this org
     if (req.body.isDefault === true) {
       await db
@@ -772,8 +793,8 @@ router.patch("/:id", async (req: AuthRequest, res: Response) => {
         );
     }
 
-    // Strip orgId from update payload — it must never be changed via PATCH
-    const { orgId: _ignoredOrgId, ...bodyWithoutOrgId } = req.body;
+    // Strip orgId and id from update payload — neither can be changed via PATCH
+    const { orgId: _ignoredOrgId, id: _ignoredId, ...bodyWithoutOrgId } = req.body;
     const updateData: any = {
       ...bodyWithoutOrgId,
       updatedAt: new Date(),

@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v19.
+This document accurately reflects the state of the codebase as of v20.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -28,6 +28,8 @@ npm audit --omit=dev
 | Gate store org isolation tests (10 tests, DB-free) | PASS (10/10) |
 | Automation inventory routes are org-scoped | PASS — all 14 route handlers filter by orgId |
 | Linked-CMDB validated before insert (no dangling rows) | PASS — CMDB org-scoped lookup runs before INSERT; 404 returned without creating a row |
+| PATCH linked-source validation — org-scoped CMDB check | PASS — effective post-update sourceRef validated against orgId before UPDATE |
+| CREATE linked inventory — API/DB consistency on sync failure | PASS — external NetBox errors caught, row kept, 201 returned with `sync.status:"failed"` |
 | Automation inventory integration tests (real routes + DB) | Available under `npm run test:integration` — require DATABASE_URL |
 | `npm audit --omit=dev` — no high/critical vulnerabilities | **OPEN** — 1 high (see ROVELINK-SEC-001 below) |
 | Auth middleware does not turn DB errors into 401 | PASS |
@@ -75,6 +77,28 @@ Integration tests fail immediately with a clear error message if `DATABASE_URL` 
   Run with:  npm run test:integration
   These tests require a real PostgreSQL database and do NOT run as part of npm test.
 ```
+
+### Running Integration Tests
+
+Integration tests require a live PostgreSQL instance accessible via `DATABASE_URL`.
+
+**In Replit** (database already provisioned):
+```bash
+npm run test:integration
+```
+
+**Locally with a Postgres instance:**
+```bash
+DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_dev npm run test:integration
+```
+
+**From a clean schema** (push Drizzle schema first, then run):
+```bash
+DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_test npm run db:push
+DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_test npm run test:integration
+```
+
+Integration tests are **always excluded** from `npm test`. The default test suite is DB-free and always passes without any infrastructure.
 
 ---
 

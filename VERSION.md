@@ -2,6 +2,48 @@
 
 ---
 
+## v20 — PATCH Linked-Source Validation + Create Consistency
+**Date:** 2026-05-15
+**Status:** Pre-production MVP
+
+### Security & Isolation
+- **PATCH linked-source validation** — `PATCH /api/inventories/:id` now validates the
+  effective post-update `sourceRef` before applying the update. The handler computes
+  `effectiveType`, `effectiveSourceRef`, `effectiveSourceType` from the incoming body
+  merged with the current row, then runs a `WHERE id = ? AND orgId = ?` check against
+  `cmdb_accounts`. A cross-org CMDB, non-existent CMDB, or missing `sourceType` is
+  rejected with 404/400 before any row is written.
+- **`id` stripped from PATCH body** — `id` is now removed from the PATCH payload
+  alongside `orgId`, preventing any attempt to reassign a row's primary key.
+
+### Create Consistency (T1 fix)
+- **API response now always matches database state after linked inventory create.**
+  Previously, if the initial NetBox connection or VM fetch failed after the row was
+  inserted, the route returned 400/403/500 while the row remained in the database.
+  Now, all external-sync failures throw to the outer catch block. The inventory row
+  is always kept, and the response is always 201 with `{ inventory, sync }`:
+  - Success: `{ inventory: {...}, sync: { status: "ok" } }`
+  - Failure: `{ inventory: {...}, sync: { status: "failed", message: "...", retryable: true } }`
+  The user can retry the sync via `POST /api/inventories/:id/refresh`.
+
+### Test Coverage
+- **PATCH linked-source integration tests** added to
+  `tests/automation-inventory-integration.test.ts`. Covers: cross-org CMDB rejection,
+  non-existent sourceRef rejection, linked type without sourceRef/sourceType (400),
+  own-org CMDB success, row unchanged after failed PATCH, orgId/id injection ignored.
+
+### Ergonomics
+- Integration test running instructions documented in `PRODUCTION-HARDENING.md`
+  with DATABASE_URL examples for Replit and local Postgres.
+
+### Unchanged from v19
+- `npm test` (DB-free): 110 tests, 0 failures.
+- `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally
+  accepted (ROVELINK-SEC-001). Review date 2026-06-15.
+- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+
+---
+
 ## v19 — Linked-CMDB Pre-Insert Validation + Automation Inventory Integration Tests
 **Date:** 2026-05-15
 **Status:** Pre-production MVP

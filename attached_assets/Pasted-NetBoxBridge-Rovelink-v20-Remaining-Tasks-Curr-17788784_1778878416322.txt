@@ -1,0 +1,372 @@
+NetBoxBridge / Rovelink — v20 Remaining Tasks
+=============================================
+
+Current review results:
+- npm ci: PASS
+- npm run check: PASS
+- npm test: PASS, 110 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm run test:integration requires real DATABASE_URL and fails clearly when missing
+
+Main status:
+The app is close to a production-candidate MVP.
+Automation inventory tenant isolation and linked-CMDB pre-insert validation are now mostly fixed.
+Remaining work is consistency, audit risk, docs/version labels, integration-test ergonomics, and local Git/demo state.
+
+
+Task 1 — Fix linked inventory create behavior after external NetBox sync failure
+--------------------------------------------------------------------------------
+
+File:
+
+    server/routes/automation-inventories.ts
+
+Problem:
+
+POST /api/inventories now correctly validates linked CMDB ownership before insert.
+
+However, after insert it immediately calls NetBox:
+
+    adapter.test()
+    adapter.listAllVms()
+
+If those calls fail, the route can return 400/403/500 after the inventory row was already created.
+
+This creates confusing behavior:
+
+    API response: create failed
+    Database state: inventory exists
+
+Required decision:
+
+Choose one behavior and implement it consistently.
+
+Recommended Option B:
+
+Create the inventory once local validation passes.
+If the first NetBox refresh fails, keep the inventory row but mark sync status as failed and return 201/202 with warning.
+
+Example response:
+
+    {
+      "inventory": { ... },
+      "sync": {
+        "status": "failed",
+        "message": "Failed to connect to NetBox: ...",
+        "retryable": true
+      }
+    }
+
+Alternative Option A:
+
+Validate NetBox connection and fetch VMs before insert.
+Only insert if external sync succeeds.
+
+Alternative Option C:
+
+Use a transaction and roll back the inventory row if external sync fails.
+Be careful: external network calls inside DB transactions are usually not ideal.
+
+Acceptance criteria:
+
+- The API response matches database state.
+- No route returns "create failed" while leaving a successfully created row without saying so.
+- Failed initial NetBox sync is visible in inventory status/preview.
+- User can retry refresh later.
+- npm run check passes.
+- npm test passes.
+
+
+Task 2 — Validate linked source fields on PATCH
+-----------------------------------------------
+
+File:
+
+    server/routes/automation-inventories.ts
+
+Problem:
+
+POST validates linked CMDB ownership before insert, but PATCH does not appear to validate sourceRef/sourceType if the inventory is changed to or remains type="linked".
+
+A user should not be able to save:
+
+    {
+      "type": "linked",
+      "sourceRef": "<cmdb id from another org>",
+      "sourceType": "netbox"
+    }
+
+Required behavior:
+
+Before updating an inventory, calculate the effective post-update values:
+
+    effectiveType = req.body.type ?? existing.type
+    effectiveSourceRef = req.body.sourceRef ?? existing.sourceRef
+    effectiveSourceType = req.body.sourceType ?? existing.sourceType
+
+If effectiveType is "linked":
+
+    - sourceRef must exist
+    - sourceType must exist
+    - sourceRef must belong to a CMDB account in req.orgId
+
+Example:
+
+    if (effectiveType === "linked") {
+      if (!effectiveSourceRef || !effectiveSourceType) {
+        return res.status(400).json({
+          message: "Linked inventories require sourceRef and sourceType"
+        });
+      }
+
+      const [cmdb] = await db
+        .select()
+        .from(cmdbAccounts)
+        .where(
+          and(
+            eq(cmdbAccounts.id, effectiveSourceRef),
+            eq(cmdbAccounts.orgId, orgId)
+          )
+        );
+
+      if (!cmdb) {
+        return res.status(404).json({ message: "Linked CMDB not found" });
+      }
+    }
+
+Also strip id and orgId from PATCH body:
+
+    const { id, orgId, ...safePatch } = req.body;
+
+Acceptance criteria:
+
+- PATCH cannot change sourceRef to another org's CMDB.
+- PATCH cannot change sourceRef to a non-existent CMDB.
+- PATCH cannot change type to linked without sourceRef/sourceType.
+- PATCH with own org CMDB works.
+- Add tests.
+- npm test passes.
+
+
+Task 3 — Add tests for PATCH linked-source validation
+-----------------------------------------------------
+
+Add tests to either:
+
+    tests/automation-inventory-isolation.test.ts
+
+or, preferably for real DB route behavior:
+
+    tests/automation-inventory-integration.test.ts
+
+Test cases:
+
+1. Org A cannot PATCH its own inventory to use Org B CMDB sourceRef.
+2. PATCH to non-existent sourceRef returns 404.
+3. PATCH to type="linked" without sourceRef/sourceType returns 400.
+4. PATCH to own org CMDB succeeds.
+5. Failed PATCH does not change the inventory's previous sourceRef.
+6. orgId and id in PATCH body are ignored.
+
+Acceptance criteria:
+
+- Tests fail before implementation.
+- Tests pass after implementation.
+- Default npm test remains DB-free.
+- DB-backed version can live under test:integration if needed.
+
+
+Task 4 — Update docs/version labels to v20
+------------------------------------------
+
+Files:
+
+    PRODUCTION-HARDENING.md
+    VERSION.md
+
+Problem:
+
+Uploaded package is NetBoxBridge (20), but docs still say v19.
+
+Required changes:
+
+In PRODUCTION-HARDENING.md:
+
+    This document accurately reflects the state of the codebase as of v20.
+
+In VERSION.md:
+
+Add a new v20 section above v19.
+
+Suggested v20 notes:
+
+    ## v20 — Create Consistency + Integration Test Hardening
+    - npm ci verified cleanly.
+    - Linked-CMDB pre-insert validation remains in place.
+    - Automation inventory integration tests available under test:integration.
+    - Remaining Drizzle accepted risk unchanged.
+    - Local Git/project sync remains demo-only.
+    - PATCH linked-source validation pending if not yet implemented.
+    - Initial NetBox sync-after-create consistency pending if not yet implemented.
+
+Acceptance criteria:
+
+- No stale "as of v19" label remains if this release is intended as v20.
+- VERSION.md latest section matches the actual package state.
+- Remaining known issues are explicitly listed.
+
+
+Task 5 — Improve integration-test ergonomics
+--------------------------------------------
+
+Current state:
+
+npm run test:integration correctly requires DATABASE_URL and fails clearly when missing.
+
+Required improvement:
+
+Add a documented way to run integration tests locally or in Replit.
+
+Option A — add npm script:
+
+    "test:integration:setup": "npm run db:push && npm run test:integration"
+
+Document usage:
+
+    DATABASE_URL=postgres://rovelink:changeme@localhost:5432/rovelink_test npm run test:integration:setup
+
+Option B — add Docker Compose test DB profile:
+
+    docker compose --profile test up -d test-db
+    DATABASE_URL=postgres://... npm run db:push
+    DATABASE_URL=postgres://... npm run test:integration
+
+Acceptance criteria:
+
+- README or PRODUCTION-HARDENING.md explains how to run integration tests.
+- Command includes DATABASE_URL example.
+- It is clear that integration tests are not part of npm test.
+- Replit can run integration tests with a provisioned database.
+
+
+Task 6 — Resolve or continue formally tracking Drizzle vulnerability
+--------------------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    drizzle-orm <0.45.2
+    GHSA-gpj5-g38j-94v9
+    Severity: high
+
+Current accepted-risk documentation is good for pre-production, but production would be stronger with the upgrade.
+
+Option A — upgrade:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit zod
+
+or manually migrate to:
+
+    drizzle-orm >= 0.45.2
+    compatible drizzle-zod
+    compatible zod version
+
+Then run:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Option B — keep accepted risk:
+
+Keep ROVELINK-SEC-001 with:
+
+    owner
+    acceptance date
+    review date
+    mitigation
+    upgrade plan
+
+Acceptance criteria:
+
+- Either npm audit --omit=dev has no high vulnerabilities,
+  OR ROVELINK-SEC-001 remains accurate and formally accepted.
+- Do not call the project fully production-ready while this risk is only temporarily accepted.
+
+
+Task 7 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current state:
+
+Project sync is simulated:
+
+    site.yml
+    deploy.yml
+    rollback.yml
+
+This is acceptable only because it is clearly labeled as demo.
+
+Option A — keep demo:
+
+- UI button must continue to say Demo Sync.
+- API response must continue to say simulated repository.
+- Docs must say no real Git checkout is performed.
+- Local Ansible must fail safely without project.checkoutPath.
+
+Option B — implement real Git sync:
+
+- Clone/pull into:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Save project.checkoutPath.
+- Discover .yml/.yaml playbooks from real checkout.
+- Use credential store for private Git credentials.
+- Never log credentials.
+- Use spawn argument arrays, not shell interpolation.
+- Continue using resolveSafePlaybookPath before execution.
+
+Acceptance criteria:
+
+- Either real Git sync works safely,
+  OR demo sync is clearly labeled everywhere and local production execution remains disabled.
+
+
+Task 8 — Optional hardening: split automation-inventories route module
+----------------------------------------------------------------------
+
+Not a blocker, but useful.
+
+File:
+
+    server/routes/automation-inventories.ts
+
+This file is still large and handles:
+
+    CRUD
+    refresh
+    parsing
+    gate stats
+    exports
+    policy
+    preview
+
+Recommended split:
+
+    server/routes/automation-inventories/index.ts
+    server/routes/automation-inventories/crud.ts
+    server/routes/automation-inventories/refresh.ts
+    server/routes/automation-inventories/export.ts
+    server/routes/automation-inventories/policy.ts
+    server/routes/automation-inventories/parsing.ts
+
+Acceptance criteria:
+
+- Behavior unchanged.
+- Auth/org checks remain on every route.
+- npm run check passes.
+- npm test passes.

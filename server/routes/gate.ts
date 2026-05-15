@@ -85,7 +85,7 @@ router.get("/status/:vmName", async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const hints = await providerHintsStore.getHintsByVmName(vmName);
+    const hints = await providerHintsStore.getHintsByVmName(orgId, vmName);
 
     res.json({
       asset_id: decision.assetId,
@@ -107,8 +107,9 @@ router.get("/status/:vmName", async (req: AuthRequest, res: Response) => {
 // NOTE: Provider hints are NON-AUTHORITATIVE and never affect gate decisions
 router.get("/hints/:vmName", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = req.user?.orgId || req.orgId || "";
     const { vmName } = req.params;
-    const hints = await providerHintsStore.getHintsByVmName(vmName);
+    const hints = await providerHintsStore.getHintsByVmName(orgId, vmName);
 
     if (!hints) {
       return res.status(404).json({ message: "No provider hints found for this VM" });

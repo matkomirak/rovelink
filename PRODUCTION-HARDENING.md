@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v16.
+This document accurately reflects the state of the codebase as of v17.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -60,9 +60,8 @@ npm audit --omit=dev
 
 | Command | What it runs | Requires DB |
 |---|---|---|
-| `npm test` | authz, role-hierarchy, security, playbook-path tests | No |
+| `npm test` | authz, security, playbook-path, gate + hint isolation (87 tests) | No |
 | `npm run test:integration` | Cross-tenant isolation (24 tests) | Yes — DATABASE_URL required |
-| `NODE_ENV=test tsx --test tests/gate-isolation.test.ts` | Gate store org isolation (10 tests, in-memory, DB-free) | No |
 | `npm run test:authz` | Auth/role tests only | No |
 | `npm run test:security` | Secret redaction/log tests only | No |
 | `npm run test:paths` | Safe playbook path tests only | No |
@@ -78,17 +77,18 @@ Integration tests fail immediately with a clear error message if `DATABASE_URL` 
 
 ## Open Security Items
 
-### ROVELINK-SEC-001 — drizzle-orm SQL Injection Risk (Accepted Temporarily)
+### ROVELINK-SEC-001 — drizzle-orm SQL Injection Risk (Formally Accepted)
 
 ```
-Risk ID:   ROVELINK-SEC-001
-Package:   drizzle-orm
-Advisory:  GHSA-gpj5-g38j-94v9
-Severity:  High
-Status:    Accepted temporarily
-Owner:     Platform Engineering
+Risk ID:       ROVELINK-SEC-001
+Package:       drizzle-orm
+Advisory:      GHSA-gpj5-g38j-94v9
+Severity:      High
+Status:        Formally accepted — upgrade blocked by dependency chain
+Owner:         Platform Engineering
 Date accepted: 2026-05-15
 Review date:   2026-06-15 (30 days)
+Upgrade plan:  Zod v3 → v4 migration sprint, then drizzle-orm@0.45.2 + drizzle-zod@0.8.x
 ```
 
 **What the advisory says:**
@@ -97,20 +97,27 @@ SQL injection via improperly escaped SQL identifiers. Affects `drizzle-orm < 0.4
 **Current installed version:** `0.39.1`
 
 **Why upgrade is blocked:**
-The patched version (`0.45.2`) requires `drizzle-zod@0.8.x`, which in turn requires Zod v4
-internal types. The entire frontend uses Zod v3 across 50+ files. Upgrading would require a
-full Zod v4 migration, which is a separate sprint-sized effort.
+`npm audit fix --force` would install `drizzle-orm@0.45.2`, which is a breaking change
+requiring `drizzle-zod@0.8.x`. `drizzle-zod@0.8.x` depends on Zod v4 internal types.
+The entire frontend and backend use Zod v3 across 50+ files (`z.object`, `z.string`,
+`createInsertSchema`, `zodResolver`, form validation). Upgrading to Zod v4 is a
+sprint-sized migration with high regression risk — it must be done as a dedicated task.
 
 **Mitigation in place:**
-The vulnerable query patterns (dynamic SQL identifier interpolation — table/column names passed
-as runtime variables) are not used in this codebase. All queries use Drizzle's typed query
-builder with schema-defined table and column references. No user-supplied values are
-interpolated as SQL identifiers. Peer-reviewed: no `sql.identifier()`, `sql.raw()`, or
-equivalent patterns found.
+The vulnerable query patterns (dynamic SQL identifier interpolation — table/column names
+passed as runtime variables) are **not used in this codebase**. All queries use Drizzle's
+typed query builder with schema-defined table and column references. No user-supplied values
+are ever interpolated as SQL identifiers.
 
-**Required before production:**
-Either upgrade drizzle-orm to a version ≥ 0.45.2 with a compatible drizzle-zod, or maintain
-this risk exception with owner sign-off and a fresh review date.
+Peer-reviewed: no `sql.identifier()`, `sql.raw()`, or equivalent patterns found in any
+server file. The attack surface described in the advisory does not exist in the current code.
+
+**Upgrade plan:**
+1. Dedicate a sprint to migrating from Zod v3 → v4 (update all `z.object`, `z.infer`, `createInsertSchema`, `zodResolver` usages — estimated 50+ files).
+2. Upgrade `drizzle-zod` to `@0.8.x`.
+3. Upgrade `drizzle-orm` to `>=0.45.2`.
+4. Run `npm audit --omit=dev` to verify 0 vulnerabilities.
+5. Re-run full test suite (`npm test` + `npm run test:integration`).
 
 `npm audit --omit=dev` currently reports **1 high vulnerability** (this item only).
 
@@ -148,25 +155,27 @@ this risk exception with owner sign-off and a fresh review date.
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
 
-### Gate Tenant Isolation (v16)
+### Gate Tenant Isolation (v17)
 - `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
 - All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
 - `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.
 - `IStorage` enforces `orgId` on all tenant-owned methods at compile time; `getProvidersUnsafe()` / `getNetboxVmsUnsafe()` labeled for internal-only use.
 - Durable gate snapshot (`gateSnapshot` JSONB) persisted on the job run record at dispatch time for audit trail.
 - Notification DELETE returns 404 when caller's orgId doesn't own the target resource (no blind cross-tenant delete).
-- 10 DB-free gate isolation tests verify all of the above (see `tests/gate-isolation.test.ts`).
+- **Provider hints org-scoped (v17):** `ProviderHintsStore` keys hints by `orgId:providerAccountId:providerId`. All four read/delete methods (`getHintsByVmName`, `getHintsByProviderId`, `getAllHintsForProvider`, `deleteHintsForProvider`) require `orgId` as first parameter. Gate routes pass `req.orgId` on both hint lookups.
+- 15 DB-free isolation tests (10 gate store + 5 provider hints) cover all of the above (see `tests/gate-isolation.test.ts`).
 
 ### Local Runner Safety
 - `runLocally` fails closed when `project.checkoutPath` is null.
 - Explicit error message: `"Local execution requires a real project checkout. Demo sync does not create checkoutPath."`
 - `resolveSafePlaybookPath` called on every local execution (rejects traversal, symlinks, non-YAML).
-- `createInventoryForRun()` reads gate-approved hosts from the gate store:
-  - Only allowed VMs are written to the inventory.
-  - Blocked VMs are excluded.
-  - If the gate store is empty, an empty inventory is written with an explanatory comment.
-  - Inventory path is never accepted from the client.
-  - File written with mode 0o600.
+- `createInventoryForRunWithSnapshot()` generates the Ansible inventory for each run:
+  - Re-evaluates gate decisions **fresh from the database** using the org-scoped cached NetBox VMs (not from the in-memory gate store).
+  - Only hosts that pass all gate criteria are written to the inventory file; blocked hosts are excluded at generation time.
+  - If no VMs pass the gate, an empty inventory is written with an explanatory comment.
+  - Inventory path is never accepted from the client; file is written under `runtime/inventories/<orgId>/<runId>/`.
+  - File written with mode `0o600`.
+  - Gate decisions produced during generation are persisted to the in-memory gate store and snapshotted on the run record for audit.
 
 ### Demo-Only Local Ansible (Option A — clearly labeled)
 - Project sync returns hardcoded demo playbooks only. No real Git clone is performed.
@@ -181,8 +190,9 @@ this risk exception with owner sign-off and a fresh review date.
 - API responses strip encrypted values (`enc:v1:...` never returned to the client).
 
 ### Testing
-- `npm test` runs without DATABASE_URL (authz, security, playbook-path, role-hierarchy tests).
+- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation — 87 tests).
 - `npm run test:integration` runs cross-tenant isolation tests (24 tests, requires DATABASE_URL).
+- Gate + hint isolation tests (`tests/gate-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
 - Integration tests guard at module load — clear error if DATABASE_URL is absent.
 - `server/db.ts` defers the DATABASE_URL check to first use, so imports do not throw in test environments.
 

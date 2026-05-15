@@ -107,6 +107,7 @@ export const jobRuns = pgTable("job_runs", {
   limitExpr: text("limit_expr"), // Host limit expression copied from template
   logs: text("logs").default(""), // Full log output
   resultSummary: jsonb("result_summary").default({}), // JSON summary (hosts, tasks, ok/failed counts)
+  gateSnapshot: jsonb("gate_snapshot").default(null), // Gate decisions computed at run preparation time
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

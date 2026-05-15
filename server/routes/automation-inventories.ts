@@ -164,11 +164,11 @@ router.post("/", async (req: AuthRequest, res: Response) => {
         // Inventory generation must ONLY read from gate store.
         // ================================================================
         const policy = extractPolicy(newInventory);
-        await runGatePhase(cmdb.id, policy);
+        await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
         
         // Read gate decisions from store - NEVER trigger evaluation here
         // This is the decoupled read phase
-        const allowedDecisions = await readAllowedAssets();
+        const allowedDecisions = await readAllowedAssets((req as AuthRequest).user?.orgId || "");
         const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
         
         // Filter VMs through gate - only include allowed VMs
@@ -489,10 +489,10 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     // Inventory generation must ONLY read from gate store.
     // ================================================================
     const policy = extractPolicy(inventory);
-    await runGatePhase(cmdb.id, policy);
+    await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
     
     // Read gate decisions from store - NEVER trigger evaluation here
-    const allowedDecisions = await readAllowedAssets();
+    const allowedDecisions = await readAllowedAssets((req as AuthRequest).user?.orgId || "");
     const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
     
     // Filter VMs through gate - only include allowed VMs
@@ -974,10 +974,10 @@ router.get("/:id/automation.yml", async (req, res) => {
 
     // Run gate phase (first-class phase)
     const policy = extractPolicy(inventory);
-    await runGatePhase(cmdb.id, policy);
+    await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
 
     // Read ONLY allowed assets from gate store
-    const allowedDecisions = await readAllowedAssets();
+    const allowedDecisions = await readAllowedAssets((req as AuthRequest).user?.orgId || "");
     const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
 
     // Fetch VMs from NetBox — always decrypt config before use
@@ -1068,10 +1068,10 @@ router.get("/:id/blocked.json", async (req, res) => {
 
     // Run gate phase (first-class phase)
     const policy = extractPolicy(inventory);
-    await runGatePhase(cmdb.id, policy);
+    await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
 
     // Read ONLY blocked assets from gate store
-    const blockedDecisions = await readBlockedAssets();
+    const blockedDecisions = await readBlockedAssets((req as AuthRequest).user?.orgId || "");
 
     // Format blocked assets according to spec
     const blockedAssets = blockedDecisions.map(decision => ({
@@ -1126,14 +1126,14 @@ router.get("/:id/blocked", async (req, res) => {
     }
 
     // Check if gate evaluation has been completed
-    if (!gateStore.isEvaluationComplete()) {
+    if (!gateStore.isEvaluationComplete((req as AuthRequest).user?.orgId || "")) {
       // Run gate phase if not yet evaluated
       const policy = extractPolicy(inventory);
-      await runGatePhase(cmdb.id, policy);
+      await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
     }
 
     // Read blocked assets from gate store
-    const blockedDecisions = await readBlockedAssets();
+    const blockedDecisions = await readBlockedAssets((req as AuthRequest).user?.orgId || "");
 
     // Format for UI
     const blocked = blockedDecisions.map(decision => ({
@@ -1149,7 +1149,7 @@ router.get("/:id/blocked", async (req, res) => {
       blocked,
       count: blocked.length,
       source: cmdb.name,
-      lastEvaluated: gateStore.getLastEvaluationTime()?.toISOString() || null,
+      lastEvaluated: gateStore.getLastEvaluationTime((req as AuthRequest).user?.orgId || "")?.toISOString() || null,
     });
   } catch (error: any) {
     console.error("Error fetching blocked assets:", error);
@@ -1190,13 +1190,13 @@ router.get("/:id/gate-stats", async (req, res) => {
     }
 
     // Check if gate evaluation has been completed
-    if (!gateStore.isEvaluationComplete()) {
+    if (!gateStore.isEvaluationComplete((req as AuthRequest).user?.orgId || "")) {
       // Run gate phase if not yet evaluated
       const policy = extractPolicy(inventory);
-      await runGatePhase(cmdb.id, policy);
+      await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
     }
 
-    const summary = await getGateSummary();
+    const summary = await getGateSummary((req as AuthRequest).user?.orgId || "");
 
     res.json({
       allowed: summary.allowed,

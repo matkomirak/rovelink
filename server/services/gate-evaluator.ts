@@ -124,9 +124,11 @@ export class GateEvaluator {
   /**
    * Evaluate and store decision for transparency.
    * Storage is ephemeral and for explainability only.
+   * orgId is required for correct org isolation in the gate store.
    */
   async evaluateAndStore(
     netboxVm: NetBoxVmForGate,
+    orgId: string,
     cmdbAccountId?: string
   ): Promise<GateEvaluationResult> {
     // Evaluate gate - never pass provider hints
@@ -134,6 +136,7 @@ export class GateEvaluator {
 
     // Store for transparency only - this is derived state
     await gateStore.storeDecision({
+      orgId,
       assetId: result.assetId,
       vmName: netboxVm.name,
       netboxVmId: netboxVm.id,
@@ -150,56 +153,60 @@ export class GateEvaluator {
 
   /**
    * FIRST-CLASS GATE EVALUATION PHASE.
-   * 
+   *
    * This function evaluates ALL gates for a CMDB.
    * It must be called BEFORE inventory generation.
    * Inventory generation must ONLY read from gate store, never trigger evaluation.
-   * 
+   *
    * @param vms - All VMs from CMDB
+   * @param orgId - Organization that owns these VMs
    * @param cmdbAccountId - CMDB account identifier
    * @returns Map of assetId to evaluation result
    */
   async evaluateAllGates(
     vms: NetBoxVmForGate[],
+    orgId: string,
     cmdbAccountId?: string
   ): Promise<Map<string, GateEvaluationResult>> {
-    // Clear previous decisions for this evaluation phase
-    await gateStore.deleteAllDecisions();
-    
+    // Clear previous decisions for this org only
+    await gateStore.deleteAllDecisions(orgId);
+
     const results = new Map<string, GateEvaluationResult>();
 
     for (const vm of vms) {
-      const result = await this.evaluateAndStore(vm, cmdbAccountId);
+      const result = await this.evaluateAndStore(vm, orgId, cmdbAccountId);
       results.set(result.assetId, result);
     }
 
-    // Mark gate evaluation as complete - this is a FIRST-CLASS PHASE
-    gateStore.markEvaluationComplete();
-    
-    console.log(`Gate evaluation complete: ${results.size} VMs evaluated`);
+    // Mark gate evaluation as complete for this org
+    gateStore.markEvaluationComplete(orgId);
+
+    console.log(`[gate] org=${orgId} evaluation complete: ${results.size} VMs evaluated`);
 
     return results;
   }
 
   /**
-   * Read gate decisions from store.
+   * Read gate decisions from store for an org.
    * Inventory generation should use this - never trigger evaluation.
-   * 
-   * Throws INVARIANT VIOLATION if gate evaluation hasn't been completed.
+   *
+   * Throws INVARIANT VIOLATION if gate evaluation hasn't been completed for this org.
    */
-  async readGateDecisions(): Promise<GateDecision[]> {
-    if (!gateStore.isEvaluationComplete()) {
-      throw new Error("INVARIANT VIOLATION: Attempted to read gate decisions before evaluation phase completed");
+  async readGateDecisions(orgId: string): Promise<GateDecision[]> {
+    if (!gateStore.isEvaluationComplete(orgId)) {
+      throw new Error(
+        `INVARIANT VIOLATION: Attempted to read gate decisions before evaluation phase completed for org ${orgId}`
+      );
     }
-    return gateStore.getAllDecisions();
+    return gateStore.getAllDecisions(orgId);
   }
 
   /**
-   * Check if a specific asset is allowed.
+   * Check if a specific asset is allowed for an org.
    * Uses asset_id for stable lookup.
    */
-  async isAssetAllowed(assetId: string): Promise<boolean> {
-    const decision = await gateStore.getDecision(assetId);
+  async isAssetAllowed(orgId: string, assetId: string): Promise<boolean> {
+    const decision = await gateStore.getDecision(orgId, assetId);
     return decision?.allowed === true;
   }
 
@@ -209,10 +216,10 @@ export class GateEvaluator {
    */
   async evaluateBatch(
     vms: NetBoxVmForGate[],
+    orgId: string,
     cmdbAccountId?: string
   ): Promise<Map<string, GateEvaluationResult>> {
-    // Delegate to evaluateAllGates for proper phase tracking
-    return this.evaluateAllGates(vms, cmdbAccountId);
+    return this.evaluateAllGates(vms, orgId, cmdbAccountId);
   }
 
   private extractName(value: { name: string; id?: number } | string | null | undefined): string | null {

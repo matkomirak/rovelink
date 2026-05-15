@@ -13,7 +13,8 @@ import { requireRole } from "../auth/roles";
 
 interface AuthRequest extends Request {
   userId?: string;
-  user?: { id: string; role: string };
+  orgId?: string;
+  user?: { id: string; role: string; orgId: string };
 }
 
 const router = Router();
@@ -24,7 +25,8 @@ const router = Router();
 // GET /api/gate/allowed - List all allowed VMs (transparency only)
 router.get("/allowed", async (req: AuthRequest, res: Response) => {
   try {
-    const allowed = await gateStore.getAllowedVms();
+    const orgId = req.user?.orgId || req.orgId || "";
+    const allowed = await gateStore.getAllowedVms(orgId);
     res.json({
       count: allowed.length,
       vms: allowed.map((d) => ({
@@ -44,7 +46,8 @@ router.get("/allowed", async (req: AuthRequest, res: Response) => {
 // GET /api/gate/blocked - List all blocked VMs with missing fields (transparency only)
 router.get("/blocked", async (req: AuthRequest, res: Response) => {
   try {
-    const blocked = await gateStore.getBlockedVms();
+    const orgId = req.user?.orgId || req.orgId || "";
+    const blocked = await gateStore.getBlockedVms(orgId);
     res.json({
       count: blocked.length,
       vms: blocked.map((d) => ({
@@ -70,12 +73,13 @@ router.get("/blocked", async (req: AuthRequest, res: Response) => {
 // NOTE: Uses VM name for API convenience, but asset_id is the true identity
 router.get("/status/:vmName", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = req.user?.orgId || req.orgId || "";
     const { vmName } = req.params;
-    // Use fallback lookup by VM name (less reliable than asset_id)
-    const decision = await gateStore.getDecisionByVmName(vmName);
+    // Use fallback lookup by VM name scoped to this org
+    const decision = await gateStore.getDecisionByVmName(orgId, vmName);
 
     if (!decision) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "No gate decision found for this VM",
         _note: "asset_id is the stable internal identity. VM names are NOT trusted identifiers.",
       });
@@ -131,13 +135,14 @@ router.get("/hints/:vmName", async (req: AuthRequest, res: Response) => {
 // GET /api/gate/summary - Minimal summary stats (transparency only)
 router.get("/summary", async (req: AuthRequest, res: Response) => {
   try {
-    const summary = await gateStore.getSummary();
-    const lastEval = gateStore.getLastEvaluationTime();
+    const orgId = req.user?.orgId || req.orgId || "";
+    const summary = await gateStore.getSummary(orgId);
+    const lastEval = gateStore.getLastEvaluationTime(orgId);
     res.json({
       allowed: summary.allowed,
       blocked: summary.blocked,
       last_evaluation: lastEval?.toISOString() || null,
-      evaluation_complete: gateStore.isEvaluationComplete(),
+      evaluation_complete: gateStore.isEvaluationComplete(orgId),
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
@@ -149,8 +154,8 @@ router.get("/summary", async (req: AuthRequest, res: Response) => {
 // NetBox remains the source of governance, not of gate decisions.
 router.post("/sync-blocks", requireRole("admin"), async (req: AuthRequest, res: Response) => {
   try {
-
-    const blocked = await gateStore.getBlockedVms();
+    const orgId = req.user?.orgId || req.orgId || "";
+    const blocked = await gateStore.getBlockedVms(orgId);
     
     // TODO: Implement actual NetBox sync when NETBOX_TOKEN is configured
     // This would update custom fields or add tags like "automation-blocked"

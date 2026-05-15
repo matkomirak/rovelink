@@ -69,8 +69,9 @@ export interface GatePhaseResult {
  * @returns Gate phase result with statistics
  */
 export async function runGatePhase(
-  cmdbId: string, 
-  policy: EligibilityPolicy = DEFAULT_POLICY
+  cmdbId: string,
+  policy: EligibilityPolicy = DEFAULT_POLICY,
+  orgId: string = ""
 ): Promise<GatePhaseResult> {
   // Fetch CMDB account
   const [cmdb] = await db
@@ -87,8 +88,8 @@ export async function runGatePhase(
   const adapter = new NetBoxAdapter(decryptedCmdbConfig as any);
   const vms = await adapter.listAllVms();
 
-  // Clear previous decisions
-  await gateStore.deleteAllDecisions();
+  // Clear previous decisions for this org
+  await gateStore.deleteAllDecisions(orgId);
 
   const blockedVms: GatePhaseResult["blockedVms"] = [];
   let allowedCount = 0;
@@ -205,8 +206,9 @@ export async function runGatePhase(
       });
     }
 
-    // Store decision (keyed by asset_id, not VM name)
+    // Store decision (keyed by orgId:asset_id, not VM name)
     await gateStore.storeDecision({
+      orgId,
       assetId,
       vmName: vm.name,
       netboxVmId: vm.id,
@@ -219,8 +221,8 @@ export async function runGatePhase(
     });
   }
 
-  // Mark evaluation complete
-  gateStore.markEvaluationComplete();
+  // Mark evaluation complete for this org
+  gateStore.markEvaluationComplete(orgId);
 
   // Write block reasons to NetBox (informational only)
   // Gate logic NEVER reads these fields
@@ -303,54 +305,54 @@ async function writeBlockReasonsToNetBox(
  * 
  * Throws INVARIANT VIOLATION if gate phase hasn't run.
  */
-export async function readAllowedAssets(): Promise<GateDecision[]> {
-  if (!gateStore.isEvaluationComplete()) {
+export async function readAllowedAssets(orgId: string): Promise<GateDecision[]> {
+  if (!gateStore.isEvaluationComplete(orgId)) {
     throw new Error("INVARIANT VIOLATION: Attempted to read gate results before gate phase completed");
   }
-  return gateStore.getAllowedVms();
+  return gateStore.getAllowedVms(orgId);
 }
 
 /**
  * Check if a specific asset is allowed by asset_id.
- * 
+ *
  * Throws INVARIANT VIOLATION if gate phase hasn't run.
  */
-export async function isAssetAllowed(assetId: string): Promise<boolean> {
-  if (!gateStore.isEvaluationComplete()) {
+export async function isAssetAllowed(orgId: string, assetId: string): Promise<boolean> {
+  if (!gateStore.isEvaluationComplete(orgId)) {
     throw new Error("INVARIANT VIOLATION: Attempted to read gate results before gate phase completed");
   }
-  const decision = await gateStore.getDecision(assetId);
+  const decision = await gateStore.getDecision(orgId, assetId);
   return decision?.allowed === true;
 }
 
 /**
  * Read blocked VMs from gate store.
- * 
+ *
  * Used for the blocked assets output.
  * These assets MUST NOT appear in any automation inventory.
- * 
+ *
  * Throws INVARIANT VIOLATION if gate phase hasn't run.
  */
-export async function readBlockedAssets(): Promise<GateDecision[]> {
-  if (!gateStore.isEvaluationComplete()) {
+export async function readBlockedAssets(orgId: string): Promise<GateDecision[]> {
+  if (!gateStore.isEvaluationComplete(orgId)) {
     throw new Error("INVARIANT VIOLATION: Attempted to read gate results before gate phase completed");
   }
-  return gateStore.getBlockedVms();
+  return gateStore.getBlockedVms(orgId);
 }
 
 /**
  * Get gate phase summary statistics.
- * 
+ *
  * Throws INVARIANT VIOLATION if gate phase hasn't run.
  */
-export async function getGateSummary(): Promise<{ allowed: number; blocked: number; evaluatedAt: Date | null }> {
-  if (!gateStore.isEvaluationComplete()) {
+export async function getGateSummary(orgId: string): Promise<{ allowed: number; blocked: number; evaluatedAt: Date | null }> {
+  if (!gateStore.isEvaluationComplete(orgId)) {
     throw new Error("INVARIANT VIOLATION: Attempted to read gate results before gate phase completed");
   }
-  const summary = await gateStore.getSummary();
+  const summary = await gateStore.getSummary(orgId);
   return {
     ...summary,
-    evaluatedAt: gateStore.getLastEvaluationTime(),
+    evaluatedAt: gateStore.getLastEvaluationTime(orgId),
   };
 }
 

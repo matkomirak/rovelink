@@ -10,7 +10,7 @@ import { AwxRunner } from "./awx-runner";
 import { LocalRunner } from "./local-runner";
 import { decryptSecret } from "./secrets";
 import { resolveSafePlaybookPath, validatePlaybookPathSyntax } from "./safe-playbook-path";
-import { createInventoryForRun } from "./inventory-generator";
+import { createInventoryForRunWithSnapshot } from "./inventory-generator";
 import type { JobRun } from "../../shared/schema";
 
 export interface RunResult {
@@ -20,18 +20,13 @@ export interface RunResult {
 }
 
 export async function dispatchRun(run: JobRun, onLog: (line: string) => void): Promise<RunResult> {
-  // Tenant safety: fail closed in production if orgId is missing
+  // Tenant safety: fail closed unconditionally if orgId is missing
   if (!run.orgId) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("Job run is missing orgId — cannot dispatch safely in production");
-    }
-    console.warn(`[dispatchRun] run ${run.id} has no orgId — falling back to unscoped template lookup`);
+    throw new Error("Job run is missing orgId — cannot dispatch safely");
   }
 
-  // Use tenant-aware storage instead of raw db query to prevent cross-tenant template access
-  const template = run.orgId
-    ? await storage.getJobTemplate(run.templateId, run.orgId)
-    : await storage.getJobTemplate(run.templateId);
+  // Use tenant-aware storage to prevent cross-tenant template access
+  const template = await storage.getJobTemplate(run.templateId, run.orgId);
 
   if (!template) throw new Error(`Job template ${run.templateId} not found`);
 
@@ -96,7 +91,7 @@ async function runLocally(
     );
   }
 
-  const project = await storage.getProject(template.projectId, run.orgId ?? null);
+  const project = await storage.getProject(template.projectId, run.orgId!);
   if (!project?.checkoutPath) {
     throw new Error(
       `Project ${template.projectId} has no checkoutPath on disk. ` +
@@ -111,14 +106,18 @@ async function runLocally(
   );
 
   // Generate and write a per-org/run inventory file — never accept a path from the client.
-  // Gate policy is enforced inside createInventoryForRun; blocked hosts are excluded.
-  const inventoryPath = await createInventoryForRun({
-    orgId: run.orgId,
+  // Gate policy is enforced fresh from DB; blocked hosts are excluded.
+  // The returned snapshot is persisted on the run for durable audit trail.
+  const { inventoryPath, gateSnapshot } = await createInventoryForRunWithSnapshot({
+    orgId: run.orgId!,
     runId: run.id,
     templateId: template.id,
     inventoryId: template.inventoryId ?? null,
     limitExpr: run.limitExpr ?? null,
   });
+
+  // Persist gate snapshot on the run record for durable audit trail
+  await storage.updateJobRun(run.id, { gateSnapshot } as any, run.orgId!);
 
   const runner = new LocalRunner();
   const result = await runner.execute(

@@ -282,7 +282,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Projects routes
   app.get("/api/projects", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const projects = await storage.getProjects(req.orgId);
+      const projects = await storage.getProjects(req.orgId!);
       res.json(projects);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch projects" });
@@ -292,7 +292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/projects", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const { orgId: _o, id: _i, ...safeBody } = req.body;
-      const data = insertProjectSchema.parse({ ...safeBody, orgId: req.orgId });
+      const data = insertProjectSchema.parse({ ...safeBody, orgId: req.orgId! });
       const project = await storage.createProject(data);
       res.json(project);
     } catch (error: any) {
@@ -302,13 +302,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/projects/:id/sync", authMiddleware, requireRole("operator", "admin"), async (req: AuthRequest, res) => {
     try {
-      const project = await storage.getProject(req.params.id, req.orgId);
+      const project = await storage.getProject(req.params.id, req.orgId!);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });
       }
 
       // Demo sync — simulates Git sync (no real checkout in this environment)
-      await storage.updateProject(req.params.id, { syncStatus: "syncing" }, req.orgId);
+      await storage.updateProject(req.params.id, { syncStatus: "syncing" }, req.orgId!);
 
       // Simulate async sync with demo playbook discovery
       setTimeout(async () => {
@@ -317,7 +317,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           syncStatus: "success",
           lastSyncAt: new Date(),
           playbooks: demoPlaybooks,
-        }, req.orgId);
+        }, req.orgId!);
       }, 2000);
 
       res.json({ message: "Demo sync started — playbooks discovered from simulated repository" });
@@ -329,7 +329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/projects/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const data = insertProjectSchema.partial().parse(req.body);
-      const project = await storage.updateProject(req.params.id, data, req.orgId);
+      const project = await storage.updateProject(req.params.id, data, req.orgId!);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });
       }
@@ -341,7 +341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/projects/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteProject(req.params.id, req.orgId);
+      await storage.deleteProject(req.params.id, req.orgId!);
       res.json({ message: "Project deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete project" });
@@ -351,7 +351,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Credentials routes
   app.get("/api/credentials", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const credentials = await storage.getCredentials(req.orgId);
+      const credentials = await storage.getCredentials(req.orgId!);
       res.json(credentials);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch credentials" });
@@ -361,7 +361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/credentials", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const { orgId: _o, id: _i, ...safeBody } = req.body;
-      const data = insertCredentialSchema.parse({ ...safeBody, orgId: req.orgId });
+      const data = insertCredentialSchema.parse({ ...safeBody, orgId: req.orgId! });
       const credential = await storage.createCredential(data);
       res.json(credential);
     } catch (error: any) {
@@ -372,7 +372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const data = insertCredentialSchema.partial().parse(req.body);
-      const credential = await storage.updateCredential(req.params.id, data, req.orgId);
+      const credential = await storage.updateCredential(req.params.id, data, req.orgId!);
       if (!credential) {
         return res.status(404).json({ message: "Credential not found" });
       }
@@ -384,7 +384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      await storage.deleteCredential(req.params.id, req.orgId);
+      await storage.deleteCredential(req.params.id, req.orgId!);
       res.json({ message: "Credential deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete credential" });
@@ -408,7 +408,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/providers", authMiddleware, async (req, res) => {
     try {
-      const providers = await storage.getProviders((req as AuthRequest).orgId);
+      const providers = await storage.getProviders((req as AuthRequest).orgId!);
       res.json(providers.map(sanitizeProviderForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get providers" });
@@ -417,7 +417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/providers/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id, req.orgId);
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -430,7 +430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get VMs discovered by a provider
   app.get("/api/providers/:id/vms", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id, req.orgId);
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -452,7 +452,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/providers", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const { orgId: _o, id: _i, ...safeBody } = req.body;
-      const body = { ...safeBody, orgId: req.orgId };
+      const body = { ...safeBody, orgId: req.orgId! };
       if (body.config && typeof body.config === "object") {
         body.config = encryptProviderConfig(body.config);
       }
@@ -468,7 +468,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const body = { ...req.body };
       if (body.config && typeof body.config === "object") {
         // Merge with existing encrypted config so blank secret fields don't wipe stored secrets
-        const existing = await storage.getProvider(req.params.id, req.orgId);
+        const existing = await storage.getProvider(req.params.id, req.orgId!);
         if (existing) {
           const existingConfig = existing.config as Record<string, any>;
           const incoming = body.config as Record<string, any>;
@@ -483,7 +483,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           body.config = encryptProviderConfig(body.config);
         }
       }
-      const provider = await storage.updateProvider(req.params.id, body, req.orgId);
+      const provider = await storage.updateProvider(req.params.id, body, req.orgId!);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -495,7 +495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/providers/:id/test", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id, req.orgId);
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -513,7 +513,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/providers/:id/sync", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
     try {
-      const provider = await storage.getProvider(req.params.id, req.orgId);
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
       if (!provider) {
         return res.status(404).json({ message: "Provider not found" });
       }
@@ -529,11 +529,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/providers/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const existing = await storage.getProvider(req.params.id, req.orgId);
+      const existing = await storage.getProvider(req.params.id, req.orgId!);
       if (!existing) {
         return res.status(404).json({ message: "Provider not found" });
       }
-      await storage.deleteProvider(req.params.id, req.orgId);
+      await storage.deleteProvider(req.params.id, req.orgId!);
       res.json({ message: "Provider deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete provider" });
@@ -553,7 +553,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ─── CMDB routes ─────────────────────────────────────────────────────────────
   app.get("/api/cmdbs", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const cmdbs = await storage.getCmdbAccounts(req.orgId);
+      const cmdbs = await storage.getCmdbAccounts(req.orgId!);
       res.json(cmdbs.map(sanitizeCmdbForResponse));
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get CMDBs" });
@@ -563,7 +563,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/cmdbs", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const { orgId: _o, id: _i, ...safeReqBody } = req.body;
-      const data = insertCmdbAccountSchema.parse({ ...safeReqBody, orgId: req.orgId });
+      const data = insertCmdbAccountSchema.parse({ ...safeReqBody, orgId: req.orgId! });
       const body = { ...data };
       if (body.config && typeof body.config === "object") {
         body.config = encryptCmdbConfig(body.config as Record<string, any>);
@@ -577,7 +577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/cmdbs/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId);
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
@@ -592,7 +592,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const body = { ...req.body };
       if (body.config && typeof body.config === "object") {
         // Preserve existing encrypted secrets when blank fields submitted
-        const existing = await storage.getCmdbAccount(req.params.id, req.orgId);
+        const existing = await storage.getCmdbAccount(req.params.id, req.orgId!);
         if (existing) {
           const existingConfig = (existing.config as Record<string, any>) || {};
           const incoming = body.config as Record<string, any>;
@@ -607,7 +607,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           body.config = encryptCmdbConfig(body.config);
         }
       }
-      const cmdb = await storage.updateCmdbAccount(req.params.id, body, req.orgId);
+      const cmdb = await storage.updateCmdbAccount(req.params.id, body, req.orgId!);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
@@ -619,11 +619,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const existing = await storage.getCmdbAccount(req.params.id, req.orgId);
+      const existing = await storage.getCmdbAccount(req.params.id, req.orgId!);
       if (!existing) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
-      await storage.deleteCmdbAccount(req.params.id, req.orgId);
+      await storage.deleteCmdbAccount(req.params.id, req.orgId!);
       res.json({ message: "CMDB account deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete CMDB account" });
@@ -632,7 +632,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/cmdbs/:id/test", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
     try {
-      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId);
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }
@@ -643,7 +643,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const result = await adapter.test();
         
         if (result.ok) {
-          await storage.updateCmdbAccount(req.params.id, { lastValidatedAt: new Date() }, req.orgId);
+          await storage.updateCmdbAccount(req.params.id, { lastValidatedAt: new Date() }, req.orgId!);
         }
         
         res.json(result);
@@ -657,7 +657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/cmdbs/:id/vms", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId);
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
       if (!cmdb) {
         return res.status(404).json({ message: "CMDB account not found" });
       }

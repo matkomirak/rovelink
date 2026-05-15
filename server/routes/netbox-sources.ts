@@ -22,9 +22,10 @@ const router = Router();
 
 // ── VM list ──────────────────────────────────────────────────────────────────
 
-router.get("/vms", async (_req, res) => {
+router.get("/vms", async (req: AuthRequest, res) => {
   try {
-    const vms = await storage.getNetboxVms();
+    const orgId = req.user?.orgId || req.orgId! || "";
+    const vms = await storage.getNetboxVms(orgId);
     res.json(vms);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -59,7 +60,7 @@ router.post("/import", requireRole("admin"), async (req, res) => {
 
 router.get("/sources", async (req: AuthRequest, res) => {
   try {
-    const sources = await storage.getNetboxInventorySources(req.orgId);
+    const sources = await storage.getNetboxInventorySources(req.orgId!);
     res.json(sources.map(sanitizeNetboxSourceForResponse));
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -68,7 +69,7 @@ router.get("/sources", async (req: AuthRequest, res) => {
 
 router.get("/sources/:id", async (req: AuthRequest, res) => {
   try {
-    const source = await storage.getNetboxInventorySource(req.params.id, req.orgId);
+    const source = await storage.getNetboxInventorySource(req.params.id, req.orgId!);
     if (!source) return res.status(404).json({ message: "Source not found" });
     res.json(sanitizeNetboxSourceForResponse(source));
   } catch (err: any) {
@@ -80,7 +81,7 @@ router.post("/sources", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
     const data = insertNetboxInventorySourceSchema.parse({
       ...req.body,
-      orgId: req.orgId,
+      orgId: req.orgId!,
     });
     if (data.token) {
       data.token = await encryptNetboxToken(data.token);
@@ -103,7 +104,7 @@ router.patch("/sources/:id", requireRole("admin"), async (req: AuthRequest, res)
     const source = await storage.updateNetboxInventorySource(
       req.params.id,
       update,
-      req.orgId
+      req.orgId!
     );
     if (!source) return res.status(404).json({ message: "Source not found" });
     res.json(sanitizeNetboxSourceForResponse(source));
@@ -114,7 +115,7 @@ router.patch("/sources/:id", requireRole("admin"), async (req: AuthRequest, res)
 
 router.delete("/sources/:id", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    await storage.deleteNetboxInventorySource(req.params.id, req.orgId);
+    await storage.deleteNetboxInventorySource(req.params.id, req.orgId!);
     res.status(204).end();
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -123,7 +124,7 @@ router.delete("/sources/:id", requireRole("admin"), async (req: AuthRequest, res
 
 router.post("/sources/:id/test", requireRole("operator"), async (req: AuthRequest, res) => {
   try {
-    const source = await storage.getNetboxInventorySource(req.params.id, req.orgId);
+    const source = await storage.getNetboxInventorySource(req.params.id, req.orgId!);
     if (!source) return res.status(404).json({ message: "Source not found" });
 
     const token = await decryptNetboxToken(source.token || "");
@@ -138,7 +139,7 @@ router.post("/sources/:id/test", requireRole("operator"), async (req: AuthReques
 
 router.get("/sources/:id/vms", async (req: AuthRequest, res) => {
   try {
-    const source = await storage.getNetboxInventorySource(req.params.id, req.orgId);
+    const source = await storage.getNetboxInventorySource(req.params.id, req.orgId!);
     if (!source) return res.status(404).json({ message: "Source not found" });
 
     const vms = await db.select().from(netboxVms).where(eq(netboxVms.sourceId, req.params.id));

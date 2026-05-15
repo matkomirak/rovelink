@@ -38,6 +38,7 @@ function namespaceTags(tags: string[], providerKind: string): string[] {
 
 export interface SyncOptions {
   providerAccountId: string;
+  orgId?: string;
   dryRun?: boolean;
 }
 
@@ -77,7 +78,7 @@ export class ProviderSyncWorker {
 
     try {
       // Get provider account
-      const provider = await storage.getProvider(options.providerAccountId);
+      const provider = await storage.getProvider(options.providerAccountId, options.orgId ?? "");
       if (!provider) {
         throw new Error('Provider account not found');
       }

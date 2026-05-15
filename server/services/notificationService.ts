@@ -4,7 +4,7 @@ import { storage } from "../storage";
 export class NotificationService {
   async triggerNotifications(run: JobRun) {
     // Always scope notifications to the run's org — never fire cross-tenant.
-    const notifications = await storage.getNotifications(run.orgId);
+    const notifications = await storage.getNotifications(run.orgId ?? "");
     const enabledNotifications = notifications.filter(n => n.enabled);
 
     for (const notification of enabledNotifications) {

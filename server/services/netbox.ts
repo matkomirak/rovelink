@@ -178,7 +178,7 @@ export class NetBoxService {
       // Add keyed groups from imported VMs if storage is provided
       if (storage) {
         try {
-          const vms = await storage.getNetboxVms();
+          const vms = await storage.getNetboxVmsUnsafe();
           const keyedGroups = new Set<string>();
           
           vms.forEach((vm: any) => {
@@ -294,7 +294,7 @@ export class NetBoxService {
       
       // If storage is provided, generate keyed groups from imported VMs
       if (storage) {
-        const vms = await storage.getNetboxVms();
+        const vms = await storage.getNetboxVmsUnsafe();
         const waveSet = new Set<string>();
         const customerSet = new Set<string>();
         const osSet = new Set<string>();

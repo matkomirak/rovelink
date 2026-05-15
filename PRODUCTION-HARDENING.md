@@ -25,10 +25,16 @@ npm audit --omit=dev
 | `npm run build` passes | PASS |
 | `npm test` passes without external services | PASS |
 | `npm run test:integration` passes (requires DATABASE_URL) | PASS (24/24, real DB) |
+| Gate store org isolation tests (10 tests, DB-free) | PASS (10/10) |
 | `npm audit --omit=dev` — no high/critical vulnerabilities | **OPEN** — 1 high (see ROVELINK-SEC-001 below) |
 | Auth middleware does not turn DB errors into 401 | PASS |
 | Auth/security tests use in-process supertest, no live DB needed | PASS |
 | Tenant isolation tests available under `test:integration` | PASS |
+| Gate store tenant isolation — all methods require orgId | PASS — composite key `orgId:assetId`, no cross-org leakage |
+| Durable gate snapshot persisted on job run record | PASS — `gateSnapshot` JSONB column, written at dispatch time |
+| `IStorage` — all tenant-owned list/get/update/delete require `orgId: string` | PASS — non-optional; compiler-enforced |
+| `getProvidersUnsafe()` / `getNetboxVmsUnsafe()` for internal-only consumers | PASS — labeled Unsafe, not callable from route handlers |
+| Notification DELETE — 404 when cross-tenant delete attempted | PASS — existence check before delete |
 | Role hierarchy enforced (platform_admin ≥ admin ≥ operator ≥ viewer) | PASS — central `server/auth/roles.ts` |
 | Organization management restricted to platform_admin | PASS |
 | Settings/AWX writes restricted to platform_admin | PASS |
@@ -56,6 +62,7 @@ npm audit --omit=dev
 |---|---|---|
 | `npm test` | authz, role-hierarchy, security, playbook-path tests | No |
 | `npm run test:integration` | Cross-tenant isolation (24 tests) | Yes — DATABASE_URL required |
+| `NODE_ENV=test tsx --test tests/gate-isolation.test.ts` | Gate store org isolation (10 tests, in-memory, DB-free) | No |
 | `npm run test:authz` | Auth/role tests only | No |
 | `npm run test:security` | Secret redaction/log tests only | No |
 | `npm run test:paths` | Safe playbook path tests only | No |
@@ -140,6 +147,15 @@ this risk exception with owner sign-off and a fresh review date.
 - **Pipeline runs** list/detail are org-scoped via `pipelines.org_id` (join-based).
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
+
+### Gate Tenant Isolation (v16)
+- `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
+- All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
+- `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.
+- `IStorage` enforces `orgId` on all tenant-owned methods at compile time; `getProvidersUnsafe()` / `getNetboxVmsUnsafe()` labeled for internal-only use.
+- Durable gate snapshot (`gateSnapshot` JSONB) persisted on the job run record at dispatch time for audit trail.
+- Notification DELETE returns 404 when caller's orgId doesn't own the target resource (no blind cross-tenant delete).
+- 10 DB-free gate isolation tests verify all of the above (see `tests/gate-isolation.test.ts`).
 
 ### Local Runner Safety
 - `runLocally` fails closed when `project.checkoutPath` is null.

@@ -30,55 +30,57 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
 
-  // Project operations
-  getProjects(orgId?: string | null): Promise<Project[]>;
-  getProject(id: string, orgId?: string | null): Promise<Project | undefined>;
+  // Project operations — orgId REQUIRED (tenant-owned)
+  getProjects(orgId: string): Promise<Project[]>;
+  getProject(id: string, orgId: string): Promise<Project | undefined>;
   createProject(project: InsertProject): Promise<Project>;
-  updateProject(id: string, data: Partial<Project>, orgId?: string | null): Promise<Project | undefined>;
-  deleteProject(id: string, orgId?: string | null): Promise<void>;
+  updateProject(id: string, data: Partial<Project>, orgId: string): Promise<Project | undefined>;
+  deleteProject(id: string, orgId: string): Promise<void>;
 
-  // Credential operations
-  getCredentials(orgId?: string | null): Promise<Credential[]>;
-  getCredential(id: string, orgId?: string | null): Promise<Credential | undefined>;
+  // Credential operations — orgId REQUIRED (tenant-owned)
+  getCredentials(orgId: string): Promise<Credential[]>;
+  getCredential(id: string, orgId: string): Promise<Credential | undefined>;
   createCredential(credential: InsertCredential): Promise<Credential>;
-  updateCredential(id: string, data: Partial<Credential>, orgId?: string | null): Promise<Credential | undefined>;
-  deleteCredential(id: string, orgId?: string | null): Promise<void>;
+  updateCredential(id: string, data: Partial<Credential>, orgId: string): Promise<Credential | undefined>;
+  deleteCredential(id: string, orgId: string): Promise<void>;
 
-  // Job Template operations
-  getJobTemplates(orgId?: string | null): Promise<JobTemplate[]>;
-  getJobTemplate(id: string, orgId?: string | null): Promise<JobTemplate | undefined>;
+  // Job Template operations — orgId REQUIRED (tenant-owned)
+  getJobTemplates(orgId: string): Promise<JobTemplate[]>;
+  getJobTemplate(id: string, orgId: string): Promise<JobTemplate | undefined>;
   createJobTemplate(template: InsertJobTemplate): Promise<JobTemplate>;
-  updateJobTemplate(id: string, data: Partial<JobTemplate>, orgId?: string | null): Promise<JobTemplate | undefined>;
-  deleteJobTemplate(id: string, orgId?: string | null): Promise<void>;
+  updateJobTemplate(id: string, data: Partial<JobTemplate>, orgId: string): Promise<JobTemplate | undefined>;
+  deleteJobTemplate(id: string, orgId: string): Promise<void>;
 
-  // Job Run operations
-  getJobRuns(filters?: any, page?: number, pageSize?: number, orgId?: string | null): Promise<JobRun[]>;
-  getJobRun(id: string, orgId?: string | null): Promise<JobRun | undefined>;
+  // Job Run operations — orgId REQUIRED (tenant-owned)
+  getJobRuns(filters: any, page: number, pageSize: number, orgId: string): Promise<JobRun[]>;
+  getJobRun(id: string, orgId: string): Promise<JobRun | undefined>;
   createJobRun(run: InsertJobRun): Promise<JobRun>;
-  updateJobRun(id: string, data: Partial<JobRun>, orgId?: string | null): Promise<JobRun | undefined>;
+  updateJobRun(id: string, data: Partial<JobRun>, orgId: string): Promise<JobRun | undefined>;
 
   // Settings operations
   getSetting(key: string): Promise<Setting | undefined>;
   setSetting(key: string, value: string): Promise<Setting>;
   getAllSettings(): Promise<Setting[]>;
 
-  // Notification operations
-  getNotifications(orgId?: string | null): Promise<Notification[]>;
-  getNotification(id: string, orgId?: string | null): Promise<Notification | undefined>;
+  // Notification operations — orgId REQUIRED (tenant-owned)
+  getNotifications(orgId: string): Promise<Notification[]>;
+  getNotification(id: string, orgId: string): Promise<Notification | undefined>;
   createNotification(notification: InsertNotification): Promise<Notification>;
-  updateNotification(id: string, data: Partial<Notification>, orgId?: string | null): Promise<Notification | undefined>;
-  deleteNotification(id: string, orgId?: string | null): Promise<void>;
+  updateNotification(id: string, data: Partial<Notification>, orgId: string): Promise<Notification | undefined>;
+  deleteNotification(id: string, orgId: string): Promise<void>;
 
-  // Provider operations
-  getProviders(orgId?: string | null): Promise<ProviderAccount[]>;
-  getProvider(id: string, orgId?: string | null): Promise<ProviderAccount | undefined>;
+  // Provider operations — orgId REQUIRED (tenant-owned)
+  getProviders(orgId: string): Promise<ProviderAccount[]>;
+  getProvider(id: string, orgId: string): Promise<ProviderAccount | undefined>;
   createProvider(provider: InsertProviderAccount): Promise<ProviderAccount>;
-  updateProvider(id: string, data: Partial<ProviderAccount>, orgId?: string | null): Promise<ProviderAccount | undefined>;
-  deleteProvider(id: string, orgId?: string | null): Promise<void>;
+  updateProvider(id: string, data: Partial<ProviderAccount>, orgId: string): Promise<ProviderAccount | undefined>;
+  deleteProvider(id: string, orgId: string): Promise<void>;
+  /** Internal use only — route handlers must not call this. */
+  getProvidersUnsafe(): Promise<ProviderAccount[]>;
 
   // Sync Run operations
   createSyncRun(run: InsertSyncRun): Promise<SyncRun>;
-  getSyncRun(id: string, orgId?: string | null): Promise<SyncRun | undefined>;
+  getSyncRun(id: string, orgId: string): Promise<SyncRun | undefined>;
   updateSyncRun(id: string, data: Partial<SyncRun>): Promise<SyncRun | undefined>;
   getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]>;
   getLastFailedSyncRuns(): Promise<SyncRun[]>;
@@ -89,33 +91,35 @@ export interface IStorage {
   pruneStaleObjects(days: number): Promise<number>;
   getProviderStats(): Promise<any[]>;
 
-  // NetBox VM operations
-  getNetboxVms(): Promise<NetboxVm[]>;
+  // NetBox VM operations — orgId REQUIRED on org-scoped read
+  getNetboxVms(orgId: string): Promise<NetboxVm[]>;
+  /** Internal use only — route handlers must not call this. */
+  getNetboxVmsUnsafe(): Promise<NetboxVm[]>;
   getNetboxVm(id: string): Promise<NetboxVm | undefined>;
   upsertNetboxVm(vm: InsertNetboxVm): Promise<NetboxVm>;
   updateNetboxVm(id: string, updates: Partial<NetboxVm>): Promise<NetboxVm | null>;
   deleteAllNetboxVms(): Promise<void>;
 
-  // NetBox Inventory Source operations
-  getNetboxInventorySources(orgId?: string | null): Promise<NetboxInventorySource[]>;
-  getNetboxInventorySource(id: string, orgId?: string | null): Promise<NetboxInventorySource | undefined>;
+  // NetBox Inventory Source operations — orgId REQUIRED (tenant-owned)
+  getNetboxInventorySources(orgId: string): Promise<NetboxInventorySource[]>;
+  getNetboxInventorySource(id: string, orgId: string): Promise<NetboxInventorySource | undefined>;
   createNetboxInventorySource(source: InsertNetboxInventorySource): Promise<NetboxInventorySource>;
-  updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>, orgId?: string | null): Promise<NetboxInventorySource | undefined>;
-  deleteNetboxInventorySource(id: string, orgId?: string | null): Promise<void>;
+  updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>, orgId: string): Promise<NetboxInventorySource | undefined>;
+  deleteNetboxInventorySource(id: string, orgId: string): Promise<void>;
 
-  // CMDB operations
-  getCmdbAccounts(orgId?: string | null): Promise<CmdbAccount[]>;
-  getCmdbAccount(id: string, orgId?: string | null): Promise<CmdbAccount | undefined>;
+  // CMDB operations — orgId REQUIRED (tenant-owned)
+  getCmdbAccounts(orgId: string): Promise<CmdbAccount[]>;
+  getCmdbAccount(id: string, orgId: string): Promise<CmdbAccount | undefined>;
   createCmdbAccount(account: InsertCmdbAccount): Promise<CmdbAccount>;
-  updateCmdbAccount(id: string, data: Partial<CmdbAccount>, orgId?: string | null): Promise<CmdbAccount | undefined>;
-  deleteCmdbAccount(id: string, orgId?: string | null): Promise<void>;
+  updateCmdbAccount(id: string, data: Partial<CmdbAccount>, orgId: string): Promise<CmdbAccount | undefined>;
+  deleteCmdbAccount(id: string, orgId: string): Promise<void>;
 
-  // Pipeline operations
-  getPipelines(orgId?: string | null): Promise<Pipeline[]>;
-  getPipeline(id: string, orgId?: string | null): Promise<Pipeline | undefined>;
+  // Pipeline operations — orgId REQUIRED (tenant-owned)
+  getPipelines(orgId: string): Promise<Pipeline[]>;
+  getPipeline(id: string, orgId: string): Promise<Pipeline | undefined>;
   createPipeline(pipeline: InsertPipeline): Promise<Pipeline>;
-  updatePipeline(id: string, data: Partial<Pipeline>, orgId?: string | null): Promise<Pipeline | undefined>;
-  deletePipeline(id: string, orgId?: string | null): Promise<void>;
+  updatePipeline(id: string, data: Partial<Pipeline>, orgId: string): Promise<Pipeline | undefined>;
+  deletePipeline(id: string, orgId: string): Promise<void>;
   incrementPipelineVersion(id: string): Promise<void>;
 
   // Pipeline Mapping operations
@@ -125,15 +129,15 @@ export interface IStorage {
   updatePipelineMapping(id: string, data: Partial<PipelineMapping>): Promise<PipelineMapping | undefined>;
   deletePipelineMapping(id: string): Promise<void>;
 
-  // Pipeline Run operations
+  // Pipeline Run operations — orgId REQUIRED on org-scoped reads
   getPipelineRuns(pipelineId: string, limit?: number): Promise<PipelineRun[]>;
-  getAllPipelineRuns(limit?: number, orgId?: string | null): Promise<PipelineRun[]>;
-  getPipelineRun(id: string, orgId?: string | null): Promise<PipelineRun | undefined>;
+  getAllPipelineRuns(limit: number, orgId: string): Promise<PipelineRun[]>;
+  getPipelineRun(id: string, orgId: string): Promise<PipelineRun | undefined>;
   createPipelineRun(run: InsertPipelineRun): Promise<PipelineRun>;
   updatePipelineRun(id: string, data: Partial<PipelineRun>): Promise<PipelineRun | undefined>;
 
   // Sync Run (unified) operations
-  getAllSyncRuns(limit?: number, orgId?: string | null): Promise<SyncRun[]>;
+  getAllSyncRuns(limit: number, orgId: string): Promise<SyncRun[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -157,18 +161,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Project operations
-  async getProjects(orgId?: string | null): Promise<Project[]> {
-    if (orgId) {
-      return await db.select().from(projects).where(eq(projects.orgId, orgId)).orderBy(desc(projects.createdAt));
-    }
-    return await db.select().from(projects).orderBy(desc(projects.createdAt));
+  async getProjects(orgId: string): Promise<Project[]> {
+    return await db.select().from(projects).where(eq(projects.orgId, orgId)).orderBy(desc(projects.createdAt));
   }
 
-  async getProject(id: string, orgId?: string | null): Promise<Project | undefined> {
-    const where = orgId
-      ? and(eq(projects.id, id), eq(projects.orgId, orgId))
-      : eq(projects.id, id);
-    const [project] = await db.select().from(projects).where(where);
+  async getProject(id: string, orgId: string): Promise<Project | undefined> {
+    const [project] = await db.select().from(projects).where(and(eq(projects.id, id), eq(projects.orgId, orgId)));
     return project || undefined;
   }
 
@@ -180,28 +178,22 @@ export class DatabaseStorage implements IStorage {
     return project;
   }
 
-  async updateProject(id: string, data: Partial<Project>, orgId?: string | null): Promise<Project | undefined> {
-    const where = orgId ? and(eq(projects.id, id), eq(projects.orgId, orgId)) : eq(projects.id, id);
-    const [updated] = await db.update(projects).set(data).where(where).returning();
+  async updateProject(id: string, data: Partial<Project>, orgId: string): Promise<Project | undefined> {
+    const [updated] = await db.update(projects).set(data).where(and(eq(projects.id, id), eq(projects.orgId, orgId))).returning();
     return updated || undefined;
   }
 
-  async deleteProject(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(projects.id, id), eq(projects.orgId, orgId)) : eq(projects.id, id);
-    await db.delete(projects).where(where);
+  async deleteProject(id: string, orgId: string): Promise<void> {
+    await db.delete(projects).where(and(eq(projects.id, id), eq(projects.orgId, orgId)));
   }
 
   // Credential operations
-  async getCredentials(orgId?: string | null): Promise<Credential[]> {
-    if (orgId) {
-      return await db.select().from(credentials).where(eq(credentials.orgId, orgId)).orderBy(desc(credentials.createdAt));
-    }
-    return await db.select().from(credentials).orderBy(desc(credentials.createdAt));
+  async getCredentials(orgId: string): Promise<Credential[]> {
+    return await db.select().from(credentials).where(eq(credentials.orgId, orgId)).orderBy(desc(credentials.createdAt));
   }
 
-  async getCredential(id: string, orgId?: string | null): Promise<Credential | undefined> {
-    const where = orgId ? and(eq(credentials.id, id), eq(credentials.orgId, orgId)) : eq(credentials.id, id);
-    const [credential] = await db.select().from(credentials).where(where);
+  async getCredential(id: string, orgId: string): Promise<Credential | undefined> {
+    const [credential] = await db.select().from(credentials).where(and(eq(credentials.id, id), eq(credentials.orgId, orgId)));
     return credential || undefined;
   }
 
@@ -213,28 +205,22 @@ export class DatabaseStorage implements IStorage {
     return credential;
   }
 
-  async updateCredential(id: string, data: Partial<Credential>, orgId?: string | null): Promise<Credential | undefined> {
-    const where = orgId ? and(eq(credentials.id, id), eq(credentials.orgId, orgId)) : eq(credentials.id, id);
-    const [updated] = await db.update(credentials).set(data).where(where).returning();
+  async updateCredential(id: string, data: Partial<Credential>, orgId: string): Promise<Credential | undefined> {
+    const [updated] = await db.update(credentials).set(data).where(and(eq(credentials.id, id), eq(credentials.orgId, orgId))).returning();
     return updated || undefined;
   }
 
-  async deleteCredential(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(credentials.id, id), eq(credentials.orgId, orgId)) : eq(credentials.id, id);
-    await db.delete(credentials).where(where);
+  async deleteCredential(id: string, orgId: string): Promise<void> {
+    await db.delete(credentials).where(and(eq(credentials.id, id), eq(credentials.orgId, orgId)));
   }
 
   // Job Template operations
-  async getJobTemplates(orgId?: string | null): Promise<JobTemplate[]> {
-    if (orgId) {
-      return await db.select().from(jobTemplates).where(eq(jobTemplates.orgId, orgId)).orderBy(desc(jobTemplates.createdAt));
-    }
-    return await db.select().from(jobTemplates).orderBy(desc(jobTemplates.createdAt));
+  async getJobTemplates(orgId: string): Promise<JobTemplate[]> {
+    return await db.select().from(jobTemplates).where(eq(jobTemplates.orgId, orgId)).orderBy(desc(jobTemplates.createdAt));
   }
 
-  async getJobTemplate(id: string, orgId?: string | null): Promise<JobTemplate | undefined> {
-    const where = orgId ? and(eq(jobTemplates.id, id), eq(jobTemplates.orgId, orgId)) : eq(jobTemplates.id, id);
-    const [template] = await db.select().from(jobTemplates).where(where);
+  async getJobTemplate(id: string, orgId: string): Promise<JobTemplate | undefined> {
+    const [template] = await db.select().from(jobTemplates).where(and(eq(jobTemplates.id, id), eq(jobTemplates.orgId, orgId)));
     return template || undefined;
   }
 
@@ -246,24 +232,18 @@ export class DatabaseStorage implements IStorage {
     return template;
   }
 
-  async updateJobTemplate(id: string, data: Partial<JobTemplate>, orgId?: string | null): Promise<JobTemplate | undefined> {
-    const where = orgId ? and(eq(jobTemplates.id, id), eq(jobTemplates.orgId, orgId)) : eq(jobTemplates.id, id);
-    const [updated] = await db.update(jobTemplates).set(data).where(where).returning();
+  async updateJobTemplate(id: string, data: Partial<JobTemplate>, orgId: string): Promise<JobTemplate | undefined> {
+    const [updated] = await db.update(jobTemplates).set(data).where(and(eq(jobTemplates.id, id), eq(jobTemplates.orgId, orgId))).returning();
     return updated || undefined;
   }
 
-  async deleteJobTemplate(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(jobTemplates.id, id), eq(jobTemplates.orgId, orgId)) : eq(jobTemplates.id, id);
-    await db.delete(jobTemplates).where(where);
+  async deleteJobTemplate(id: string, orgId: string): Promise<void> {
+    await db.delete(jobTemplates).where(and(eq(jobTemplates.id, id), eq(jobTemplates.orgId, orgId)));
   }
 
   // Job Run operations
-  async getJobRuns(filters: any = {}, page: number = 1, pageSize: number = 50, orgId?: string | null): Promise<JobRun[]> {
-    let query = db.select().from(jobRuns);
-    
-    if (orgId) {
-      query = query.where(eq(jobRuns.orgId, orgId)) as any;
-    }
+  async getJobRuns(filters: any = {}, page: number = 1, pageSize: number = 50, orgId: string): Promise<JobRun[]> {
+    let query = db.select().from(jobRuns).where(eq(jobRuns.orgId, orgId)) as any;
     if (filters.status) {
       query = query.where(eq(jobRuns.status, filters.status)) as any;
     }
@@ -281,9 +261,8 @@ export class DatabaseStorage implements IStorage {
     return await query.orderBy(desc(jobRuns.createdAt)).limit(pageSize).offset(offset);
   }
 
-  async getJobRun(id: string, orgId?: string | null): Promise<JobRun | undefined> {
-    const where = orgId ? and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)) : eq(jobRuns.id, id);
-    const [run] = await db.select().from(jobRuns).where(where);
+  async getJobRun(id: string, orgId: string): Promise<JobRun | undefined> {
+    const [run] = await db.select().from(jobRuns).where(and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)));
     return run || undefined;
   }
 
@@ -295,12 +274,11 @@ export class DatabaseStorage implements IStorage {
     return run;
   }
 
-  async updateJobRun(id: string, data: Partial<JobRun>, orgId?: string | null): Promise<JobRun | undefined> {
-    const where = orgId ? and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)) : eq(jobRuns.id, id);
+  async updateJobRun(id: string, data: Partial<JobRun>, orgId: string): Promise<JobRun | undefined> {
     const [updated] = await db
       .update(jobRuns)
       .set(data)
-      .where(where)
+      .where(and(eq(jobRuns.id, id), eq(jobRuns.orgId, orgId)))
       .returning();
     return updated || undefined;
   }
@@ -334,16 +312,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Notification operations
-  async getNotifications(orgId?: string | null): Promise<Notification[]> {
-    if (orgId) {
-      return await db.select().from(notifications).where(eq(notifications.orgId, orgId)).orderBy(desc(notifications.createdAt));
-    }
-    return await db.select().from(notifications).orderBy(desc(notifications.createdAt));
+  async getNotifications(orgId: string): Promise<Notification[]> {
+    return await db.select().from(notifications).where(eq(notifications.orgId, orgId)).orderBy(desc(notifications.createdAt));
   }
 
-  async getNotification(id: string, orgId?: string | null): Promise<Notification | undefined> {
-    const where = orgId ? and(eq(notifications.id, id), eq(notifications.orgId, orgId)) : eq(notifications.id, id);
-    const [notification] = await db.select().from(notifications).where(where);
+  async getNotification(id: string, orgId: string): Promise<Notification | undefined> {
+    const [notification] = await db.select().from(notifications).where(and(eq(notifications.id, id), eq(notifications.orgId, orgId)));
     return notification || undefined;
   }
 
@@ -355,32 +329,31 @@ export class DatabaseStorage implements IStorage {
     return notification;
   }
 
-  async updateNotification(id: string, data: Partial<Notification>, orgId?: string | null): Promise<Notification | undefined> {
-    const where = orgId ? and(eq(notifications.id, id), eq(notifications.orgId, orgId)) : eq(notifications.id, id);
+  async updateNotification(id: string, data: Partial<Notification>, orgId: string): Promise<Notification | undefined> {
     const [updated] = await db
       .update(notifications)
       .set(data)
-      .where(where)
+      .where(and(eq(notifications.id, id), eq(notifications.orgId, orgId)))
       .returning();
     return updated || undefined;
   }
 
-  async deleteNotification(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(notifications.id, id), eq(notifications.orgId, orgId)) : eq(notifications.id, id);
-    await db.delete(notifications).where(where);
+  async deleteNotification(id: string, orgId: string): Promise<void> {
+    await db.delete(notifications).where(and(eq(notifications.id, id), eq(notifications.orgId, orgId)));
   }
 
   // Provider operations
-  async getProviders(orgId?: string | null): Promise<ProviderAccount[]> {
-    if (orgId) {
-      return await db.select().from(providerAccounts).where(eq(providerAccounts.orgId, orgId)).orderBy(desc(providerAccounts.createdAt));
-    }
+  async getProviders(orgId: string): Promise<ProviderAccount[]> {
+    return await db.select().from(providerAccounts).where(eq(providerAccounts.orgId, orgId)).orderBy(desc(providerAccounts.createdAt));
+  }
+
+  /** Internal use only — route handlers must not call this. */
+  async getProvidersUnsafe(): Promise<ProviderAccount[]> {
     return await db.select().from(providerAccounts).orderBy(desc(providerAccounts.createdAt));
   }
 
-  async getProvider(id: string, orgId?: string | null): Promise<ProviderAccount | undefined> {
-    const where = orgId ? and(eq(providerAccounts.id, id), eq(providerAccounts.orgId, orgId)) : eq(providerAccounts.id, id);
-    const [provider] = await db.select().from(providerAccounts).where(where);
+  async getProvider(id: string, orgId: string): Promise<ProviderAccount | undefined> {
+    const [provider] = await db.select().from(providerAccounts).where(and(eq(providerAccounts.id, id), eq(providerAccounts.orgId, orgId)));
     return provider || undefined;
   }
 
@@ -395,15 +368,13 @@ export class DatabaseStorage implements IStorage {
     return provider;
   }
 
-  async updateProvider(id: string, data: Partial<ProviderAccount>, orgId?: string | null): Promise<ProviderAccount | undefined> {
-    const where = orgId ? and(eq(providerAccounts.id, id), eq(providerAccounts.orgId, orgId)) : eq(providerAccounts.id, id);
-    const [updated] = await db.update(providerAccounts).set({ ...data, updatedAt: new Date() }).where(where).returning();
+  async updateProvider(id: string, data: Partial<ProviderAccount>, orgId: string): Promise<ProviderAccount | undefined> {
+    const [updated] = await db.update(providerAccounts).set({ ...data, updatedAt: new Date() }).where(and(eq(providerAccounts.id, id), eq(providerAccounts.orgId, orgId))).returning();
     return updated || undefined;
   }
 
-  async deleteProvider(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(providerAccounts.id, id), eq(providerAccounts.orgId, orgId)) : eq(providerAccounts.id, id);
-    await db.delete(providerAccounts).where(where);
+  async deleteProvider(id: string, orgId: string): Promise<void> {
+    await db.delete(providerAccounts).where(and(eq(providerAccounts.id, id), eq(providerAccounts.orgId, orgId)));
   }
 
   // Sync Run operations
@@ -415,14 +386,12 @@ export class DatabaseStorage implements IStorage {
     return run;
   }
 
-  async getSyncRun(id: string, orgId?: string | null): Promise<SyncRun | undefined> {
+  async getSyncRun(id: string, orgId: string): Promise<SyncRun | undefined> {
     const [run] = await db.select().from(syncRuns).where(eq(syncRuns.id, id));
     if (!run) return undefined;
-    if (orgId) {
-      // Verify the run's provider belongs to this org
-      const provider = await this.getProvider(run.providerAccountId, orgId);
-      if (!provider) return undefined;
-    }
+    // Verify the run's provider belongs to this org
+    const provider = await this.getProvider(run.providerAccountId, orgId);
+    if (!provider) return undefined;
     return run;
   }
 
@@ -494,7 +463,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getProviderStats(): Promise<any[]> {
-    const providers = await this.getProviders();
+    const providers = await this.getProvidersUnsafe();
     const stats = [];
 
     for (const provider of providers) {
@@ -527,7 +496,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   // NetBox VM operations
-  async getNetboxVms(): Promise<NetboxVm[]> {
+  async getNetboxVms(orgId: string): Promise<NetboxVm[]> {
+    // Scoped to org via JOIN on netbox_inventory_sources ownership.
+    // VMs with null sourceId are not returned in any org's view.
+    return await db
+      .select({ vm: netboxVms })
+      .from(netboxVms)
+      .innerJoin(netboxInventorySources, eq(netboxVms.sourceId, netboxInventorySources.id))
+      .where(eq(netboxInventorySources.orgId, orgId))
+      .orderBy(desc(netboxVms.lastImportedAt))
+      .then((rows) => rows.map((r) => r.vm));
+  }
+
+  /** Internal use only — route handlers must not call this. */
+  async getNetboxVmsUnsafe(): Promise<NetboxVm[]> {
     return await db.select().from(netboxVms).orderBy(desc(netboxVms.lastImportedAt));
   }
 
@@ -582,16 +564,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // NetBox Inventory Source operations
-  async getNetboxInventorySources(orgId?: string | null): Promise<NetboxInventorySource[]> {
-    if (orgId) {
-      return await db.select().from(netboxInventorySources).where(eq(netboxInventorySources.orgId, orgId)).orderBy(desc(netboxInventorySources.createdAt));
-    }
-    return await db.select().from(netboxInventorySources).orderBy(desc(netboxInventorySources.createdAt));
+  async getNetboxInventorySources(orgId: string): Promise<NetboxInventorySource[]> {
+    return await db.select().from(netboxInventorySources).where(eq(netboxInventorySources.orgId, orgId)).orderBy(desc(netboxInventorySources.createdAt));
   }
 
-  async getNetboxInventorySource(id: string, orgId?: string | null): Promise<NetboxInventorySource | undefined> {
-    const where = orgId ? and(eq(netboxInventorySources.id, id), eq(netboxInventorySources.orgId, orgId)) : eq(netboxInventorySources.id, id);
-    const [source] = await db.select().from(netboxInventorySources).where(where);
+  async getNetboxInventorySource(id: string, orgId: string): Promise<NetboxInventorySource | undefined> {
+    const [source] = await db.select().from(netboxInventorySources).where(and(eq(netboxInventorySources.id, id), eq(netboxInventorySources.orgId, orgId)));
     return source || undefined;
   }
 
@@ -603,28 +581,22 @@ export class DatabaseStorage implements IStorage {
     return source;
   }
 
-  async updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>, orgId?: string | null): Promise<NetboxInventorySource | undefined> {
-    const where = orgId ? and(eq(netboxInventorySources.id, id), eq(netboxInventorySources.orgId, orgId)) : eq(netboxInventorySources.id, id);
-    const [updated] = await db.update(netboxInventorySources).set(data).where(where).returning();
+  async updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>, orgId: string): Promise<NetboxInventorySource | undefined> {
+    const [updated] = await db.update(netboxInventorySources).set(data).where(and(eq(netboxInventorySources.id, id), eq(netboxInventorySources.orgId, orgId))).returning();
     return updated || undefined;
   }
 
-  async deleteNetboxInventorySource(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(netboxInventorySources.id, id), eq(netboxInventorySources.orgId, orgId)) : eq(netboxInventorySources.id, id);
-    await db.delete(netboxInventorySources).where(where);
+  async deleteNetboxInventorySource(id: string, orgId: string): Promise<void> {
+    await db.delete(netboxInventorySources).where(and(eq(netboxInventorySources.id, id), eq(netboxInventorySources.orgId, orgId)));
   }
 
   // CMDB operations
-  async getCmdbAccounts(orgId?: string | null): Promise<CmdbAccount[]> {
-    if (orgId) {
-      return await db.select().from(cmdbAccounts).where(eq(cmdbAccounts.orgId, orgId)).orderBy(desc(cmdbAccounts.createdAt));
-    }
-    return await db.select().from(cmdbAccounts).orderBy(desc(cmdbAccounts.createdAt));
+  async getCmdbAccounts(orgId: string): Promise<CmdbAccount[]> {
+    return await db.select().from(cmdbAccounts).where(eq(cmdbAccounts.orgId, orgId)).orderBy(desc(cmdbAccounts.createdAt));
   }
 
-  async getCmdbAccount(id: string, orgId?: string | null): Promise<CmdbAccount | undefined> {
-    const where = orgId ? and(eq(cmdbAccounts.id, id), eq(cmdbAccounts.orgId, orgId)) : eq(cmdbAccounts.id, id);
-    const [account] = await db.select().from(cmdbAccounts).where(where);
+  async getCmdbAccount(id: string, orgId: string): Promise<CmdbAccount | undefined> {
+    const [account] = await db.select().from(cmdbAccounts).where(and(eq(cmdbAccounts.id, id), eq(cmdbAccounts.orgId, orgId)));
     return account || undefined;
   }
 
@@ -636,28 +608,22 @@ export class DatabaseStorage implements IStorage {
     return account;
   }
 
-  async updateCmdbAccount(id: string, data: Partial<CmdbAccount>, orgId?: string | null): Promise<CmdbAccount | undefined> {
-    const where = orgId ? and(eq(cmdbAccounts.id, id), eq(cmdbAccounts.orgId, orgId)) : eq(cmdbAccounts.id, id);
-    const [updated] = await db.update(cmdbAccounts).set({ ...data, updatedAt: new Date() }).where(where).returning();
+  async updateCmdbAccount(id: string, data: Partial<CmdbAccount>, orgId: string): Promise<CmdbAccount | undefined> {
+    const [updated] = await db.update(cmdbAccounts).set({ ...data, updatedAt: new Date() }).where(and(eq(cmdbAccounts.id, id), eq(cmdbAccounts.orgId, orgId))).returning();
     return updated || undefined;
   }
 
-  async deleteCmdbAccount(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(cmdbAccounts.id, id), eq(cmdbAccounts.orgId, orgId)) : eq(cmdbAccounts.id, id);
-    await db.delete(cmdbAccounts).where(where);
+  async deleteCmdbAccount(id: string, orgId: string): Promise<void> {
+    await db.delete(cmdbAccounts).where(and(eq(cmdbAccounts.id, id), eq(cmdbAccounts.orgId, orgId)));
   }
 
   // Pipeline operations
-  async getPipelines(orgId?: string | null): Promise<Pipeline[]> {
-    if (orgId) {
-      return await db.select().from(pipelines).where(eq(pipelines.orgId, orgId)).orderBy(desc(pipelines.createdAt));
-    }
-    return await db.select().from(pipelines).orderBy(desc(pipelines.createdAt));
+  async getPipelines(orgId: string): Promise<Pipeline[]> {
+    return await db.select().from(pipelines).where(eq(pipelines.orgId, orgId)).orderBy(desc(pipelines.createdAt));
   }
 
-  async getPipeline(id: string, orgId?: string | null): Promise<Pipeline | undefined> {
-    const where = orgId ? and(eq(pipelines.id, id), eq(pipelines.orgId, orgId)) : eq(pipelines.id, id);
-    const [pipeline] = await db.select().from(pipelines).where(where);
+  async getPipeline(id: string, orgId: string): Promise<Pipeline | undefined> {
+    const [pipeline] = await db.select().from(pipelines).where(and(eq(pipelines.id, id), eq(pipelines.orgId, orgId)));
     return pipeline || undefined;
   }
 
@@ -669,15 +635,13 @@ export class DatabaseStorage implements IStorage {
     return pipeline;
   }
 
-  async updatePipeline(id: string, data: Partial<Pipeline>, orgId?: string | null): Promise<Pipeline | undefined> {
-    const where = orgId ? and(eq(pipelines.id, id), eq(pipelines.orgId, orgId)) : eq(pipelines.id, id);
-    const [updated] = await db.update(pipelines).set({ ...data, updatedAt: new Date() }).where(where).returning();
+  async updatePipeline(id: string, data: Partial<Pipeline>, orgId: string): Promise<Pipeline | undefined> {
+    const [updated] = await db.update(pipelines).set({ ...data, updatedAt: new Date() }).where(and(eq(pipelines.id, id), eq(pipelines.orgId, orgId))).returning();
     return updated || undefined;
   }
 
-  async deletePipeline(id: string, orgId?: string | null): Promise<void> {
-    const where = orgId ? and(eq(pipelines.id, id), eq(pipelines.orgId, orgId)) : eq(pipelines.id, id);
-    await db.delete(pipelines).where(where);
+  async deletePipeline(id: string, orgId: string): Promise<void> {
+    await db.delete(pipelines).where(and(eq(pipelines.id, id), eq(pipelines.orgId, orgId)));
   }
 
   async incrementPipelineVersion(id: string): Promise<void> {
@@ -741,14 +705,12 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  async getPipelineRun(id: string, orgId?: string | null): Promise<PipelineRun | undefined> {
+  async getPipelineRun(id: string, orgId: string): Promise<PipelineRun | undefined> {
     const [run] = await db.select().from(pipelineRuns).where(eq(pipelineRuns.id, id));
     if (!run) return undefined;
-    if (orgId) {
-      // Verify the run's pipeline belongs to this org
-      const pipeline = await this.getPipeline(run.pipelineId, orgId);
-      if (!pipeline) return undefined;
-    }
+    // Verify the run's pipeline belongs to this org
+    const pipeline = await this.getPipeline(run.pipelineId, orgId);
+    if (!pipeline) return undefined;
     return run;
   }
 
@@ -769,44 +731,30 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
-  // All pipeline runs, optionally scoped to an org via pipeline ownership
-  async getAllPipelineRuns(limit: number = 100, orgId?: string | null): Promise<PipelineRun[]> {
-    if (orgId) {
-      const orgPipelineIds = db
-        .select({ id: pipelines.id })
-        .from(pipelines)
-        .where(eq(pipelines.orgId, orgId));
-      return await db
-        .select()
-        .from(pipelineRuns)
-        .where(inArray(pipelineRuns.pipelineId, orgPipelineIds))
-        .orderBy(desc(pipelineRuns.createdAt))
-        .limit(limit);
-    }
+  // All pipeline runs scoped to an org via pipeline ownership
+  async getAllPipelineRuns(limit: number = 100, orgId: string): Promise<PipelineRun[]> {
+    const orgPipelineIds = db
+      .select({ id: pipelines.id })
+      .from(pipelines)
+      .where(eq(pipelines.orgId, orgId));
     return await db
       .select()
       .from(pipelineRuns)
+      .where(inArray(pipelineRuns.pipelineId, orgPipelineIds))
       .orderBy(desc(pipelineRuns.createdAt))
       .limit(limit);
   }
 
-  // All sync runs, optionally scoped to an org via provider ownership
-  async getAllSyncRuns(limit: number = 100, orgId?: string | null): Promise<SyncRun[]> {
-    if (orgId) {
-      const orgProviderIds = db
-        .select({ id: providerAccounts.id })
-        .from(providerAccounts)
-        .where(eq(providerAccounts.orgId, orgId));
-      return await db
-        .select()
-        .from(syncRuns)
-        .where(inArray(syncRuns.providerAccountId, orgProviderIds))
-        .orderBy(desc(syncRuns.createdAt))
-        .limit(limit);
-    }
+  // All sync runs scoped to an org via provider ownership
+  async getAllSyncRuns(limit: number = 100, orgId: string): Promise<SyncRun[]> {
+    const orgProviderIds = db
+      .select({ id: providerAccounts.id })
+      .from(providerAccounts)
+      .where(eq(providerAccounts.orgId, orgId));
     return await db
       .select()
       .from(syncRuns)
+      .where(inArray(syncRuns.providerAccountId, orgProviderIds))
       .orderBy(desc(syncRuns.createdAt))
       .limit(limit);
   }

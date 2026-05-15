@@ -4,44 +4,67 @@
  * The generated file lives at:
  *   runtime/inventories/<orgId>/<runId>/inventory.yml
  *
- * Gate policy is always enforced:
- *   - Allowed hosts are included.
- *   - Blocked hosts are excluded.
- *   - Hosts from other organizations are never included.
+ * Gate policy is ALWAYS recomputed fresh from the org's DB-cached NetBox VMs.
+ * There is NO dependency on the ephemeral in-memory gate store for execution.
+ * The gate store is updated for transparency (UI), but inventory generation
+ * reads from DB → evaluates inline → writes file.
+ *
+ * After writing, a GateDecisionSnapshot[] is returned for the caller to persist
+ * on the job run (gateSnapshot field).
+ *
+ * Cross-org isolation:
+ *   - Only VMs owned by the org (via netbox_inventory_sources.org_id) are loaded.
+ *   - Gate evaluation is scoped to the org.
+ *   - Inventory never includes hosts from another organization.
  *
  * The file is written with mode 0o600. The returned path is always an
  * absolute path resolved from the project root.
- *
- * IMPORTANT: The gate store is ephemeral (in-memory). If no gate evaluation
- * has run since the last server start, the inventory will be empty and the
- * run will fail safely with an explanatory message.
  */
 
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
-import { gateStore } from "./gate-store";
+import { gateEvaluator } from "./gate-evaluator";
+import { gateStore, type GateDecisionSnapshot } from "./gate-store";
 import { storage } from "../storage";
+import { deriveAssetId } from "./asset-identity";
 
 export interface InventoryOptions {
-  orgId: string | null;
+  orgId: string;
   runId: string;
-  templateId?: string;
+  templateId?: string | null;
   inventoryId?: string | null;
   limitExpr?: string | null;
+}
+
+export interface InventoryResult {
+  inventoryPath: string;
+  gateSnapshot: GateDecisionSnapshot[];
+  allowedCount: number;
+  blockedCount: number;
 }
 
 export async function createInventoryForRun(
   options: InventoryOptions
 ): Promise<string> {
+  const { inventoryPath } = await createInventoryForRunWithSnapshot(options);
+  return inventoryPath;
+}
+
+/**
+ * Full version — returns both the path and the gate snapshot.
+ * Called by runner-dispatcher so the snapshot can be persisted on the run.
+ */
+export async function createInventoryForRunWithSnapshot(
+  options: InventoryOptions
+): Promise<InventoryResult> {
   const { orgId, runId } = options;
-  const orgDir = orgId ?? "default";
 
   // Resolve to an absolute path — no ambiguity about CWD.
   const dir = path.resolve(
     process.cwd(),
     "runtime",
     "inventories",
-    orgDir,
+    orgId,
     runId
   );
 
@@ -50,36 +73,91 @@ export async function createInventoryForRun(
 
   const inventoryPath = path.join(dir, "inventory.yml");
 
-  // ── Gate phase: read pre-evaluated decisions (never re-evaluate here) ──────
-  const allowedDecisions = await gateStore.getAllowedVms();
+  // ── Gate phase: load org's cached VMs from DB, evaluate inline ──────────────
+  // This is ALWAYS fresh from DB — no dependency on ephemeral gate store.
+  const dbVms = await storage.getNetboxVms(orgId);
 
-  // Build a name → VM lookup for fast IP resolution.
-  // Only load netbox VMs once; filter within the loop.
-  let vmsByName: Map<string, { ip: string | null; netboxId: number }> | null = null;
-  if (allowedDecisions.length > 0) {
-    const allVms = await storage.getNetboxVms();
-    vmsByName = new Map(
-      allVms.map((vm) => [vm.name, { ip: vm.ip ?? null, netboxId: vm.netboxId }])
-    );
+  const gateSnapshot: GateDecisionSnapshot[] = [];
+  const allowedHosts: Array<{
+    safeName: string;
+    ip: string | null;
+    netboxId: number | undefined;
+  }> = [];
+
+  for (const vm of dbVms) {
+    // Convert DB record to the shape gate-evaluator expects
+    const vmForGate = {
+      id: vm.netboxId,
+      name: vm.name,
+      tenant: (vm.customFields as any)?.tenant ?? null,
+      role: (vm.customFields as any)?.role ?? null,
+      tags: Array.isArray(vm.tags) ? (vm.tags as string[]) : [],
+      custom_fields: (vm.customFields as Record<string, any>) ?? {},
+    };
+
+    // Evaluate gate (pure function, no side effects on store yet)
+    const result = gateEvaluator.evaluateGate(vmForGate, false);
+
+    const snapshot: GateDecisionSnapshot = {
+      assetId: result.assetId,
+      vmName: vm.name,
+      netboxVmId: vm.netboxId,
+      allowed: result.allowed,
+      missing: result.missing,
+      reason: result.reason,
+      failureType: result.failureType,
+      evaluatedAt: new Date().toISOString(),
+    };
+    gateSnapshot.push(snapshot);
+
+    // Also update the org-scoped gate store for UI transparency
+    await gateStore.storeDecision({
+      orgId,
+      assetId: result.assetId,
+      vmName: vm.name,
+      netboxVmId: vm.netboxId,
+      allowed: result.allowed,
+      missing: result.missing,
+      evaluatedAt: new Date(),
+      reason: result.reason,
+      failureType: result.failureType,
+    });
+
+    if (result.allowed) {
+      // Strip CIDR notation if present (e.g., "10.0.0.1/24" → "10.0.0.1")
+      const ip = vm.ip ? vm.ip.split("/")[0] : null;
+      allowedHosts.push({
+        safeName: vm.name.replace(/[^A-Za-z0-9_\-.]/g, "_"),
+        ip,
+        netboxId: vm.netboxId,
+      });
+    }
   }
 
+  // Mark as evaluated for this org (enables gate store UI)
+  gateStore.markEvaluationComplete(orgId);
+
+  const allowedCount = allowedHosts.length;
+  const blockedCount = gateSnapshot.length - allowedCount;
+
+  // ── Write inventory YAML ─────────────────────────────────────────────────────
   const lines: string[] = [
     "---",
     "# Generated by Rovelink",
     `# Run ID: ${runId}`,
-    `# Organization ID: ${orgDir}`,
-    "# Gate policy: enforced",
-    "# Blocked hosts excluded",
+    `# Organization ID: ${orgId}`,
+    "# Gate policy: enforced (recomputed from DB at run preparation time)",
+    `# Allowed: ${allowedCount}  Blocked: ${blockedCount}`,
     "#",
   ];
 
-  if (allowedDecisions.length === 0) {
+  if (allowedHosts.length === 0) {
     lines.push(
-      "# WARNING: Gate store is empty.",
-      "#   Either no gate evaluation has run since the last server start,",
-      "#   or all hosts are currently blocked by gate policy.",
-      "#   Run a gate evaluation before executing local Ansible playbooks.",
-      "#   Local Ansible execution will fail safely with an empty host list.",
+      "# No hosts passed gate evaluation.",
+      "#   Possible reasons:",
+      "#   - No NetBox VMs are imported for this organization.",
+      "#   - All VMs are missing required governance fields (tenant, role, automatable).",
+      "#   Import VMs via a NetBox Inventory Source before executing local Ansible playbooks.",
       "#",
       "all:",
       "  hosts: {}"
@@ -87,32 +165,20 @@ export async function createInventoryForRun(
   } else {
     lines.push("all:", "  hosts:");
 
-    for (const decision of allowedDecisions) {
-      const vmData = vmsByName?.get(decision.vmName);
-      const indent = "    ";
-
-      // Sanitize vm name for YAML key safety (spaces → underscores)
-      const safeKey = decision.vmName.replace(/[^A-Za-z0-9_\-\.]/g, "_");
-
-      lines.push(`${indent}${safeKey}:`);
-
-      if (vmData?.ip) {
-        // Strip CIDR notation if present (e.g., "10.0.0.1/24" → "10.0.0.1")
-        const host = vmData.ip.split("/")[0];
-        lines.push(`${indent}  ansible_host: "${host}"`);
+    for (const host of allowedHosts) {
+      lines.push(`    ${host.safeName}:`);
+      if (host.ip) {
+        lines.push(`      ansible_host: "${host.ip}"`);
       }
-
-      if (decision.netboxVmId != null) {
-        lines.push(`${indent}  rovelink_netbox_id: ${decision.netboxVmId}`);
-      } else if (vmData?.netboxId != null) {
-        lines.push(`${indent}  rovelink_netbox_id: ${vmData.netboxId}`);
+      if (host.netboxId != null) {
+        lines.push(`      rovelink_netbox_id: ${host.netboxId}`);
       }
-
-      lines.push(`${indent}  rovelink_gate_status: allowed`);
+      lines.push(`      rovelink_gate_status: allowed`);
+      lines.push(`      rovelink_org_id: "${orgId}"`);
     }
   }
 
   await writeFile(inventoryPath, lines.join("\n") + "\n", { mode: 0o600 });
 
-  return inventoryPath;
+  return { inventoryPath, gateSnapshot, allowedCount, blockedCount };
 }

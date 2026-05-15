@@ -17,7 +17,7 @@ const router = Router();
 
 router.get("/", async (req: AuthRequest, res) => {
   try {
-    const templates = await storage.getJobTemplates(req.orgId);
+    const templates = await storage.getJobTemplates(req.orgId!);
     res.json(templates);
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to fetch templates" });
@@ -26,7 +26,7 @@ router.get("/", async (req: AuthRequest, res) => {
 
 router.get("/:id", async (req: AuthRequest, res) => {
   try {
-    const template = await storage.getJobTemplate(req.params.id, req.orgId);
+    const template = await storage.getJobTemplate(req.params.id, req.orgId!);
     if (!template) return res.status(404).json({ message: "Template not found" });
     res.json(template);
   } catch (error: any) {
@@ -36,7 +36,7 @@ router.get("/:id", async (req: AuthRequest, res) => {
 
 router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    const data = insertJobTemplateSchema.parse({ ...req.body, orgId: req.orgId });
+    const data = insertJobTemplateSchema.parse({ ...req.body, orgId: req.orgId! });
     const template = await storage.createJobTemplate(data);
     res.json(template);
   } catch (error: any) {
@@ -46,7 +46,7 @@ router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
 
 router.patch("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    const template = await storage.updateJobTemplate(req.params.id, req.body, req.orgId);
+    const template = await storage.updateJobTemplate(req.params.id, req.body, req.orgId!);
     if (!template) return res.status(404).json({ message: "Template not found" });
     res.json(template);
   } catch (error: any) {
@@ -56,7 +56,7 @@ router.patch("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
 
 router.delete("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    await storage.deleteJobTemplate(req.params.id, req.orgId);
+    await storage.deleteJobTemplate(req.params.id, req.orgId!);
     res.status(204).end();
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to delete template" });
@@ -65,7 +65,7 @@ router.delete("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
 
 router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res) => {
   try {
-    const template = await storage.getJobTemplate(req.params.id, req.orgId);
+    const template = await storage.getJobTemplate(req.params.id, req.orgId!);
     if (!template) {
       return res.status(404).json({ message: "Template not found" });
     }
@@ -73,14 +73,14 @@ router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res
     const run = await storage.createJobRun({
       templateId: template.id,
       userId: req.userId!,
-      orgId: req.orgId || null,
+      orgId: req.orgId! || null,
       status: "queued",
       limitExpr: template.limitExpr || null,
     });
 
     setImmediate(async () => {
       try {
-        await storage.updateJobRun(run.id, { status: "running", startedAt: new Date() });
+        await storage.updateJobRun(run.id, { status: "running", startedAt: new Date() }, run.orgId!);
 
         let logs = "";
         const result = await dispatchRun(run, (log) => {
@@ -100,7 +100,7 @@ router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res
           completedAt: new Date(),
           logs: result.logs,
           resultSummary: result.summary,
-        });
+        }, run.orgId!);
 
         if (updatedRun) {
           await notificationService.triggerNotifications(updatedRun);
@@ -109,7 +109,7 @@ router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res
         const failedRun = await storage.updateJobRun(run.id, {
           status: "failed",
           completedAt: new Date(),
-        });
+        }, run.orgId!);
         if (failedRun) {
           await notificationService.triggerNotifications(failedRun);
         }
@@ -124,7 +124,7 @@ router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res
 
 router.post("/:id/schedule", requireRole("operator"), async (req: AuthRequest, res) => {
   try {
-    const template = await storage.getJobTemplate(req.params.id, req.orgId);
+    const template = await storage.getJobTemplate(req.params.id, req.orgId!);
     if (!template) return res.status(404).json({ message: "Template not found" });
 
     const { scheduledAt } = req.body;
@@ -133,7 +133,7 @@ router.post("/:id/schedule", requireRole("operator"), async (req: AuthRequest, r
     const run = await storage.createJobRun({
       templateId: template.id,
       userId: req.userId!,
-      orgId: req.orgId || null,
+      orgId: req.orgId! || null,
       status: "queued",
       scheduledAt: new Date(scheduledAt),
       limitExpr: template.limitExpr || null,

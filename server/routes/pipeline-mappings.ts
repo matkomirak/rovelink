@@ -21,7 +21,7 @@ interface AuthRequest extends Request {
 
 // Helper to get CMDB adapter instance — tenant-aware
 async function getCmdbAdapter(cmdbAccountId: string, orgId?: string) {
-  const cmdb = await storage.getCmdbAccount(cmdbAccountId, orgId);
+  const cmdb = await storage.getCmdbAccount(cmdbAccountId, orgId ?? "");
   if (!cmdb) {
     throw new Error("CMDB account not found");
   }
@@ -40,7 +40,7 @@ async function getCmdbAdapter(cmdbAccountId: string, orgId?: string) {
 // POST /api/pipelines/:pipelineId/mappings - Create mapping (verify pipeline ownership)
 router.post("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found", message: "Pipeline not found" });
     }
@@ -63,7 +63,7 @@ router.post("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => 
 // GET /api/pipelines/:pipelineId/mappings - List mappings (verify pipeline ownership)
 router.get("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found", message: "Pipeline not found" });
     }
@@ -77,7 +77,7 @@ router.get("/:pipelineId/mappings", async (req: AuthRequest, res: Response) => {
 // GET /api/pipelines/:pipelineId/mappings/:mapId - Get specific mapping
 router.get("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -94,7 +94,7 @@ router.get("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Respons
 // PATCH /api/pipelines/:pipelineId/mappings/:mapId - Update mapping rules
 router.patch("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -106,7 +106,7 @@ router.patch("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Respo
     const updated = await storage.updatePipelineMapping(req.params.mapId, req.body);
     await storage.incrementPipelineVersion(req.params.pipelineId);
 
-    const refreshedPipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    const refreshedPipeline = await storage.getPipeline(req.params.pipelineId, req.orgId!);
 
     res.json({
       ...updated,
@@ -120,7 +120,7 @@ router.patch("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Respo
 // DELETE /api/pipelines/:pipelineId/mappings/:mapId - Delete mapping
 router.delete("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -139,7 +139,7 @@ router.delete("/:pipelineId/mappings/:mapId", async (req: AuthRequest, res: Resp
 // POST /api/pipelines/:pipelineId/mappings/:mapId/test - Test transformation
 router.post("/:pipelineId/mappings/:mapId/test", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.pipelineId, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found", message: "Pipeline not found" });
     }
@@ -160,7 +160,7 @@ router.post("/:pipelineId/mappings/:mapId/test", async (req: AuthRequest, res: R
     }
 
     // Use org-scoped CMDB adapter
-    const adapter = await getCmdbAdapter(pipeline.cmdbAccountId, req.orgId);
+    const adapter = await getCmdbAdapter(pipeline.cmdbAccountId, req.orgId!);
 
     const rules = mapping.rules as any;
     if (!rules || !rules.fields) {

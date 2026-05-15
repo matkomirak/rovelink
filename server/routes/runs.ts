@@ -34,11 +34,11 @@ router.get("/", async (req: AuthRequest, res) => {
     // All three data sources are org-scoped — org-A cannot see org-B's runs
     const [jobRunsData, pipelineRunsData, syncRunsData, pipelinesData, providersData] =
       await Promise.all([
-        storage.getJobRuns({}, 1, 100, req.orgId),
-        storage.getAllPipelineRuns(100, req.orgId),
-        storage.getAllSyncRuns(100, req.orgId),
-        storage.getPipelines(req.orgId),
-        storage.getProviders(req.orgId),
+        storage.getJobRuns({}, 1, 100, req.orgId!),
+        storage.getAllPipelineRuns(100, req.orgId!),
+        storage.getAllSyncRuns(100, req.orgId!),
+        storage.getPipelines(req.orgId!),
+        storage.getProviders(req.orgId!),
       ]);
 
     const pipelineNameMap = new Map(
@@ -130,7 +130,7 @@ router.get("/", async (req: AuthRequest, res) => {
 router.get("/:id", async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const orgId = req.orgId;
+    const orgId = req.orgId!;
 
     // org-scoped lookup for job runs — returns undefined if wrong org
     const jobRun = await storage.getJobRun(id, orgId);
@@ -175,9 +175,9 @@ router.get("/:id", async (req: AuthRequest, res) => {
 
 router.post("/:id/archive", async (req: AuthRequest, res) => {
   try {
-    const run = await storage.getJobRun(req.params.id, req.orgId);
+    const run = await storage.getJobRun(req.params.id, req.orgId!);
     if (!run) return res.status(404).json({ message: "Run not found" });
-    await storage.updateJobRun(req.params.id, { archived: true }, req.orgId);
+    await storage.updateJobRun(req.params.id, { archived: true }, req.orgId!);
     res.json({ message: "Run archived successfully" });
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to archive run" });
@@ -186,9 +186,9 @@ router.post("/:id/archive", async (req: AuthRequest, res) => {
 
 router.post("/:id/unarchive", async (req: AuthRequest, res) => {
   try {
-    const run = await storage.getJobRun(req.params.id, req.orgId);
+    const run = await storage.getJobRun(req.params.id, req.orgId!);
     if (!run) return res.status(404).json({ message: "Run not found" });
-    await storage.updateJobRun(req.params.id, { archived: false }, req.orgId);
+    await storage.updateJobRun(req.params.id, { archived: false }, req.orgId!);
     res.json({ message: "Run unarchived successfully" });
   } catch (error: any) {
     res.status(500).json({ message: error.message || "Failed to unarchive run" });
@@ -197,7 +197,7 @@ router.post("/:id/unarchive", async (req: AuthRequest, res) => {
 
 router.get("/:id/csv", async (req: AuthRequest, res) => {
   try {
-    const run = await storage.getJobRun(req.params.id, req.orgId);
+    const run = await storage.getJobRun(req.params.id, req.orgId!);
     if (!run) return res.status(404).json({ message: "Run not found" });
 
     const csv =

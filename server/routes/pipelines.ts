@@ -40,7 +40,7 @@ interface AuthRequest extends Request {
 
 // Helper to get CMDB adapter instance with decrypted secrets — tenant-aware
 async function getCmdbAdapter(cmdbAccountId: string, orgId?: string) {
-  const cmdb = await storage.getCmdbAccount(cmdbAccountId, orgId);
+  const cmdb = await storage.getCmdbAccount(cmdbAccountId, orgId ?? "");
   if (!cmdb) {
     throw new Error("CMDB account not found");
   }
@@ -61,7 +61,7 @@ async function getCmdbAdapter(cmdbAccountId: string, orgId?: string) {
 // GET /api/pipelines - List all pipelines (org-scoped)
 router.get("/", async (req: AuthRequest, res: Response) => {
   try {
-    const pipelines = await storage.getPipelines(req.orgId);
+    const pipelines = await storage.getPipelines(req.orgId!);
     
     const enriched = await Promise.all(
       pipelines.map(async (pipeline) => {
@@ -94,19 +94,19 @@ router.post("/", async (req: AuthRequest, res: Response) => {
     const data = insertPipelineSchema.parse(safeBody);
     
     // Validate provider and CMDB belong to the same org
-    const provider = await storage.getProvider(data.providerAccountId, req.orgId);
+    const provider = await storage.getProvider(data.providerAccountId, req.orgId!);
     if (!provider) {
       return res.status(400).json({ error: "validation_error", message: "Provider account not found" });
     }
     
-    const cmdb = await storage.getCmdbAccount(data.cmdbAccountId, req.orgId);
+    const cmdb = await storage.getCmdbAccount(data.cmdbAccountId, req.orgId!);
     if (!cmdb) {
       return res.status(400).json({ error: "validation_error", message: "CMDB account not found" });
     }
 
     const pipeline = await storage.createPipeline({
       ...data,
-      orgId: req.orgId,
+      orgId: req.orgId!,
       createdBy: req.userId,
     });
 
@@ -145,7 +145,7 @@ router.get("/presets/:id", async (req: AuthRequest, res: Response) => {
 // GET /api/pipelines/:id - Get pipeline details (org-scoped)
 router.get("/:id", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.id, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.id, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -171,7 +171,7 @@ router.get("/:id", async (req: AuthRequest, res: Response) => {
 // PATCH /api/pipelines/:id - Update pipeline (org-scoped)
 router.patch("/:id", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.updatePipeline(req.params.id, req.body, req.orgId);
+    const pipeline = await storage.updatePipeline(req.params.id, req.body, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -184,7 +184,7 @@ router.patch("/:id", async (req: AuthRequest, res: Response) => {
 // DELETE /api/pipelines/:id - Delete pipeline (org-scoped)
 router.delete("/:id", async (req: AuthRequest, res: Response) => {
   try {
-    await storage.deletePipeline(req.params.id, req.orgId);
+    await storage.deletePipeline(req.params.id, req.orgId!);
     res.status(204).send();
   } catch (error: any) {
     res.status(500).json({ error: "internal", message: error.message });
@@ -194,7 +194,7 @@ router.delete("/:id", async (req: AuthRequest, res: Response) => {
 // GET /api/pipelines/:id/runs - Get pipeline runs (verify pipeline ownership first)
 router.get("/:id/runs", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.id, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.id, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -219,7 +219,7 @@ router.get("/:id/runs", async (req: AuthRequest, res: Response) => {
 // POST /api/pipelines/:id/dry-run - Execute dry-run (org-scoped)
 router.post("/:id/dry-run", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.id, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.id, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -238,7 +238,7 @@ router.post("/:id/dry-run", async (req: AuthRequest, res: Response) => {
     if (mappings.length === 0) {
       notes.push("No mappings configured");
     } else {
-      const provider = await storage.getProvider(pipeline.providerAccountId, req.orgId);
+      const provider = await storage.getProvider(pipeline.providerAccountId, req.orgId!);
       if (provider) {
         const samples = getSamples(provider.kind, mappings[0].sourceType, 10);
         
@@ -293,12 +293,12 @@ router.post("/:id/dry-run", async (req: AuthRequest, res: Response) => {
 // GET /api/pipelines/:id/runs/:runId/changes.csv - Export dry-run changes (org-scoped)
 router.get("/:id/runs/:runId/changes.csv", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.id, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.id, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
 
-    const run = await storage.getPipelineRun(req.params.runId);
+    const run = await storage.getPipelineRun(req.params.runId, req.orgId!);
     if (!run || run.pipelineId !== pipeline.id) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -327,12 +327,12 @@ router.get("/:id/runs/:runId/changes.csv", async (req: AuthRequest, res: Respons
 // GET /api/pipelines/:id/runs/:runId - Get run details (org-scoped via parent pipeline)
 router.get("/:id/runs/:runId", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.id, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.id, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
 
-    const run = await storage.getPipelineRun(req.params.runId);
+    const run = await storage.getPipelineRun(req.params.runId, req.orgId!);
     if (!run || run.pipelineId !== pipeline.id) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -356,7 +356,7 @@ router.get("/:id/runs/:runId", async (req: AuthRequest, res: Response) => {
 // POST /api/pipelines/:id/sync - Execute real sync (org-scoped)
 router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
   try {
-    const pipeline = await storage.getPipeline(req.params.id, req.orgId);
+    const pipeline = await storage.getPipeline(req.params.id, req.orgId!);
     if (!pipeline) {
       return res.status(404).json({ error: "not_found" });
     }
@@ -392,8 +392,8 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response) => {
       try {
         await addLog("Starting pipeline sync...");
 
-        // Use pipeline's own orgId for all sub-lookups (not req.orgId which may not be available in async closure)
-        const providerAccount = await storage.getProvider(pipeline.providerAccountId, pipelineOrgId ?? undefined);
+        // Use pipeline's own orgId for all sub-lookups (not req.orgId! which may not be available in async closure)
+        const providerAccount = await storage.getProvider(pipeline.providerAccountId, pipelineOrgId ?? "");
         if (!providerAccount) {
           throw new Error("Provider account not found");
         }

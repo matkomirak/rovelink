@@ -8,10 +8,17 @@ import { decryptCmdbConfig } from "../services/secrets";
 import { runGatePhase, readAllowedAssets, readBlockedAssets, getGateSummary } from "../services/gate-phase";
 import { deriveAssetId } from "../services/asset-identity";
 import { gateStore } from "../services/gate-store";
+import { hasRoleAtLeast } from "../auth/roles";
 
-// Auth request type
+// Auth request type — orgId is stamped by auth middleware
 interface AuthRequest extends Request {
   user?: any;
+  orgId?: string;
+}
+
+// Helper: resolve orgId from request (supports both middleware patterns)
+function resolveOrgId(req: AuthRequest): string {
+  return req.user?.orgId || req.orgId || "";
 }
 
 // Default policy for gate evaluation - all optional rules disabled
@@ -35,12 +42,14 @@ function extractPolicy(inventory: any): EligibilityPolicy {
 
 const router = express.Router();
 
-// List all automation inventories
-router.get("/", async (req, res) => {
+// List all automation inventories — org-scoped
+router.get("/", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const inventories = await db
       .select()
       .from(automationInventories)
+      .where(eq(automationInventories.orgId, orgId))
       .orderBy(desc(automationInventories.createdAt));
     res.json(inventories);
   } catch (error: any) {
@@ -48,13 +57,19 @@ router.get("/", async (req, res) => {
   }
 });
 
-// Get single inventory
-router.get("/:id", async (req, res) => {
+// Get single inventory — org-scoped
+router.get("/:id", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -69,11 +84,11 @@ router.get("/:id", async (req, res) => {
 // Create new automation inventory
 router.post("/", async (req: AuthRequest, res: Response) => {
   try {
-    const userRole = req.user?.role;
-    if (userRole !== "admin") {
+    if (!hasRoleAtLeast(req.user?.role, "admin")) {
       return res.status(403).json({ message: "Admin role required" });
     }
 
+    const orgId = resolveOrgId(req);
     const validated = insertAutomationInventorySchema.parse(req.body);
     const userId = req.user?.id;
 
@@ -92,18 +107,27 @@ router.post("/", async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // If this is marked as default, unset other defaults
+    // If this is marked as default, unset other defaults within this org only
     if (validated.isDefault) {
       await db
         .update(automationInventories)
         .set({ isDefault: false })
-        .where(eq(automationInventories.isDefault, true));
+        .where(
+          and(
+            eq(automationInventories.isDefault, true),
+            eq(automationInventories.orgId, orgId)
+          )
+        );
     }
+
+    // Strip client-supplied orgId and id — always stamp from authenticated request
+    const { orgId: _ignoredOrgId, id: _ignoredId, ...safeBody } = validated as any;
 
     const [newInventory] = await db
       .insert(automationInventories)
       .values({
-        ...validated,
+        ...safeBody,
+        orgId,
         createdBy: userId,
         updatedAt: new Date(),
       })
@@ -112,11 +136,16 @@ router.post("/", async (req: AuthRequest, res: Response) => {
     // For linked inventories, fetch real data from CMDB
     if (newInventory.type === "linked" && newInventory.sourceRef) {
       try {
-        // Get the linked CMDB account
+        // Get the linked CMDB account — org-scoped to prevent cross-tenant linking
         const [cmdb] = await db
           .select()
           .from(cmdbAccounts)
-          .where(eq(cmdbAccounts.id, newInventory.sourceRef));
+          .where(
+            and(
+              eq(cmdbAccounts.id, newInventory.sourceRef),
+              eq(cmdbAccounts.orgId, orgId)
+            )
+          );
 
         if (!cmdb) {
           return res.status(404).json({ message: "Linked CMDB not found" });
@@ -164,11 +193,11 @@ router.post("/", async (req: AuthRequest, res: Response) => {
         // Inventory generation must ONLY read from gate store.
         // ================================================================
         const policy = extractPolicy(newInventory);
-        await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
+        await runGatePhase(cmdb.id, policy, orgId);
         
         // Read gate decisions from store - NEVER trigger evaluation here
         // This is the decoupled read phase
-        const allowedDecisions = await readAllowedAssets((req as AuthRequest).user?.orgId || "");
+        const allowedDecisions = await readAllowedAssets(orgId);
         const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
         
         // Filter VMs through gate - only include allowed VMs
@@ -300,13 +329,23 @@ router.post("/", async (req: AuthRequest, res: Response) => {
               hosts: fullHosts,
             },
           })
-          .where(eq(automationInventories.id, newInventory.id));
+          .where(
+            and(
+              eq(automationInventories.id, newInventory.id),
+              eq(automationInventories.orgId, orgId)
+            )
+          );
 
         // Re-fetch to get updated data
         const [updated] = await db
           .select()
           .from(automationInventories)
-          .where(eq(automationInventories.id, newInventory.id));
+          .where(
+            and(
+              eq(automationInventories.id, newInventory.id),
+              eq(automationInventories.orgId, orgId)
+            )
+          );
         return res.status(201).json(updated);
       } catch (error: any) {
         console.error("Error fetching NetBox data for linked inventory:", error.message);
@@ -323,12 +362,22 @@ router.post("/", async (req: AuthRequest, res: Response) => {
               error: error.message
             },
           })
-          .where(eq(automationInventories.id, newInventory.id));
+          .where(
+            and(
+              eq(automationInventories.id, newInventory.id),
+              eq(automationInventories.orgId, orgId)
+            )
+          );
 
         const [updated] = await db
           .select()
           .from(automationInventories)
-          .where(eq(automationInventories.id, newInventory.id));
+          .where(
+            and(
+              eq(automationInventories.id, newInventory.id),
+              eq(automationInventories.orgId, orgId)
+            )
+          );
         
         return res.status(201).json({
           ...updated,
@@ -348,12 +397,22 @@ router.post("/", async (req: AuthRequest, res: Response) => {
             hostsCount: parsed.hostsCount,
             previewData: parsed.preview,
           })
-          .where(eq(automationInventories.id, newInventory.id));
+          .where(
+            and(
+              eq(automationInventories.id, newInventory.id),
+              eq(automationInventories.orgId, orgId)
+            )
+          );
 
         const [updated] = await db
           .select()
           .from(automationInventories)
-          .where(eq(automationInventories.id, newInventory.id));
+          .where(
+            and(
+              eq(automationInventories.id, newInventory.id),
+              eq(automationInventories.orgId, orgId)
+            )
+          );
         return res.status(201).json(updated);
       } catch (parseError: any) {
         console.error("File parse error:", parseError);
@@ -366,13 +425,19 @@ router.post("/", async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Get inventory preview
-router.get("/:id/preview", async (req, res) => {
+// Get inventory preview — org-scoped
+router.get("/:id/preview", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -392,13 +457,19 @@ router.get("/:id/preview", async (req, res) => {
   }
 });
 
-// Get full inventory structure - uses cached data, not live fetch
-router.get("/:id/structure", async (req, res) => {
+// Get full inventory structure - uses cached data, not live fetch — org-scoped
+router.get("/:id/structure", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -441,18 +512,23 @@ router.get("/:id/structure", async (req, res) => {
   }
 });
 
-// Refresh linked inventory
+// Refresh linked inventory — org-scoped
 router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
   try {
-    const userRole = req.user?.role;
-    if (userRole === "viewer") {
+    if (!hasRoleAtLeast(req.user?.role, "operator")) {
       return res.status(403).json({ message: "Viewers cannot refresh inventories" });
     }
 
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -466,11 +542,16 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: "Inventory has no linked CMDB source" });
     }
 
-    // Fetch real data from CMDB
+    // Fetch real data from CMDB — org-scoped to prevent cross-tenant CMDB access
     const [cmdb] = await db
       .select()
       .from(cmdbAccounts)
-      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+      .where(
+        and(
+          eq(cmdbAccounts.id, inventory.sourceRef),
+          eq(cmdbAccounts.orgId, orgId)
+        )
+      );
 
     if (!cmdb) {
       return res.status(404).json({ message: "Linked CMDB not found" });
@@ -489,10 +570,10 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     // Inventory generation must ONLY read from gate store.
     // ================================================================
     const policy = extractPolicy(inventory);
-    await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
+    await runGatePhase(cmdb.id, policy, orgId);
     
     // Read gate decisions from store - NEVER trigger evaluation here
-    const allowedDecisions = await readAllowedAssets((req as AuthRequest).user?.orgId || "");
+    const allowedDecisions = await readAllowedAssets(orgId);
     const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
     
     // Filter VMs through gate - only include allowed VMs
@@ -625,12 +706,22 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
         },
         updatedAt: new Date(),
       })
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     const [updated] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     res.json(updated);
   } catch (error: any) {
@@ -638,33 +729,45 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Update inventory
+// Update inventory — org-scoped
 router.patch("/:id", async (req: AuthRequest, res: Response) => {
   try {
-    const userRole = req.user?.role;
-    if (userRole !== "admin") {
+    if (!hasRoleAtLeast(req.user?.role, "admin")) {
       return res.status(403).json({ message: "Admin role required" });
     }
 
+    const orgId = resolveOrgId(req);
     const [existing] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!existing) {
       return res.status(404).json({ message: "Inventory not found" });
     }
 
-    // Handle default flag toggle
+    // Handle default flag toggle — only within this org
     if (req.body.isDefault === true) {
       await db
         .update(automationInventories)
         .set({ isDefault: false })
-        .where(eq(automationInventories.isDefault, true));
+        .where(
+          and(
+            eq(automationInventories.isDefault, true),
+            eq(automationInventories.orgId, orgId)
+          )
+        );
     }
 
+    // Strip orgId from update payload — it must never be changed via PATCH
+    const { orgId: _ignoredOrgId, ...bodyWithoutOrgId } = req.body;
     const updateData: any = {
-      ...req.body,
+      ...bodyWithoutOrgId,
       updatedAt: new Date(),
     };
 
@@ -683,12 +786,22 @@ router.patch("/:id", async (req: AuthRequest, res: Response) => {
     await db
       .update(automationInventories)
       .set(updateData)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     const [updated] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     res.json(updated);
   } catch (error: any) {
@@ -696,18 +809,23 @@ router.patch("/:id", async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Update eligibility policy
+// Update eligibility policy — org-scoped
 router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
   try {
-    const userRole = req.user?.role;
-    if (userRole !== "admin") {
+    if (!hasRoleAtLeast(req.user?.role, "admin")) {
       return res.status(403).json({ message: "Admin role required" });
     }
 
+    const orgId = resolveOrgId(req);
     const [existing] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!existing) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -726,12 +844,22 @@ router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
         eligibilityPolicy: policy,
         updatedAt: new Date(),
       })
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     const [updated] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     res.json({ 
       message: "Policy updated",
@@ -742,13 +870,19 @@ router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Get eligibility policy
-router.get("/:id/policy", async (req, res) => {
+// Get eligibility policy — org-scoped
+router.get("/:id/policy", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -780,18 +914,23 @@ router.get("/:id/policy", async (req, res) => {
   }
 });
 
-// Delete inventory
+// Delete inventory — org-scoped
 router.delete("/:id", async (req: AuthRequest, res: Response) => {
   try {
-    const userRole = req.user?.role;
-    if (userRole !== "admin") {
+    if (!hasRoleAtLeast(req.user?.role, "admin")) {
       return res.status(403).json({ message: "Admin role required" });
     }
 
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -799,7 +938,12 @@ router.delete("/:id", async (req: AuthRequest, res: Response) => {
 
     await db
       .delete(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     res.json({ message: "Inventory deleted" });
   } catch (error: any) {
@@ -945,12 +1089,18 @@ function parseInventoryFile(content: string, format: string) {
 // ================================================================
 // AUTOMATION.YML - Download allowed assets as Ansible inventory
 // ================================================================
-router.get("/:id/automation.yml", async (req, res) => {
+router.get("/:id/automation.yml", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -962,11 +1112,16 @@ router.get("/:id/automation.yml", async (req, res) => {
       });
     }
 
-    // Get CMDB account
+    // Get CMDB account — org-scoped
     const [cmdb] = await db
       .select()
       .from(cmdbAccounts)
-      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+      .where(
+        and(
+          eq(cmdbAccounts.id, inventory.sourceRef),
+          eq(cmdbAccounts.orgId, orgId)
+        )
+      );
 
     if (!cmdb) {
       return res.status(404).json({ message: "Linked CMDB not found" });
@@ -974,10 +1129,10 @@ router.get("/:id/automation.yml", async (req, res) => {
 
     // Run gate phase (first-class phase)
     const policy = extractPolicy(inventory);
-    await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
+    await runGatePhase(cmdb.id, policy, orgId);
 
     // Read ONLY allowed assets from gate store
-    const allowedDecisions = await readAllowedAssets((req as AuthRequest).user?.orgId || "");
+    const allowedDecisions = await readAllowedAssets(orgId);
     const allowedAssetIds = new Set(allowedDecisions.map(d => d.assetId));
 
     // Fetch VMs from NetBox — always decrypt config before use
@@ -1039,12 +1194,18 @@ router.get("/:id/automation.yml", async (req, res) => {
 // ================================================================
 // BLOCKED.JSON - Download blocked assets with reasons
 // ================================================================
-router.get("/:id/blocked.json", async (req, res) => {
+router.get("/:id/blocked.json", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -1056,11 +1217,16 @@ router.get("/:id/blocked.json", async (req, res) => {
       });
     }
 
-    // Get CMDB account
+    // Get CMDB account — org-scoped
     const [cmdb] = await db
       .select()
       .from(cmdbAccounts)
-      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+      .where(
+        and(
+          eq(cmdbAccounts.id, inventory.sourceRef),
+          eq(cmdbAccounts.orgId, orgId)
+        )
+      );
 
     if (!cmdb) {
       return res.status(404).json({ message: "Linked CMDB not found" });
@@ -1068,10 +1234,10 @@ router.get("/:id/blocked.json", async (req, res) => {
 
     // Run gate phase (first-class phase)
     const policy = extractPolicy(inventory);
-    await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
+    await runGatePhase(cmdb.id, policy, orgId);
 
     // Read ONLY blocked assets from gate store
-    const blockedDecisions = await readBlockedAssets((req as AuthRequest).user?.orgId || "");
+    const blockedDecisions = await readBlockedAssets(orgId);
 
     // Format blocked assets according to spec
     const blockedAssets = blockedDecisions.map(decision => ({
@@ -1096,12 +1262,18 @@ router.get("/:id/blocked.json", async (req, res) => {
 // ================================================================
 // BLOCKED - API endpoint for UI to get blocked assets list
 // ================================================================
-router.get("/:id/blocked", async (req, res) => {
+router.get("/:id/blocked", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -1115,25 +1287,30 @@ router.get("/:id/blocked", async (req, res) => {
       });
     }
 
-    // Get CMDB account
+    // Get CMDB account — org-scoped
     const [cmdb] = await db
       .select()
       .from(cmdbAccounts)
-      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+      .where(
+        and(
+          eq(cmdbAccounts.id, inventory.sourceRef),
+          eq(cmdbAccounts.orgId, orgId)
+        )
+      );
 
     if (!cmdb) {
       return res.status(404).json({ message: "Linked CMDB not found" });
     }
 
     // Check if gate evaluation has been completed
-    if (!gateStore.isEvaluationComplete((req as AuthRequest).user?.orgId || "")) {
+    if (!gateStore.isEvaluationComplete(orgId)) {
       // Run gate phase if not yet evaluated
       const policy = extractPolicy(inventory);
-      await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
+      await runGatePhase(cmdb.id, policy, orgId);
     }
 
     // Read blocked assets from gate store
-    const blockedDecisions = await readBlockedAssets((req as AuthRequest).user?.orgId || "");
+    const blockedDecisions = await readBlockedAssets(orgId);
 
     // Format for UI
     const blocked = blockedDecisions.map(decision => ({
@@ -1149,7 +1326,7 @@ router.get("/:id/blocked", async (req, res) => {
       blocked,
       count: blocked.length,
       source: cmdb.name,
-      lastEvaluated: gateStore.getLastEvaluationTime((req as AuthRequest).user?.orgId || "")?.toISOString() || null,
+      lastEvaluated: gateStore.getLastEvaluationTime(orgId)?.toISOString() || null,
     });
   } catch (error: any) {
     console.error("Error fetching blocked assets:", error);
@@ -1160,12 +1337,18 @@ router.get("/:id/blocked", async (req, res) => {
 // ================================================================
 // GATE STATS - Get allowed/blocked counts for an inventory
 // ================================================================
-router.get("/:id/gate-stats", async (req, res) => {
+router.get("/:id/gate-stats", async (req: AuthRequest, res: Response) => {
   try {
+    const orgId = resolveOrgId(req);
     const [inventory] = await db
       .select()
       .from(automationInventories)
-      .where(eq(automationInventories.id, req.params.id));
+      .where(
+        and(
+          eq(automationInventories.id, req.params.id),
+          eq(automationInventories.orgId, orgId)
+        )
+      );
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -1179,24 +1362,29 @@ router.get("/:id/gate-stats", async (req, res) => {
       });
     }
 
-    // Get CMDB account
+    // Get CMDB account — org-scoped
     const [cmdb] = await db
       .select()
       .from(cmdbAccounts)
-      .where(eq(cmdbAccounts.id, inventory.sourceRef));
+      .where(
+        and(
+          eq(cmdbAccounts.id, inventory.sourceRef),
+          eq(cmdbAccounts.orgId, orgId)
+        )
+      );
 
     if (!cmdb) {
       return res.status(404).json({ message: "Linked CMDB not found" });
     }
 
     // Check if gate evaluation has been completed
-    if (!gateStore.isEvaluationComplete((req as AuthRequest).user?.orgId || "")) {
+    if (!gateStore.isEvaluationComplete(orgId)) {
       // Run gate phase if not yet evaluated
       const policy = extractPolicy(inventory);
-      await runGatePhase(cmdb.id, policy, (req as AuthRequest).user?.orgId || "");
+      await runGatePhase(cmdb.id, policy, orgId);
     }
 
-    const summary = await getGateSummary((req as AuthRequest).user?.orgId || "");
+    const summary = await getGateSummary(orgId);
 
     res.json({
       allowed: summary.allowed,

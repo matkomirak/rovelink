@@ -10,7 +10,7 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx server/seed.ts",
-    "test": "NODE_ENV=test tsx --test tests/authz.test.ts tests/security.test.ts tests/playbook-paths.test.ts tests/gate-isolation.test.ts",
+    "test": "NODE_ENV=test tsx --test tests/authz.test.ts tests/security.test.ts tests/playbook-paths.test.ts tests/gate-isolation.test.ts tests/automation-inventory-isolation.test.ts",
     "test:integration": "NODE_ENV=test tsx --test tests/tenant-isolation.test.ts",
     "test:security": "NODE_ENV=test tsx --test tests/security.test.ts",
     "test:authz": "NODE_ENV=test tsx --test tests/authz.test.ts",

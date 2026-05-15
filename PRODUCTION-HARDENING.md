@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v17.
+This document accurately reflects the state of the codebase as of v18.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -24,8 +24,9 @@ npm audit --omit=dev
 | `npm run check` passes | PASS |
 | `npm run build` passes | PASS |
 | `npm test` passes without external services | PASS |
-| `npm run test:integration` passes (requires DATABASE_URL) | PASS (24/24, real DB) |
+| `npm run test:integration` passes (requires DATABASE_URL) | Available — last known status in configured DB: PASS (24/24) |
 | Gate store org isolation tests (10 tests, DB-free) | PASS (10/10) |
+| Automation inventory routes are org-scoped | PASS — all 14 route handlers filter by orgId |
 | `npm audit --omit=dev` — no high/critical vulnerabilities | **OPEN** — 1 high (see ROVELINK-SEC-001 below) |
 | Auth middleware does not turn DB errors into 401 | PASS |
 | Auth/security tests use in-process supertest, no live DB needed | PASS |
@@ -60,7 +61,7 @@ npm audit --omit=dev
 
 | Command | What it runs | Requires DB |
 |---|---|---|
-| `npm test` | authz, security, playbook-path, gate + hint isolation (87 tests) | No |
+| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation (110 tests) | No |
 | `npm run test:integration` | Cross-tenant isolation (24 tests) | Yes — DATABASE_URL required |
 | `npm run test:authz` | Auth/role tests only | No |
 | `npm run test:security` | Secret redaction/log tests only | No |
@@ -155,7 +156,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
 
-### Gate Tenant Isolation (v17)
+### Gate Tenant Isolation (v18)
 - `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
 - All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
 - `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.
@@ -190,9 +191,10 @@ server file. The attack surface described in the advisory does not exist in the 
 - API responses strip encrypted values (`enc:v1:...` never returned to the client).
 
 ### Testing
-- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation — 87 tests).
-- `npm run test:integration` runs cross-tenant isolation tests (24 tests, requires DATABASE_URL).
+- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation, automation inventory isolation — 110 tests).
+- `npm run test:integration` requires `DATABASE_URL` pointing at a real PostgreSQL instance. Last known status in configured DB environment: PASS (24/24 tests).
 - Gate + hint isolation tests (`tests/gate-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
+- Automation inventory isolation tests (`tests/automation-inventory-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
 - Integration tests guard at module load — clear error if DATABASE_URL is absent.
 - `server/db.ts` defers the DATABASE_URL check to first use, so imports do not throw in test environments.
 

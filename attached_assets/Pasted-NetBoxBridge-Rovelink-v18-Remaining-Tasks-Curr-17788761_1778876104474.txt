@@ -1,0 +1,374 @@
+NetBoxBridge / Rovelink — v18 Remaining Tasks
+=============================================
+
+Current validation:
+- npm run check: PASS
+- npm test: PASS, 87 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm run test:integration requires real DATABASE_URL
+
+Main remaining blocker:
+Automation inventory routes are not fully tenant-scoped.
+
+
+Task 1 — Fix automation inventory tenant isolation
+--------------------------------------------------
+
+File:
+
+    server/routes/automation-inventories.ts
+
+Problem:
+
+Routes use direct DB queries without orgId filtering.
+
+Examples:
+
+    db.select().from(automationInventories)
+
+and:
+
+    where(eq(automationInventories.id, req.params.id))
+
+These can expose or mutate automation inventories across organizations.
+
+Required changes:
+
+1. Add orgId to AuthRequest type:
+
+    interface AuthRequest extends Request {
+      user?: any;
+      orgId?: string;
+    }
+
+2. All list routes must filter by orgId:
+
+    where(eq(automationInventories.orgId, req.orgId!))
+
+3. All single-object routes must filter by both id and orgId:
+
+    where(
+      and(
+        eq(automationInventories.id, req.params.id),
+        eq(automationInventories.orgId, req.orgId!)
+      )
+    )
+
+4. All create routes must ignore client-provided orgId and set orgId from req.orgId:
+
+    const { orgId: _ignoredOrgId, id: _ignoredId, ...safeBody } = validated;
+
+    const [newInventory] = await db
+      .insert(automationInventories)
+      .values({
+        ...safeBody,
+        orgId: req.orgId!,
+        createdBy: req.user?.id,
+        updatedAt: new Date(),
+      })
+      .returning();
+
+5. Default inventory logic must be org-scoped.
+
+Unsafe:
+
+    update automationInventories set isDefault=false where isDefault=true
+
+Safe:
+
+    update automationInventories
+    set isDefault=false
+    where and(
+      eq(automationInventories.isDefault, true),
+      eq(automationInventories.orgId, req.orgId!)
+    )
+
+6. Delete must be org-scoped:
+
+    delete from automationInventories
+    where and(
+      eq(automationInventories.id, req.params.id),
+      eq(automationInventories.orgId, req.orgId!)
+    )
+
+7. Refresh, preview, export, gate, default, and linked-source actions must first load the inventory by id + orgId.
+
+8. Linked CMDB source lookup must also be org-scoped:
+
+    where(
+      and(
+        eq(cmdbAccounts.id, inventory.sourceRef),
+        eq(cmdbAccounts.orgId, req.orgId!)
+      )
+    )
+
+or use:
+
+    storage.getCmdbAccount(inventory.sourceRef, req.orgId!)
+
+Acceptance criteria:
+
+- Org A cannot list Org B automation inventories.
+- Org A cannot read Org B automation inventory by ID.
+- Org A cannot update/delete/refresh/export/preview Org B automation inventory.
+- Org A cannot create a linked inventory using Org B's CMDB account.
+- Setting default inventory only affects the current org.
+- npm run check passes.
+- npm test passes.
+
+
+Task 2 — Replace manual role checks in automation inventories
+-------------------------------------------------------------
+
+File:
+
+    server/routes/automation-inventories.ts
+
+Problem:
+
+The route uses exact role checks such as:
+
+    if (userRole !== "admin") {
+      return res.status(403).json({ message: "Admin role required" });
+    }
+
+This bypasses the central role hierarchy.
+
+Required change:
+
+Use the central role helper from:
+
+    server/auth/roles.ts
+
+Either apply middleware:
+
+    requireRole("admin")
+
+or use:
+
+    hasRoleAtLeast(req.user?.role, "admin")
+
+Expected behavior:
+
+- admin can create/update/delete automation inventories.
+- platform_admin can also create/update/delete automation inventories.
+- operator cannot create/update/delete unless intentionally allowed.
+- viewer cannot create/update/delete.
+
+Acceptance criteria:
+
+- No exact checks like userRole !== "admin" remain in automation-inventories.ts.
+- platform_admin passes admin-level inventory routes.
+- Tests cover platform_admin access.
+- npm test passes.
+
+
+Task 3 — Add automation inventory tenant-isolation tests
+--------------------------------------------------------
+
+Add tests for automation inventory boundaries.
+
+Suggested file:
+
+    tests/automation-inventory-isolation.test.ts
+
+Test cases:
+
+1. List route:
+   - Org A only sees Org A inventories.
+   - Org B inventories are not returned.
+
+2. Detail route:
+   - Org A cannot GET Org B inventory by ID.
+
+3. Create route:
+   - Client-provided orgId is ignored.
+   - Created inventory uses req.orgId.
+
+4. Linked CMDB:
+   - Org A cannot create linked inventory using Org B CMDB account.
+
+5. Update route:
+   - Org A cannot PATCH/PUT Org B inventory.
+
+6. Delete route:
+   - Org A cannot DELETE Org B inventory.
+
+7. Default inventory:
+   - Setting default in Org A does not unset default inventory in Org B.
+
+8. Role hierarchy:
+   - platform_admin can access admin-level inventory routes.
+   - admin can access admin-level inventory routes.
+   - operator/viewer cannot mutate inventories.
+
+Acceptance criteria:
+
+- Tests fail before the fix.
+- Tests pass after the fix.
+- Include the new DB-free tests in npm test if they are mocked.
+- If they need a real DB, include them in npm run test:integration and document that clearly.
+
+
+Task 4 — Update PRODUCTION-HARDENING.md for v18
+-----------------------------------------------
+
+File:
+
+    PRODUCTION-HARDENING.md
+
+Required changes:
+
+1. Change:
+
+    as of v17
+
+to:
+
+    as of v18
+
+2. Update test status wording.
+
+Current text says integration tests pass with real DB. If this is only true in Replit's configured DB environment, phrase it as:
+
+    Integration tests are available under npm run test:integration and require DATABASE_URL.
+    Last known status in configured DB environment: PASS.
+
+3. Add automation inventory tenant isolation to the blocking checklist as OPEN until fixed.
+
+Example:
+
+    | Automation inventory routes are org-scoped | OPEN — direct DB queries still need orgId filtering |
+
+4. Keep Drizzle risk accurate:
+
+    npm audit --omit=dev reports 1 high vulnerability: drizzle-orm GHSA-gpj5-g38j-94v9.
+
+Acceptance criteria:
+
+- Document says v18.
+- No unverifiable production-ready claims.
+- Automation inventory tenant gap is tracked.
+- Drizzle accepted risk remains accurate.
+
+
+Task 5 — Resolve or continue formally tracking Drizzle vulnerability
+-------------------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    drizzle-orm <0.45.2
+    GHSA-gpj5-g38j-94v9
+
+Current versions:
+
+    drizzle-orm ^0.39.1
+    drizzle-zod ^0.7.0
+    zod ^3.24.2
+
+Required action:
+
+Option A — upgrade:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit
+
+or manually update drizzle-orm to >=0.45.2 and adjust code if needed.
+
+Then run:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Option B — keep accepted risk:
+
+Ensure PRODUCTION-HARDENING.md has:
+
+    Risk ID
+    advisory
+    severity
+    owner
+    acceptance date
+    review date
+    mitigation
+    upgrade plan
+
+Acceptance criteria:
+
+- Either npm audit --omit=dev has no high vulnerabilities,
+  OR the risk is clearly documented as accepted.
+- Do not call the project production-ready while this is unresolved or only temporarily accepted.
+
+
+Task 6 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current state:
+
+Project sync is still simulated:
+
+    site.yml
+    deploy.yml
+    rollback.yml
+
+This is acceptable only if clearly labeled as demo.
+
+Option A — keep demo:
+
+- UI button must continue to say Demo Sync.
+- API response must continue to say simulated repository.
+- Docs must say no real Git checkout is performed.
+- Local Ansible must fail safely without project.checkoutPath.
+
+Option B — implement real Git sync:
+
+- Clone/pull into:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Save project.checkoutPath.
+- Discover .yml/.yaml playbooks from real checkout.
+- Use credential store for private Git credentials.
+- Never log credentials.
+- Use spawn argument arrays, not shell interpolation.
+- Continue using resolveSafePlaybookPath before execution.
+
+Acceptance criteria:
+
+- Either real Git sync works safely,
+  OR demo sync is clearly labeled everywhere and local production execution remains disabled.
+
+
+Task 7 — Update VERSION.md
+--------------------------
+
+Problem:
+
+VERSION.md is stale and describes an old v1.0 baseline.
+
+Required update:
+
+Add a current section for the latest hardening version.
+
+Include:
+
+- platform_admin role hierarchy
+- org-scoped gate decisions
+- org-scoped provider hints
+- gated per-run inventory generation
+- safe local runner path validation
+- demo-only project sync
+- AWX/global settings platform_admin model
+- default DB-free test suite
+- integration tests requiring DATABASE_URL
+- remaining Drizzle accepted risk
+- automation inventory tenant isolation status
+
+Acceptance criteria:
+
+- VERSION.md reflects the current product and technical state.
+- It no longer reads like pipeline support is only future/planned if that functionality now exists.

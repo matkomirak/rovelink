@@ -249,21 +249,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // DEMO-ONLY: returns hardcoded mock hosts — not org-scoped.
+  // Production use: replace with automation inventory or org-scoped NetBox VM data.
   app.get("/api/inventory/hosts", authMiddleware, async (req, res) => {
     try {
       const group = req.query.group as string | undefined;
       const hosts = await netboxService.getHosts(group);
-      res.json(hosts);
+      res.json({
+        _demo: true,
+        _note: "Demo data only — not org-scoped. Use automation inventory endpoints in production.",
+        hosts,
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch hosts" });
     }
   });
 
+  // DEMO-ONLY: preflight evaluated against mock hosts — not org-scoped.
   app.post("/api/inventory/preflight", authMiddleware, async (req, res) => {
     try {
       const { limitExpr } = req.body;
       const result = await netboxService.preflightCheck(limitExpr);
-      res.json(result);
+      res.json({
+        ...result,
+        _demo: true,
+        _note: "Demo data only — limit expression evaluated against mock hosts, not real org inventory.",
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Preflight check failed" });
     }
@@ -392,12 +403,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Reports routes
-  app.get("/api/reports/inventory-health", authMiddleware, async (req, res) => {
+  // Org-scoped inventory health — computed from real NetBox VMs imported for this org.
+  app.get("/api/reports/inventory-health", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const hosts = await netboxService.getHosts();
-      const total = hosts.length;
-      const withIP = hosts.filter(h => h.primary_ip4).length;
-      const withUser = hosts.filter(h => h.ansible_user).length;
+      const vms = await storage.getNetboxVms(req.orgId!);
+      const total = vms.length;
+      const withIP = vms.filter(v => !!v.ip).length;
+      const withUser = vms.filter(v => !!(v.customFields as Record<string, any>)?.ansible_user).length;
       const coverage = total > 0 ? Math.round((Math.min(withIP, withUser) / total) * 100) : 0;
 
       res.json({ total, withIP, withUser, coverage });
@@ -758,13 +770,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Token rotation — not yet implemented.
   app.post("/api/housekeeping/rotate-tokens", authMiddleware, requireRole("admin"), async (req, res) => {
-    try {
-      // Stub implementation
-      res.json({ message: "Token rotation checked (stub)", checkedAt: new Date().toISOString() });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to rotate tokens" });
-    }
+    res.status(501).json({
+      message: "Token rotation is not yet implemented.",
+      planned: "Per-org credential rotation for admin; platform-token rotation for platform_admin.",
+    });
   });
 
   // Stats routes

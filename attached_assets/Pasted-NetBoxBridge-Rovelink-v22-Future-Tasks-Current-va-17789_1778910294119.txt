@@ -1,0 +1,355 @@
+NetBoxBridge / Rovelink — v22 Future Tasks
+==========================================
+
+Current validation:
+- npm ci: PASS
+- npm run check: PASS
+- npm test: PASS, 110 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm run test:integration requires real DATABASE_URL
+
+Main status:
+The legacy route scoping work from v21 is mostly fixed.
+Remaining work is Drizzle audit risk, docs versioning, legacy mock inventory/report endpoints, global group-cache design, token-rotation stub, and real Git sync.
+
+
+Task 1 — Resolve or continue formally tracking Drizzle vulnerability
+--------------------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    drizzle-orm <0.45.2
+    GHSA-gpj5-g38j-94v9
+    Severity: high
+
+Option A — upgrade:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit zod
+
+or manually migrate to:
+
+    drizzle-orm >= 0.45.2
+    compatible drizzle-zod
+    compatible zod version
+
+Then run:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Option B — keep accepted risk:
+
+Keep ROVELINK-SEC-001 current with:
+
+    owner
+    acceptance date
+    review date
+    mitigation
+    upgrade plan
+
+Acceptance criteria:
+
+- Either npm audit --omit=dev has no high vulnerabilities,
+  OR ROVELINK-SEC-001 remains accurate and formally accepted.
+- Do not mark the product fully production-ready while this remains only temporarily accepted.
+
+
+Task 2 — Update docs/version labels to v22
+------------------------------------------
+
+Files:
+
+    PRODUCTION-HARDENING.md
+    VERSION.md
+
+Problem:
+
+Uploaded package is NetBoxBridge (22), but docs currently say v21.
+
+Required changes:
+
+In PRODUCTION-HARDENING.md:
+
+    This document accurately reflects the state of the codebase as of v22.
+
+In VERSION.md:
+
+Add a v22 section above v21.
+
+Suggested v22 notes:
+
+    ## v22 — Legacy Route Scope Hardening
+    - Provider stats are org-scoped.
+    - Provider run history is org-scoped.
+    - Inventory suggestions use org-scoped NetBox VM data.
+    - Global housekeeping routes are platform_admin-only.
+    - retry-last-failed is org-scoped.
+    - Default test suite remains 110 passing tests.
+    - Drizzle accepted risk remains.
+    - Legacy mock inventory/report endpoints still need production cleanup.
+    - Local Git/project sync remains demo-only.
+
+Acceptance criteria:
+
+- No stale "as of v21" text remains if this is intended as v22.
+- VERSION.md latest section matches current package state.
+- Known remaining gaps are listed clearly.
+
+
+Task 3 — Replace or deprecate legacy mock inventory endpoints
+-------------------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/services/netbox.ts
+
+Affected endpoints:
+
+    GET /api/inventory/hosts
+    POST /api/inventory/preflight
+    GET /api/reports/inventory-health
+
+Problem:
+
+These endpoints still use mock/global NetBox service methods:
+
+    netboxService.getHosts()
+    netboxService.preflightCheck()
+    netboxService.getHosts() for inventory health
+
+They do not use org-scoped automation inventory data or org-scoped NetBox VM data.
+
+Required decision:
+
+Option A — make them real and org-scoped:
+
+- GET /api/inventory/hosts should read from org-scoped NetBox VMs or selected automation inventory.
+- POST /api/inventory/preflight should evaluate the limit expression against org-scoped allowed inventory.
+- GET /api/reports/inventory-health should compute health from org-scoped automation inventory / NetBox VM data.
+
+Example:
+
+    const vms = await storage.getNetboxVms(req.orgId!)
+
+Option B — deprecate/remove them:
+
+- Return 410 or hide from UI if superseded by automation inventory endpoints.
+- Document that automation inventories are the supported production path.
+
+Option C — keep demo-only:
+
+- Clearly label responses as demo/mock.
+- Do not use them for production dashboard metrics.
+
+Acceptance criteria:
+
+- User-facing inventory/report endpoints do not show misleading mock data in production.
+- No org can see another org's inventory-derived metadata.
+- Dashboard/report metrics use real org-scoped data.
+- npm run check passes.
+- npm test passes.
+
+
+Task 4 — Decide whether group cache should remain global or become org-scoped
+----------------------------------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/storage.ts
+    shared/schema.ts if schema changes are needed
+
+Current state:
+
+    POST /api/housekeeping/rebuild-groups-cache
+
+is platform_admin-only, which is safe for a global cache.
+
+But the group cache itself is still global:
+
+    clearGroupCache()
+    addGroupCache(...)
+
+Required decision:
+
+Option A — keep global:
+
+- Keep endpoint platform_admin-only.
+- Document group cache as platform-wide.
+- Ensure normal org users never receive global cached group data unless that is intended.
+
+Option B — make org-scoped:
+
+- Add orgId to groupCache.
+- clearGroupCache(orgId)
+- addGroupCache(orgId, item)
+- list groups by orgId.
+- Admin can rebuild only own org cache.
+
+Acceptance criteria:
+
+- Group cache scope is documented.
+- Normal org admins cannot clear/rebuild global cache.
+- User-facing group suggestions are org-scoped.
+
+
+Task 5 — Implement or hide token rotation stub
+----------------------------------------------
+
+File:
+
+    server/routes.ts
+
+Current endpoint:
+
+    POST /api/housekeeping/rotate-tokens
+
+Current behavior:
+
+    returns "Token rotation checked (stub)"
+
+Required decision:
+
+Option A — implement real token rotation:
+
+- Define which tokens can be rotated.
+- Rotate only org-owned credentials for org admins.
+- Rotate global/platform tokens only for platform_admin.
+- Never return raw token values.
+- Add audit log entry.
+
+Option B — hide/deprecate:
+
+- Remove from UI.
+- Return 501 Not Implemented.
+- Document it as planned future work.
+
+Acceptance criteria:
+
+- Product does not imply token rotation is implemented if it is only a stub.
+- If implemented, token rotation is scoped correctly and secrets are never exposed.
+
+
+Task 6 — Add tests for legacy route scoping
+-------------------------------------------
+
+Suggested file:
+
+    tests/legacy-route-scope.test.ts
+
+Test cases:
+
+1. Provider stats:
+   - Org A only sees Org A provider stats.
+   - Org B providers do not appear.
+
+2. Provider runs:
+   - Org A cannot read Org B provider runs.
+
+3. Inventory suggestions:
+   - Org A suggestions do not include groups/tags from Org B VMs.
+
+4. Housekeeping:
+   - admin cannot call platform-global housekeeping routes.
+   - platform_admin can call platform-global housekeeping routes.
+   - retry-last-failed as admin only retries current org failures.
+
+Acceptance criteria:
+
+- Tests cover the v22 hardening behavior.
+- Tests are included in npm test if DB-free/mocked.
+- If DB-backed, include under npm run test:integration.
+- npm test passes.
+
+
+Task 7 — Improve integration-test ergonomics
+--------------------------------------------
+
+Current state:
+
+npm run test:integration fails clearly when DATABASE_URL is missing.
+
+Required improvement:
+
+Add a documented one-command path for local/Replit DB integration tests.
+
+Example script:
+
+    "test:integration:setup": "npm run db:push && npm run test:integration"
+
+Document usage:
+
+    DATABASE_URL=postgres://rovelink:changeme@localhost:5432/rovelink_test npm run test:integration:setup
+
+Acceptance criteria:
+
+- README or PRODUCTION-HARDENING.md explains exactly how to run integration tests.
+- Example DATABASE_URL is included.
+- It is clear that integration tests are not part of npm test.
+- Replit can run them with a provisioned database.
+
+
+Task 8 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current state:
+
+Project sync is simulated:
+
+    site.yml
+    deploy.yml
+    rollback.yml
+
+Option A — keep demo:
+
+- UI button continues to say Demo Sync.
+- API response continues to say simulated repository.
+- Docs say no real Git checkout is performed.
+- Local Ansible fails safely without project.checkoutPath.
+
+Option B — implement real Git sync:
+
+- Clone/pull into:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Save project.checkoutPath.
+- Discover .yml/.yaml playbooks from real checkout.
+- Use credential store for private Git credentials.
+- Never log credentials.
+- Use spawn argument arrays, not shell interpolation.
+- Continue using resolveSafePlaybookPath before execution.
+
+Acceptance criteria:
+
+- Either real Git sync works safely,
+  OR demo sync is clearly labeled everywhere and local production execution remains disabled.
+
+
+Task 9 — Optional cleanup: split remaining legacy routes
+--------------------------------------------------------
+
+Not a blocker, but useful.
+
+server/routes.ts still contains mixed domains.
+
+Recommended future split:
+
+    server/routes/inventory.ts
+    server/routes/housekeeping.ts
+    server/routes/provider-stats.ts
+    server/routes/providers.ts
+    server/routes/cmdbs.ts
+
+Acceptance criteria:
+
+- Behavior unchanged.
+- Auth/org/platform checks remain explicit.
+- npm run check passes.
+- npm test passes.

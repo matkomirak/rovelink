@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v21.
+This document accurately reflects the state of the codebase as of v22.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -36,6 +36,12 @@ npm audit --omit=dev
 | Inventory suggestions (`GET /api/inventory/suggest`) scoped to org | PASS — uses `getNetboxVms(orgId)` instead of unsafe method |
 | Housekeeping routes — global ops restricted to platform_admin | PASS — rebuild-groups-cache, ensure-netbox-schema, prune-stale now require platform_admin |
 | Housekeeping retry-last-failed — org-scoped | PASS — filters failed runs to org-owned providers via `getLastFailedSyncRuns(orgId)` |
+| `GET /api/reports/inventory-health` — org-scoped | PASS — replaced mock `getHosts()` with `storage.getNetboxVms(orgId)` |
+| `GET /api/inventory/hosts` — demo-labeled | PASS — response includes `_demo:true` and `_note`; not used for production metrics |
+| `POST /api/inventory/preflight` — demo-labeled | PASS — response includes `_demo:true` and `_note` |
+| `POST /api/housekeeping/rotate-tokens` — 501 Not Implemented | PASS — stub replaced with explicit 501; no misleading "Token rotation checked" |
+| Group cache — documented as global, platform_admin-only rebuild | PASS — documented; `clearGroupCache` / `addGroupCache` remain global |
+| Legacy route scope tests (housekeeping roles + demo labels) | PASS — `tests/legacy-route-scope.test.ts`, DB-free, included in `npm test` |
 | `npm audit --omit=dev` — no high/critical vulnerabilities | **OPEN** — 1 high (see ROVELINK-SEC-001 below) |
 | Auth middleware does not turn DB errors into 401 | PASS |
 | Auth/security tests use in-process supertest, no live DB needed | PASS |
@@ -72,6 +78,7 @@ npm audit --omit=dev
 |---|---|---|
 | `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation (110 tests) | No |
 | `npm run test:integration` | Cross-tenant isolation + automation inventory integration tests | Yes — DATABASE_URL required |
+| `npm run test:integration:setup` | Push schema then run all integration tests | Yes — DATABASE_URL required |
 | `npm run test:authz` | Auth/role tests only | No |
 | `npm run test:security` | Secret redaction/log tests only | No |
 | `npm run test:paths` | Safe playbook path tests only | No |
@@ -98,6 +105,10 @@ DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_dev npm run test:integ
 ```
 
 **From a clean schema** (push Drizzle schema first, then run):
+```bash
+DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_test npm run test:integration:setup
+```
+Or separately:
 ```bash
 DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_test npm run db:push
 DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_test npm run test:integration
@@ -187,7 +198,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
 
-### Gate Tenant Isolation (v21)
+### Gate Tenant Isolation (v22)
 - `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
 - All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
 - `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.
@@ -227,6 +238,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - Gate + hint isolation tests (`tests/gate-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
 - Automation inventory isolation tests (`tests/automation-inventory-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
 - Automation inventory integration tests (`tests/automation-inventory-integration.test.ts`) test real routes against real DB — included in `npm run test:integration`.
+- Legacy route scope tests (`tests/legacy-route-scope.test.ts`) verify housekeeping role enforcement and demo-label shapes — DB-free, included in `npm test`.
 - All integration test files guard at module load — clear error if DATABASE_URL is absent.
 - `server/db.ts` defers the DATABASE_URL check to first use, so imports do not throw in test environments.
 

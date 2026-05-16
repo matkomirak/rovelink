@@ -2,6 +2,49 @@
 
 ---
 
+## v22 — Legacy Mock Endpoint Cleanup + Housekeeping Role Hardening Tests
+**Date:** 2026-05-16
+**Status:** Pre-production MVP
+
+### Endpoint Fixes
+- **`GET /api/reports/inventory-health` made org-scoped** — replaced the call to
+  `netboxService.getHosts()` (global mock data) with `storage.getNetboxVms(req.orgId!)`.
+  Health metrics (total, withIP, withUser, coverage) are now computed from real,
+  org-scoped NetBox VM imports.
+- **`GET /api/inventory/hosts` labeled as demo** — response now includes
+  `_demo: true` and `_note` clarifying this is mock data not suitable for production
+  metrics. The endpoint itself remains for backwards-compat UI use.
+- **`POST /api/inventory/preflight` labeled as demo** — same `_demo: true` / `_note`
+  treatment; preflight is still evaluated against hardcoded mock hosts.
+- **`POST /api/housekeeping/rotate-tokens` returns 501** — replaced the misleading
+  "Token rotation checked (stub)" response with a proper `501 Not Implemented`,
+  including a `planned` field describing the intended future behavior.
+
+### Group Cache (T4 decision)
+- Group cache remains **global**. The rebuild endpoint is already `platform_admin`-only.
+  Normal org admins cannot clear or rebuild the cache. Documented in PRODUCTION-HARDENING.md.
+
+### Test Coverage
+- **`tests/legacy-route-scope.test.ts`** added — 16 DB-free tests covering:
+  - Housekeeping role enforcement: admin → 403 on rebuild-groups-cache, ensure-netbox-schema, prune-stale
+  - platform_admin passes role check on all three global housekeeping routes
+  - retry-last-failed: viewer → 403, admin → passes
+  - rotate-tokens: admin/platform_admin → 501, viewer → 403
+  - `/api/inventory/hosts` and `/api/inventory/preflight` return `_demo:true`
+  - `/api/stats/providers` and `/api/providers/:id/runs` require auth (401 without token)
+- File added to `npm test` — DB-free suite now covers 126 tests.
+
+### Integration Test Ergonomics
+- `npm run test:integration:setup` added to `package.json` — pushes Drizzle schema then
+  runs all integration tests in one command.
+
+### Unchanged from v21
+- `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
+  (ROVELINK-SEC-001). Review date 2026-06-15.
+- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+
+---
+
 ## v21 — Stats, Suggestions, and Housekeeping Route Org-Scoping
 **Date:** 2026-05-16
 **Status:** Pre-production MVP

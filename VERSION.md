@@ -2,6 +2,50 @@
 
 ---
 
+## v21 — Stats, Suggestions, and Housekeeping Route Org-Scoping
+**Date:** 2026-05-16
+**Status:** Pre-production MVP
+
+### Security & Isolation
+- **Provider stats org-scoped** — `GET /api/stats/providers` now calls
+  `storage.getProviderStats(orgId)`. The implementation uses `getProviders(orgId)` (never
+  `getProvidersUnsafe`) and passes `orgId` into the inner-joined `getProviderRuns` call.
+  Org A can no longer see Org B provider stats.
+- **Provider runs org-scoped** — `GET /api/providers/:id/runs` now verifies provider
+  ownership (`getProvider(id, orgId) → 404 if not found`) and joins `syncRuns` against
+  `providerAccounts` on `orgId`. Cross-org run leakage eliminated at both route and storage
+  layers.
+- **Inventory suggestions org-scoped** — `GET /api/inventory/suggest` now passes `orgId`
+  to `getSuggestions`. The service uses `storage.getNetboxVms(orgId)` instead of the unsafe
+  variant. Org B VM metadata (tags, OS, roles, patch waves) will not appear in Org A
+  autocomplete.
+- **Housekeeping route scoping hardened:**
+  - `POST /api/housekeeping/rebuild-groups-cache` → `platform_admin` only (global cache,
+    all tenants' VMs).
+  - `POST /api/housekeeping/ensure-netbox-schema` → `platform_admin` only (modifies shared
+    NetBox instance via env-var credentials).
+  - `POST /api/housekeeping/prune-stale` → `platform_admin` only (deletes `externalObjects`
+    rows globally).
+  - `POST /api/housekeeping/retry-last-failed` → remains `admin`, now org-scoped via
+    `getLastFailedSyncRuns(orgId)` which filters to the calling org's provider IDs.
+  - `POST /api/housekeeping/rotate-tokens` → remains `admin` (stub, no global state).
+
+### Storage Interface Changes
+- `getProviderRuns(providerAccountId, limit, orgId)` — added `orgId` (required).
+- `getLastFailedSyncRuns(orgId)` — added `orgId` (required).
+- `getProviderStats(orgId)` — added `orgId` (required).
+- `getSuggestions(query, storage?, orgId?)` — added optional `orgId`; uses safe path when
+  present.
+
+### Unchanged from v20
+- `npm test` (DB-free): 110 tests, 0 failures.
+- `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
+  (ROVELINK-SEC-001). Review date 2026-06-15.
+- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- Integration test ergonomics documented in `PRODUCTION-HARDENING.md`.
+
+---
+
 ## v20 — PATCH Linked-Source Validation + Create Consistency
 **Date:** 2026-05-15
 **Status:** Pre-production MVP

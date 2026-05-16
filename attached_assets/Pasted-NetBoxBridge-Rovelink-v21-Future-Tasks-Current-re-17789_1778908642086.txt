@@ -1,0 +1,476 @@
+NetBoxBridge / Rovelink — v21 Future Tasks
+==========================================
+
+Current review results:
+- npm run check: PASS
+- npm test: PASS, 110 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm run test:integration requires real DATABASE_URL and fails clearly when missing
+- npm ci timed out in the review sandbox but later commands passed; verify clean install in Replit
+
+Main status:
+v21 fixes the v20 PATCH linked-source validation and create-consistency issues.
+Remaining work is mostly legacy/global route tenant-safety, Drizzle audit risk, docs versioning, integration-test ergonomics, and real Git sync.
+
+
+Task 1 — Scope provider stats by organization
+---------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/storage.ts
+
+Problem:
+
+GET /api/stats/providers currently calls:
+
+    storage.getProviderStats()
+
+The storage method uses:
+
+    getProvidersUnsafe()
+
+This returns provider stats across all organizations.
+
+Required fix:
+
+Change route:
+
+    app.get("/api/stats/providers", authMiddleware, async (req: AuthRequest, res) => {
+      const stats = await storage.getProviderStats(req.orgId!);
+      res.json(stats);
+    });
+
+Change storage interface:
+
+    getProviderStats(orgId: string): Promise<any[]>
+
+Change implementation:
+
+    async getProviderStats(orgId: string): Promise<any[]> {
+      const providers = await this.getProviders(orgId);
+      ...
+    }
+
+Also make provider runs inside stats org-safe:
+
+    const lastRuns = await this.getProviderRuns(provider.id, 1, orgId);
+
+Acceptance criteria:
+
+- Org A only sees provider stats for Org A.
+- Org B providers never appear in Org A stats.
+- Add tests.
+- npm test passes.
+- npm run check passes.
+
+
+Task 2 — Scope provider runs route by organization
+--------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/storage.ts
+
+Problem:
+
+GET /api/providers/:id/runs calls:
+
+    storage.getProviderRuns(req.params.id, limit)
+
+without verifying provider ownership.
+
+Required fix:
+
+Route should first verify provider belongs to req.orgId:
+
+    const provider = await storage.getProvider(req.params.id, req.orgId!);
+    if (!provider) {
+      return res.status(404).json({ message: "Provider not found" });
+    }
+
+Then fetch org-scoped runs:
+
+    const runs = await storage.getProviderRuns(req.params.id, limit, req.orgId!);
+
+Storage method should be:
+
+    getProviderRuns(providerAccountId: string, limit: number, orgId: string)
+
+Implementation should either:
+- join syncRuns to providerAccounts and filter providerAccounts.orgId, or
+- first verify provider with getProvider(providerAccountId, orgId).
+
+Acceptance criteria:
+
+- Org A cannot read sync runs for Org B provider ID.
+- Existing provider run list still works for own org.
+- Add tests.
+- npm test passes.
+- npm run check passes.
+
+
+Task 3 — Make inventory suggestions org-scoped
+----------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/services/netbox.ts
+    server/storage.ts
+
+Problem:
+
+GET /api/inventory/suggest calls:
+
+    netboxService.getSuggestions(query, storage)
+
+The service uses:
+
+    storage.getNetboxVmsUnsafe()
+
+This can leak group names derived from another organization's imported VMs.
+
+Required fix:
+
+Change route:
+
+    const suggestions = await netboxService.getSuggestions(query, storage, req.orgId!);
+
+Change service signature:
+
+    getSuggestions(query: string, storage?: any, orgId?: string)
+
+When orgId is present, use:
+
+    storage.getNetboxVms(orgId)
+
+Do not use getNetboxVmsUnsafe() for user-facing routes.
+
+Acceptance criteria:
+
+- Org A suggestions are built only from Org A VMs.
+- Org B VM metadata does not appear in Org A suggestions.
+- Add tests for group suggestion isolation.
+- npm test passes.
+- npm run check passes.
+
+
+Task 4 — Decide and fix group-cache housekeeping scope
+------------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/services/netbox.ts
+    server/storage.ts
+    shared/schema.ts, if schema changes are needed
+
+Problem:
+
+POST /api/housekeeping/rebuild-groups-cache calls:
+
+    netboxService.listAllGroups(storage)
+
+The service uses:
+
+    storage.getNetboxVmsUnsafe()
+
+Then it clears and rebuilds the global group cache:
+
+    storage.clearGroupCache()
+    storage.addGroupCache(...)
+
+This is global but only requires admin.
+
+Required decision:
+
+Choose one model.
+
+Option A — org-scoped group cache:
+
+- Add orgId to groupCache table.
+- clearGroupCache(orgId)
+- addGroupCache(orgId, item)
+- listAllGroups(storage, orgId)
+- Admin can rebuild only own org's cache.
+
+Option B — global platform cache:
+
+- Keep it global.
+- Change route permission from admin to platform_admin.
+- Clearly document it as a global platform operation.
+
+Recommended:
+
+Option A if group cache affects user-facing org data.
+Option B if it is truly platform-wide.
+
+Acceptance criteria:
+
+- Normal org admin cannot clear/rebuild global cross-tenant cache.
+- Either group cache is org-scoped, or endpoint is platform_admin only.
+- npm test passes.
+- npm run check passes.
+
+
+Task 5 — Scope or restrict retry-last-failed housekeeping
+---------------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/storage.ts
+
+Problem:
+
+POST /api/housekeeping/retry-last-failed calls:
+
+    storage.getLastFailedSyncRuns()
+
+This returns failed sync runs globally across all providers.
+
+The route currently requires admin, so an org admin can potentially retry syncs for other orgs.
+
+Required fix:
+
+Choose one:
+
+Option A — org-scoped:
+
+    storage.getLastFailedSyncRuns(req.orgId!)
+
+Only retry failed runs for providers belonging to the current org.
+
+Option B — platform-only:
+
+    requireRole("platform_admin")
+
+and document it as a global operation.
+
+Recommended:
+
+Option A for normal org admin behavior.
+
+Acceptance criteria:
+
+- Org admin only retries failed syncs for their own org.
+- Platform admin behavior is explicit if global retry remains.
+- Add tests.
+- npm test passes.
+- npm run check passes.
+
+
+Task 6 — Review all housekeeping routes for org/platform scope
+--------------------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/storage.ts
+
+Review these endpoints:
+
+    POST /api/housekeeping/rebuild-groups-cache
+    POST /api/housekeeping/ensure-netbox-schema
+    POST /api/housekeeping/prune-stale
+    POST /api/housekeeping/retry-last-failed
+    POST /api/housekeeping/rotate-tokens
+
+For each endpoint, decide:
+
+    Is this tenant-scoped?
+    Or is this a global platform operation?
+
+Rules:
+
+- Tenant-scoped endpoints may be admin.
+- Global endpoints must be platform_admin.
+- No normal org admin should mutate global cross-tenant state.
+
+Acceptance criteria:
+
+- Every housekeeping route has documented scope.
+- Global routes require platform_admin.
+- Tenant routes use req.orgId.
+- npm run check passes.
+- npm test passes.
+
+
+Task 7 — Resolve or continue formally tracking Drizzle vulnerability
+--------------------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    drizzle-orm <0.45.2
+    GHSA-gpj5-g38j-94v9
+    Severity: high
+
+Current state:
+
+The risk is formally documented as ROVELINK-SEC-001.
+
+Option A — upgrade:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit zod
+
+or manually migrate to:
+
+    drizzle-orm >= 0.45.2
+    compatible drizzle-zod
+    compatible zod version
+
+Then run:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Option B — keep accepted risk:
+
+Keep ROVELINK-SEC-001 current with:
+
+    owner
+    acceptance date
+    review date
+    mitigation
+    upgrade plan
+
+Acceptance criteria:
+
+- Either npm audit --omit=dev has no high vulnerabilities,
+  OR ROVELINK-SEC-001 remains accurate and formally accepted.
+- Do not call the project fully production-ready while this risk is only temporarily accepted.
+
+
+Task 8 — Update docs/version labels if this package is v21
+----------------------------------------------------------
+
+Files:
+
+    PRODUCTION-HARDENING.md
+    VERSION.md
+
+Problem:
+
+Uploaded package is NetBoxBridge (21), but docs currently describe the state as v20.
+
+Required decision:
+
+If the internal product version is now v21, update docs.
+
+In PRODUCTION-HARDENING.md:
+
+    This document accurately reflects the state of the codebase as of v21.
+
+In VERSION.md:
+
+Add a v21 section above v20.
+
+Suggested v21 notes:
+
+    ## v21 — Linked Inventory Consistency + PATCH Validation Finalization
+    - POST /api/inventories returns 201 with sync status when initial NetBox sync fails.
+    - PATCH linked-source validation is enforced.
+    - Integration tests cover PATCH linked-source behavior.
+    - Remaining Drizzle accepted risk unchanged.
+    - Legacy stats/suggestion/housekeeping route scoping pending.
+
+Acceptance criteria:
+
+- Docs match the package/version naming.
+- Known remaining issues are listed clearly.
+- No stale v20 label remains if this is intended as v21.
+
+
+Task 9 — Improve integration-test ergonomics
+--------------------------------------------
+
+Current state:
+
+npm run test:integration fails clearly when DATABASE_URL is missing.
+
+Required improvement:
+
+Add a documented one-command path for local/Replit DB integration tests.
+
+Example script:
+
+    "test:integration:setup": "npm run db:push && npm run test:integration"
+
+Document usage:
+
+    DATABASE_URL=postgres://rovelink:changeme@localhost:5432/rovelink_test npm run test:integration:setup
+
+Acceptance criteria:
+
+- README or PRODUCTION-HARDENING.md explains exactly how to run integration tests.
+- Example DATABASE_URL is included.
+- It is clear that integration tests are not part of npm test.
+- Replit can run them with a provisioned database.
+
+
+Task 10 — Keep local Ansible demo-labeled or implement real Git sync
+--------------------------------------------------------------------
+
+Current state:
+
+Project sync is simulated:
+
+    site.yml
+    deploy.yml
+    rollback.yml
+
+Option A — keep demo:
+
+- UI button continues to say Demo Sync.
+- API response continues to say simulated repository.
+- Docs say no real Git checkout is performed.
+- Local Ansible fails safely without project.checkoutPath.
+
+Option B — implement real Git sync:
+
+- Clone/pull into:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Save project.checkoutPath.
+- Discover .yml/.yaml playbooks from real checkout.
+- Use credential store for private Git credentials.
+- Never log credentials.
+- Use spawn argument arrays, not shell interpolation.
+- Continue using resolveSafePlaybookPath before execution.
+
+Acceptance criteria:
+
+- Either real Git sync works safely,
+  OR demo sync is clearly labeled everywhere and local production execution remains disabled.
+
+
+Task 11 — Optional cleanup: split remaining legacy routes
+---------------------------------------------------------
+
+Not a blocker, but useful.
+
+server/routes.ts still contains legacy inventory, housekeeping, stats, providers, CMDBs, projects, credentials, templates, and runs.
+
+Recommended future split:
+
+    server/routes/inventory.ts
+    server/routes/housekeeping.ts
+    server/routes/provider-stats.ts
+    server/routes/providers.ts
+    server/routes/cmdbs.ts
+
+Acceptance criteria:
+
+- Behavior unchanged.
+- Auth/org/platform checks remain explicit.
+- npm run check passes.
+- npm test passes.

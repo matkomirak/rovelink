@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v20.
+This document accurately reflects the state of the codebase as of v21.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -31,6 +31,11 @@ npm audit --omit=dev
 | PATCH linked-source validation — org-scoped CMDB check | PASS — effective post-update sourceRef validated against orgId before UPDATE |
 | CREATE linked inventory — API/DB consistency on sync failure | PASS — external NetBox errors caught, row kept, 201 returned with `sync.status:"failed"` |
 | Automation inventory integration tests (real routes + DB) | Available under `npm run test:integration` — require DATABASE_URL |
+| Provider stats (`GET /api/stats/providers`) scoped to org | PASS — uses `getProviders(orgId)` + inner-join on `getProviderRuns` |
+| Provider runs (`GET /api/providers/:id/runs`) scoped to org | PASS — ownership check + orgId inner-join on syncRuns |
+| Inventory suggestions (`GET /api/inventory/suggest`) scoped to org | PASS — uses `getNetboxVms(orgId)` instead of unsafe method |
+| Housekeeping routes — global ops restricted to platform_admin | PASS — rebuild-groups-cache, ensure-netbox-schema, prune-stale now require platform_admin |
+| Housekeeping retry-last-failed — org-scoped | PASS — filters failed runs to org-owned providers via `getLastFailedSyncRuns(orgId)` |
 | `npm audit --omit=dev` — no high/critical vulnerabilities | **OPEN** — 1 high (see ROVELINK-SEC-001 below) |
 | Auth middleware does not turn DB errors into 401 | PASS |
 | Auth/security tests use in-process supertest, no live DB needed | PASS |
@@ -182,7 +187,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
 
-### Gate Tenant Isolation (v19)
+### Gate Tenant Isolation (v21)
 - `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
 - All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
 - `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.

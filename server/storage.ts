@@ -82,14 +82,14 @@ export interface IStorage {
   createSyncRun(run: InsertSyncRun): Promise<SyncRun>;
   getSyncRun(id: string, orgId: string): Promise<SyncRun | undefined>;
   updateSyncRun(id: string, data: Partial<SyncRun>): Promise<SyncRun | undefined>;
-  getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]>;
-  getLastFailedSyncRuns(): Promise<SyncRun[]>;
+  getProviderRuns(providerAccountId: string, limit: number, orgId: string): Promise<SyncRun[]>;
+  getLastFailedSyncRuns(orgId: string): Promise<SyncRun[]>;
 
   // Housekeeping operations
   clearGroupCache(): Promise<void>;
   addGroupCache(item: { kind: string; name: string }): Promise<GroupCache>;
   pruneStaleObjects(days: number): Promise<number>;
-  getProviderStats(): Promise<any[]>;
+  getProviderStats(orgId: string): Promise<any[]>;
 
   // NetBox VM operations — orgId REQUIRED on org-scoped read
   getNetboxVms(orgId: string): Promise<NetboxVm[]>;
@@ -404,24 +404,45 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
-  async getProviderRuns(providerAccountId: string, limit: number): Promise<SyncRun[]> {
+  async getProviderRuns(providerAccountId: string, limit: number, orgId: string): Promise<SyncRun[]> {
+    // Inner join against providerAccounts on orgId prevents reading runs for
+    // a provider that belongs to another org even if the caller supplies a
+    // valid-looking providerAccountId from a different tenant.
     return await db
-      .select()
+      .select({ sync_run: syncRuns })
       .from(syncRuns)
+      .innerJoin(
+        providerAccounts,
+        and(
+          eq(syncRuns.providerAccountId, providerAccounts.id),
+          eq(providerAccounts.orgId, orgId)
+        )
+      )
       .where(eq(syncRuns.providerAccountId, providerAccountId))
       .orderBy(desc(syncRuns.createdAt))
-      .limit(limit);
+      .limit(limit)
+      .then(rows => rows.map(r => r.sync_run));
   }
 
-  async getLastFailedSyncRuns(): Promise<SyncRun[]> {
-    // Get the most recent failed run for each provider
+  async getLastFailedSyncRuns(orgId: string): Promise<SyncRun[]> {
+    // Scope to this org by filtering on provider IDs that belong to orgId.
+    const orgProviders = await this.getProviders(orgId);
+    if (orgProviders.length === 0) return [];
+    const providerIds = orgProviders.map(p => p.id);
+
+    // Get the most recent failed run for each org-owned provider
     const subquery = db
       .select({
         providerAccountId: syncRuns.providerAccountId,
         maxCreatedAt: sql`MAX(${syncRuns.createdAt})`.as('max_created_at'),
       })
       .from(syncRuns)
-      .where(eq(syncRuns.status, 'failed'))
+      .where(
+        and(
+          eq(syncRuns.status, 'failed'),
+          inArray(syncRuns.providerAccountId, providerIds)
+        )
+      )
       .groupBy(syncRuns.providerAccountId)
       .as('latest_failed');
 
@@ -462,13 +483,14 @@ export class DatabaseStorage implements IStorage {
     return result.rowCount || 0;
   }
 
-  async getProviderStats(): Promise<any[]> {
-    const providers = await this.getProvidersUnsafe();
+  async getProviderStats(orgId: string): Promise<any[]> {
+    // Scoped to org — never leaks other tenants' provider stats.
+    const providers = await this.getProviders(orgId);
     const stats = [];
 
     for (const provider of providers) {
-      // Get last sync run
-      const lastRuns = await this.getProviderRuns(provider.id, 1);
+      // Get last sync run — pass orgId so the inner join enforces org ownership
+      const lastRuns = await this.getProviderRuns(provider.id, 1, orgId);
       const lastRun = lastRuns[0];
 
       // Calculate next run time (simplified - would use cron parser in real implementation)

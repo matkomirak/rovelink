@@ -269,10 +269,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/inventory/suggest", authMiddleware, async (req, res) => {
+  app.get("/api/inventory/suggest", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const query = req.query.q as string || "";
-      const suggestions = await netboxService.getSuggestions(query, storage);
+      const suggestions = await netboxService.getSuggestions(query, storage, req.orgId!);
       res.json(suggestions);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get suggestions" });
@@ -540,10 +540,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/providers/:id/runs", authMiddleware, async (req, res) => {
+  app.get("/api/providers/:id/runs", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
-      const runs = await storage.getProviderRuns(req.params.id, limit);
+      // Verify the provider belongs to the requesting org before returning runs
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+      const runs = await storage.getProviderRuns(req.params.id, limit, req.orgId!);
       res.json(runs);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get provider runs" });
@@ -674,7 +679,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Housekeeping routes
-  app.post("/api/housekeeping/rebuild-groups-cache", authMiddleware, requireRole("admin"), async (req, res) => {
+  // platform_admin only — this rebuilds the GLOBAL group cache from ALL orgs' VMs.
+  // A normal org admin must not trigger a global cache rebuild that affects other tenants.
+  app.post("/api/housekeeping/rebuild-groups-cache", authMiddleware, requireRole("platform_admin"), async (req, res) => {
     try {
       const { netboxService } = await import("./services/netbox");
       const groups = await netboxService.listAllGroups(storage);
@@ -690,7 +697,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/housekeeping/ensure-netbox-schema", authMiddleware, requireRole("admin"), async (req, res) => {
+  // platform_admin only — writes custom fields to the shared NetBox instance
+  // configured via the global NETBOX_URL / NETBOX_TOKEN env vars. This is a
+  // platform-wide schema change that affects all tenants sharing the NetBox.
+  app.post("/api/housekeeping/ensure-netbox-schema", authMiddleware, requireRole("platform_admin"), async (req, res) => {
     try {
       const netboxUrl = process.env.NETBOX_URL || '';
       const netboxToken = process.env.NETBOX_TOKEN || '';
@@ -710,7 +720,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/housekeeping/prune-stale", authMiddleware, requireRole("admin"), async (req, res) => {
+  // platform_admin only — deletes externalObjects rows globally across all orgs.
+  app.post("/api/housekeeping/prune-stale", authMiddleware, requireRole("platform_admin"), async (req, res) => {
     try {
       const days = parseInt(req.body.days as string) || 30;
       const count = await storage.pruneStaleObjects(days);
@@ -721,9 +732,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/housekeeping/retry-last-failed", authMiddleware, requireRole("admin"), async (req, res) => {
+  // admin — org-scoped: only retries failed syncs for providers belonging to req.orgId.
+  app.post("/api/housekeeping/retry-last-failed", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const failedRuns = await storage.getLastFailedSyncRuns();
+      const failedRuns = await storage.getLastFailedSyncRuns(req.orgId!);
       const retried: string[] = [];
       
       const { SyncWorker } = await import("./services/syncWorker");
@@ -756,9 +768,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Stats routes
-  app.get("/api/stats/providers", authMiddleware, async (req, res) => {
+  app.get("/api/stats/providers", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const stats = await storage.getProviderStats();
+      const stats = await storage.getProviderStats(req.orgId!);
       res.json(stats);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get provider stats" });

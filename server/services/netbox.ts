@@ -162,7 +162,7 @@ export class NetBoxService {
     }
   }
 
-  async getSuggestions(query: string, storage?: any): Promise<string[]> {
+  async getSuggestions(query: string, storage?: any, orgId?: string): Promise<string[]> {
     try {
       let allSuggestions: string[] = [
         // Traditional groups
@@ -175,10 +175,14 @@ export class NetBoxService {
         "monitoring",
       ];
       
-      // Add keyed groups from imported VMs if storage is provided
+      // Add keyed groups from imported VMs if storage is provided.
+      // Always use the org-scoped method when an orgId is supplied so that
+      // one org's VM metadata never leaks into another org's suggestions.
       if (storage) {
         try {
-          const vms = await storage.getNetboxVmsUnsafe();
+          const vms = orgId
+            ? await storage.getNetboxVms(orgId)
+            : await storage.getNetboxVmsUnsafe();
           const keyedGroups = new Set<string>();
           
           vms.forEach((vm: any) => {

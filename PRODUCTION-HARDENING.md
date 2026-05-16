@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v23.
+This document accurately reflects the state of the codebase as of v24.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -48,6 +48,8 @@ npm audit --omit=dev
 | Open signup blocked in production (`isProduction` guard) | PASS — `POST /api/auth/signup` returns 403 `SIGNUP_DISABLED` in production |
 | `POST /api/users` — platform_admin-only user creation with explicit orgId | PASS — role-checked, only platform_admin can create users with assigned orgId |
 | Org-context integration tests (DB-free, in `npm test`) | PASS — `tests/org-context.test.ts` covers all six categories above |
+| `POST /api/users` — orgId required for viewer/operator/admin | PASS — 400 returned if tenant-role user created without orgId; platform_admin exempt |
+| `GET /api/auth/me` — returns orgId | PASS — response includes `orgId` field; null for users without org context |
 | `npm audit --omit=dev` — no high/critical vulnerabilities | **OPEN** — 1 high (see ROVELINK-SEC-001 below) |
 | Auth middleware does not turn DB errors into 401 | PASS |
 | Auth/security tests use in-process supertest, no live DB needed | PASS |
@@ -82,10 +84,10 @@ npm audit --omit=dev
 
 | Command | What it runs | Requires DB |
 |---|---|---|
-| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context (149 tests) | No |
+| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context (156 tests) | No |
 | `npm run test:integration` | Cross-tenant isolation + automation inventory integration tests | Yes — DATABASE_URL required |
 | `npm run test:integration:setup` | Push schema then run all integration tests | Yes — DATABASE_URL required |
-| `npm run test:org-context` _(via npm test)_ | `requireOrgContext` + onboarding route tests | No |
+| `npm run test:org-context` | `requireOrgContext` + onboarding route tests | No |
 | `npm run test:authz` | Auth/role tests only | No |
 | `npm run test:security` | Secret redaction/log tests only | No |
 | `npm run test:paths` | Safe playbook path tests only | No |
@@ -205,7 +207,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
 
-### Gate Tenant Isolation (v23)
+### Gate Tenant Isolation (v24)
 - `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
 - All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
 - `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.
@@ -240,7 +242,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - API responses strip encrypted values (`enc:v1:...` never returned to the client).
 
 ### Testing
-- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation, automation inventory isolation, legacy-route-scope, org-context — 149 tests).
+- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation, automation inventory isolation, legacy-route-scope, org-context — 156 tests).
 - `npm run test:integration` requires `DATABASE_URL` pointing at a real PostgreSQL instance. Covers cross-tenant isolation (24 tests) + automation inventory integration tests (real routes + real DB). Last known status in configured DB environment: PASS.
 - Gate + hint isolation tests (`tests/gate-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
 - Automation inventory isolation tests (`tests/automation-inventory-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.

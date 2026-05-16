@@ -270,7 +270,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!req.user) {
       return res.status(401).json({ message: "Not authenticated" });
     }
-    res.json({ id: req.user.id, username: req.user.username, role: req.user.role });
+    res.json({ id: req.user.id, username: req.user.username, role: req.user.role, orgId: req.user.orgId ?? null });
   });
 
   // platform_admin-only: create a user with explicit orgId and role assignment.
@@ -282,8 +282,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "username and password are required" });
       }
       const allowedRoles = ["viewer", "operator", "admin", "platform_admin"];
-      if (role && !allowedRoles.includes(role)) {
+      const effectiveRole = role ?? "viewer";
+      if (!allowedRoles.includes(effectiveRole)) {
         return res.status(400).json({ message: `role must be one of: ${allowedRoles.join(", ")}` });
+      }
+      // Tenant roles require an orgId — platform_admin operates globally without one.
+      if (effectiveRole !== "platform_admin" && !orgId) {
+        return res.status(400).json({ message: "orgId is required for viewer, operator, and admin users" });
       }
       const existing = await storage.getUserByUsername(username);
       if (existing) {
@@ -293,7 +298,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.createUser({
         username,
         password: hashedPassword,
-        role: role ?? "viewer",
+        role: effectiveRole,
         orgId: orgId ?? null,
       });
       res.status(201).json({
@@ -303,7 +308,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         orgId: user.orgId,
       });
     } catch (error: any) {
-      res.status(400).json({ message: error.message || "Failed to create user" });
+      // All explicit validation paths return 400 above; reaching here means an unexpected
+      // server-side error (DB connection, bcrypt failure, etc.) which is 500.
+      res.status(500).json({ message: error.message || "Failed to create user" });
     }
   });
 

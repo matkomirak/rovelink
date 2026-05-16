@@ -1,0 +1,180 @@
+NetBoxBridge / Rovelink — v24 Remaining Tasks
+=============================================
+
+Current validation:
+- npm ci: PASS
+- npm run check: PASS
+- npm test: PASS, 149 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm run test:integration requires real DATABASE_URL
+
+Task 1 — Resolve or formally accept Drizzle vulnerability for production
+------------------------------------------------------------------------
+
+Problem:
+npm audit --omit=dev still reports:
+
+  drizzle-orm <0.45.2
+  GHSA-gpj5-g38j-94v9
+  Severity: high
+
+Option A:
+Upgrade drizzle-orm to >=0.45.2 and update compatible drizzle-zod/zod versions.
+
+Then run:
+
+  npm run check
+  npm test
+  npm run build
+  npm audit --omit=dev
+
+Option B:
+Keep ROVELINK-SEC-001 as a formal accepted production risk with:
+- owner
+- acceptance date
+- review date
+- mitigation
+- upgrade plan
+
+Acceptance:
+- Either audit has no high vulnerabilities,
+  OR the high vulnerability is formally accepted by the project owner/security owner.
+- Do not mark project fully production-ready while this is only temporarily accepted.
+
+
+Task 2 — Require orgId when platform_admin creates tenant users
+---------------------------------------------------------------
+
+File:
+  server/routes.ts
+
+Endpoint:
+  POST /api/users
+
+Problem:
+platform_admin can create viewer/operator/admin users with orgId null.
+
+Required behavior:
+- platform_admin may have orgId null.
+- viewer/operator/admin must have orgId.
+- Optional: validate that orgId exists before user creation.
+
+Suggested validation:
+
+  const effectiveRole = role ?? "viewer";
+
+  if (effectiveRole !== "platform_admin" && !orgId) {
+    return res.status(400).json({
+      message: "orgId is required for viewer, operator, and admin users"
+    });
+  }
+
+Acceptance:
+- Creating viewer/operator/admin without orgId returns 400.
+- Creating platform_admin without orgId is allowed.
+- Creating viewer/operator/admin with orgId works.
+- Tests added.
+- npm test passes.
+
+
+Task 3 — Return orgId from /api/auth/me
+---------------------------------------
+
+File:
+  server/routes.ts
+
+Current response omits orgId.
+
+Update response to include:
+
+  {
+    id,
+    username,
+    role,
+    orgId
+  }
+
+Acceptance:
+- /api/auth/me returns orgId.
+- Existing auth tests still pass.
+- Frontend can identify current tenant context.
+
+
+Task 4 — Update docs/version labels to v24
+------------------------------------------
+
+Files:
+  PRODUCTION-HARDENING.md
+  VERSION.md
+
+Required changes:
+- Change "as of v23" to "as of v24" if this package is intended as v24.
+- Add a v24 section to VERSION.md.
+- Mention:
+  - requireOrgContext added
+  - open signup blocked in production
+  - platform_admin user creation added
+  - /api/inventory/groups demo-labeled
+  - DB-free test suite now has 149 passing tests
+  - Drizzle accepted risk remains
+
+Also fix this doc mismatch:
+- PRODUCTION-HARDENING.md references npm run test:org-context
+- package.json does not define test:org-context
+
+Either add:
+
+  "test:org-context": "NODE_ENV=test tsx --test tests/org-context.test.ts"
+
+or remove/change the doc row.
+
+Acceptance:
+- Docs match actual package state.
+- Test count is accurate.
+- No stale v23 wording remains if this is v24.
+
+
+Task 5 — Improve integration-test ergonomics
+--------------------------------------------
+
+Current state:
+npm run test:integration requires DATABASE_URL and fails clearly when missing.
+
+Required improvement:
+Document exact usage in README or PRODUCTION-HARDENING.md.
+
+Example:
+
+  DATABASE_URL=postgres://rovelink:changeme@localhost:5432/rovelink_test npm run test:integration:setup
+
+Acceptance:
+- Documentation explains how to run integration tests.
+- It is clear integration tests are not part of npm test.
+- Replit can run them with a provisioned database.
+
+
+Task 6 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current state:
+Project sync is simulated.
+
+Option A — keep demo:
+- UI button continues to say Demo Sync.
+- API response continues to say simulated repository.
+- Docs say no real Git checkout is performed.
+- Local Ansible fails safely without project.checkoutPath.
+
+Option B — implement real Git sync:
+- Clone/pull into runtime/projects/<orgId>/<projectId>/
+- Save project.checkoutPath.
+- Discover .yml/.yaml playbooks from real checkout.
+- Use credential store for private Git credentials.
+- Never log credentials.
+- Use spawn argument arrays, not shell interpolation.
+- Continue using resolveSafePlaybookPath before execution.
+
+Acceptance:
+- Either real Git sync works safely,
+  OR demo sync is clearly labeled everywhere and local production execution remains disabled.

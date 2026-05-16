@@ -2,6 +2,44 @@
 
 ---
 
+## v24 — User Creation Validation + /api/auth/me orgId
+**Date:** 2026-05-16
+**Status:** Pre-production MVP
+
+### Endpoint Changes
+- **`POST /api/users` — orgId enforced for tenant roles** — viewer, operator, and admin
+  users now require `orgId` at creation time. Sending a tenant role without `orgId` returns
+  `400 { message: "orgId is required for viewer, operator, and admin users" }`.
+  `platform_admin` is exempt (operates globally). The role-validation logic now uses
+  `effectiveRole = role ?? "viewer"` so the default `"viewer"` role is also subject to the
+  orgId check.
+- **`GET /api/auth/me` — returns `orgId`** — response shape extended to
+  `{ id, username, role, orgId }`. `orgId` is `null` for users without an assigned org
+  (platform_admin or dev-created users). The frontend can now identify the current tenant
+  context without inspecting the JWT directly.
+
+### Test Coverage
+- 5 new tests in `tests/org-context.test.ts` covering:
+  - viewer / operator / admin without orgId → 400 from `POST /api/users`
+  - platform_admin without orgId → allowed (not 400) from `POST /api/users`
+  - viewer with orgId → passes orgId validation
+  - `GET /api/auth/me` with orgId token → response includes matching orgId
+  - `GET /api/auth/me` without orgId token → response includes `orgId: null`
+- DB-free suite: **156 tests, 0 failures**.
+- `npm run test:org-context` added to `package.json` as a targeted script.
+
+### Doc Fixes
+- `PRODUCTION-HARDENING.md` table row for `test:org-context` corrected — now references
+  the properly defined `package.json` script instead of the _(via npm test)_ annotation.
+
+### Unchanged from v23
+- `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
+  (ROVELINK-SEC-001). Review date 2026-06-15.
+- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- `rotate-tokens` remains 501 Not Implemented.
+
+---
+
 ## v23 — Org-Context Guard + Signup Onboarding Model + Demo Inventory Groups
 **Date:** 2026-05-16
 **Status:** Pre-production MVP

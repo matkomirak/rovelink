@@ -15,7 +15,8 @@
     "test:integration:setup": "npm run db:push && npm run test:integration",
     "test:security": "NODE_ENV=test tsx --test tests/security.test.ts",
     "test:authz": "NODE_ENV=test tsx --test tests/authz.test.ts",
-    "test:paths": "NODE_ENV=test tsx --test tests/playbook-paths.test.ts"
+    "test:paths": "NODE_ENV=test tsx --test tests/playbook-paths.test.ts",
+    "test:org-context": "NODE_ENV=test tsx --test tests/org-context.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

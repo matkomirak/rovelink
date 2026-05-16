@@ -204,6 +204,77 @@ describe("POST /api/users — platform_admin-only user creation", async () => {
   });
 });
 
+// ─── POST /api/users — orgId enforcement for tenant roles ─────────────────────
+
+describe("POST /api/users — orgId required for tenant roles", async () => {
+  await test("platform_admin creating a viewer without orgId → 400", async () => {
+    const r = await req
+      .post("/api/users")
+      .set("Authorization", `Bearer ${tokenPlatformAdminNoOrg}`)
+      .send({ username: "viewer-no-org", password: "pass1234", role: "viewer" });
+    assert.equal(r.status, 400);
+    assert.ok(
+      r.body.message?.includes("orgId"),
+      `expected 'orgId' in message, got: ${r.body.message}`
+    );
+  });
+
+  await test("platform_admin creating an operator without orgId → 400", async () => {
+    const r = await req
+      .post("/api/users")
+      .set("Authorization", `Bearer ${tokenPlatformAdminNoOrg}`)
+      .send({ username: "op-no-org", password: "pass1234", role: "operator" });
+    assert.equal(r.status, 400);
+  });
+
+  await test("platform_admin creating an admin without orgId → 400", async () => {
+    const r = await req
+      .post("/api/users")
+      .set("Authorization", `Bearer ${tokenPlatformAdminNoOrg}`)
+      .send({ username: "admin-no-org", password: "pass1234", role: "admin" });
+    assert.equal(r.status, 400);
+  });
+
+  await test("platform_admin creating another platform_admin without orgId → allowed (not 400)", async () => {
+    const r = await req
+      .post("/api/users")
+      .set("Authorization", `Bearer ${tokenPlatformAdminNoOrg}`)
+      .send({ username: `pa-${Date.now()}`, password: "pass1234", role: "platform_admin" });
+    // 201 (created) or 500 (DB unavail in test) — neither is 400
+    assert.notEqual(r.status, 400, "platform_admin without orgId must not return 400");
+  });
+
+  await test("platform_admin creating a viewer WITH orgId → passes validation (not 400)", async () => {
+    const r = await req
+      .post("/api/users")
+      .set("Authorization", `Bearer ${tokenPlatformAdminNoOrg}`)
+      .send({ username: `v-${Date.now()}`, password: "pass1234", role: "viewer", orgId: "org-abc" });
+    assert.notEqual(r.status, 400, "viewer with orgId must not fail orgId validation");
+  });
+});
+
+// ─── GET /api/auth/me — returns orgId ─────────────────────────────────────────
+
+describe("GET /api/auth/me — includes orgId in response", async () => {
+  await test("token with orgId → response includes matching orgId", async () => {
+    const r = await req
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${tokenAdminWithOrg}`);
+    assert.equal(r.status, 200);
+    assert.ok("orgId" in r.body, "response must include orgId field");
+    assert.equal(r.body.orgId, "org-abc");
+  });
+
+  await test("token without orgId → response includes orgId:null", async () => {
+    const r = await req
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${tokenAdminNoOrg}`);
+    assert.equal(r.status, 200);
+    assert.ok("orgId" in r.body, "response must include orgId field");
+    assert.equal(r.body.orgId, null);
+  });
+});
+
 // ─── /api/inventory/groups — demo-labeled ─────────────────────────────────────
 
 describe("GET /api/inventory/groups — demo-labeled response", async () => {

@@ -2,6 +2,52 @@
 
 ---
 
+## v23 — Org-Context Guard + Signup Onboarding Model + Demo Inventory Groups
+**Date:** 2026-05-16
+**Status:** Pre-production MVP
+
+### Security & Isolation
+- **`requireOrgContext` middleware added** — every tenant-owned route now enforces that
+  non-platform_admin users carry a valid `orgId` in their JWT. Missing org → `403` with
+  `code: "ORG_CONTEXT_REQUIRED"`. Applied to all router-mounted routes (`/api/pipelines`,
+  `/api/providers`, `/api/inventories`, `/api/gate`, `/api/templates`, `/api/runs`,
+  `/api/notifications`, `/api/netbox`, `/api/netbox-sources`, `/api/org`) and all inline
+  tenant prefixes (`/api/inventory`, `/api/reports`, `/api/projects`, `/api/credentials`,
+  `/api/providers`, `/api/cmdbs`, `/api/stats`). `platform_admin` bypasses the check.
+- **Open signup blocked in production** — `POST /api/auth/signup` returns
+  `403 SIGNUP_DISABLED` when `NODE_ENV=production`. Users created via open signup in dev
+  receive no orgId and will be blocked by `requireOrgContext` on tenant routes, making
+  the gap visible rather than silently harmful.
+- **`POST /api/users` — platform_admin-only user creation** — production onboarding path.
+  Accepts `{ username, password, role, orgId }`, validates role against allowed set, hashes
+  password with bcrypt, returns `201` without exposing the password hash. Only
+  `platform_admin` can call this endpoint. This is Option C from the task document
+  (platform_admin-only user creation) — suitable for enterprise/internal deployments.
+
+### Endpoint Fixes
+- **`GET /api/inventory/groups` labeled as demo** — response now wraps groups inside
+  `{ _demo: true, _note: "...", groups }`, consistent with hosts and preflight.
+  All three legacy mock inventory endpoints are now uniformly labeled.
+
+### Test Coverage
+- **`tests/org-context.test.ts`** added — 20 DB-free tests covering:
+  - viewer/operator/admin with no orgId → 403 `ORG_CONTEXT_REQUIRED` on `/api/projects`,
+    `/api/credentials`, `/api/cmdbs`, `/api/inventory/suggest`, `/api/reports/inventory-health`,
+    `/api/stats/providers`
+  - Same roles WITH orgId → pass org guard (200 or 500 from DB, not 403)
+  - platform_admin with no orgId → bypasses guard on all tested routes
+  - `POST /api/users`: viewer/admin → 403; platform_admin → passes role check; invalid role → 400
+  - `/api/inventory/groups` → `_demo:true` shape verified
+- DB-free suite: **149 tests, 0 failures** (up from 129).
+
+### Unchanged from v22
+- `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
+  (ROVELINK-SEC-001). Review date 2026-06-15.
+- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- `rotate-tokens` remains 501 Not Implemented.
+
+---
+
 ## v22 — Legacy Mock Endpoint Cleanup + Housekeeping Role Hardening Tests
 **Date:** 2026-05-16
 **Status:** Pre-production MVP

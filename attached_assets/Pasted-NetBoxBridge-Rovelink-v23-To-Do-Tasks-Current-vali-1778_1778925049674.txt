@@ -1,0 +1,389 @@
+NetBoxBridge / Rovelink — v23 To-Do Tasks
+=========================================
+
+Current validation:
+- npm ci: PASS
+- npm run check: PASS
+- npm test: PASS, 129 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm run test:integration requires real DATABASE_URL
+
+Main status:
+v23 improves legacy route testing, org-scoped inventory health, demo labeling, and token-rotation clarity.
+Remaining work is Drizzle risk, docs versioning, mock inventory groups, signup/org onboarding, integration-test ergonomics, and local Git sync.
+
+
+Task 1 — Resolve or continue formally tracking Drizzle vulnerability
+--------------------------------------------------------------------
+
+Problem:
+
+npm audit --omit=dev still reports:
+
+    drizzle-orm <0.45.2
+    GHSA-gpj5-g38j-94v9
+    Severity: high
+
+Option A — upgrade:
+
+    npm update drizzle-orm drizzle-zod drizzle-kit zod
+
+or manually migrate to:
+
+    drizzle-orm >= 0.45.2
+    compatible drizzle-zod
+    compatible zod version
+
+Then run:
+
+    npm run check
+    npm test
+    npm run build
+    npm audit --omit=dev
+
+Option B — keep accepted risk:
+
+Keep ROVELINK-SEC-001 current with:
+
+    owner
+    acceptance date
+    review date
+    mitigation
+    upgrade plan
+
+Acceptance criteria:
+
+- Either npm audit --omit=dev has no high vulnerabilities,
+  OR ROVELINK-SEC-001 remains accurate and formally accepted.
+- Do not mark the product fully production-ready while this risk is only temporarily accepted.
+
+
+Task 2 — Update docs/version labels to v23
+------------------------------------------
+
+Files:
+
+    PRODUCTION-HARDENING.md
+    VERSION.md
+
+Problem:
+
+Uploaded package is NetBoxBridge (23), but docs currently say v22.
+
+Required changes:
+
+In PRODUCTION-HARDENING.md:
+
+    This document accurately reflects the state of the codebase as of v23.
+
+Update test count:
+
+    npm test: PASS — 129 tests
+
+In VERSION.md:
+
+Add a v23 section above v22.
+
+Suggested v23 notes:
+
+    ## v23 — Demo Endpoint Clarity + Legacy Route Test Expansion
+    - DB-free test suite now passes with 129 tests.
+    - Legacy route-scope tests are included in npm test.
+    - Inventory health report uses org-scoped NetBox VM data.
+    - /api/inventory/hosts and /api/inventory/preflight are explicitly demo-labeled.
+    - /api/housekeeping/rotate-tokens returns 501 Not Implemented.
+    - Drizzle accepted risk remains.
+    - /api/inventory/groups still needs real org-scoped implementation or demo labeling.
+    - Signup/org onboarding model still needs production decision.
+    - Local Git/project sync remains demo-only.
+
+Acceptance criteria:
+
+- No stale "as of v22" text remains if this is intended as v23.
+- Test count matches actual npm test output.
+- Known remaining gaps are listed clearly.
+
+
+Task 3 — Fix or demo-label /api/inventory/groups
+------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    server/services/netbox.ts
+
+Problem:
+
+GET /api/inventory/groups still returns hardcoded mock groups from:
+
+    netboxService.getGroups()
+
+Unlike /api/inventory/hosts and /api/inventory/preflight, it is not demo-labeled.
+
+Required decision:
+
+Option A — make it real and org-scoped:
+
+- Use storage.getNetboxVms(req.orgId!)
+- Derive groups from real org-owned VM metadata:
+  - tags
+  - roles
+  - patch waves
+  - customers
+  - OS
+- Return only current org's groups.
+
+Option B — keep demo-only:
+
+- Return:
+    {
+      "_demo": true,
+      "_note": "Demo data only — not org-scoped. Use automation inventory endpoints in production.",
+      "groups": [...]
+    }
+
+Option C — deprecate:
+
+- Return 410 Gone if superseded by automation inventory endpoints.
+- Hide from UI.
+
+Recommended short-term fix:
+
+Use Option B for consistency, then later replace with Option A.
+
+Acceptance criteria:
+
+- /api/inventory/groups no longer silently returns mock data.
+- Either it is real/org-scoped or clearly marked demo.
+- Add/update tests.
+- npm test passes.
+- npm run check passes.
+
+
+Task 4 — Decide production signup and organization onboarding model
+-------------------------------------------------------------------
+
+Files:
+
+    server/routes.ts
+    shared/schema.ts
+    README.md / PRODUCTION-HARDENING.md
+
+Problem:
+
+POST /api/auth/signup creates a viewer user without clearly assigning orgId.
+
+Many tenant-scoped routes assume:
+
+    req.orgId!
+
+A user without orgId can produce broken tenant behavior.
+
+Required decision:
+
+Choose one model.
+
+Option A — invite-only signup:
+
+- Disable open signup in production.
+- Require an invite token that includes orgId and role.
+- New users are attached to the invite's organization.
+- Expired/invalid invite returns 403.
+
+Option B — create organization on signup:
+
+- Signup requires organization name.
+- Create a new organization.
+- Create first user as admin of that organization.
+- Set user.orgId.
+- Return JWT with orgId.
+
+Option C — platform-admin-only user creation:
+
+- Disable public signup entirely.
+- Only platform_admin can create users and assign orgId.
+
+Recommended for this product:
+
+Option A or C for enterprise use.
+Option B only if you want self-service SaaS onboarding.
+
+Acceptance criteria:
+
+- Production users cannot exist without orgId unless they are platform_admin.
+- JWT always includes orgId for tenant users.
+- Routes that require org context fail cleanly with 400/403 if orgId is missing.
+- Documentation explains the onboarding model.
+- Add tests for signup/onboarding behavior.
+- npm test passes.
+
+
+Task 5 — Add org-context guard middleware
+-----------------------------------------
+
+Problem:
+
+Many routes rely on:
+
+    req.orgId!
+
+This is okay only if auth always guarantees orgId for tenant users.
+
+Required improvement:
+
+Add middleware:
+
+    requireOrgContext
+
+Behavior:
+
+    if user.role !== "platform_admin" and !req.orgId:
+      return 403 or 400 with "Organization context required"
+
+Use it on tenant-owned routes:
+
+    projects
+    providers
+    CMDBs
+    credentials
+    job templates
+    runs
+    automation inventories
+    pipelines
+    inventory suggestions
+    reports
+
+Platform-global routes can skip it if they require platform_admin.
+
+Acceptance criteria:
+
+- Tenant routes fail cleanly if orgId is missing.
+- No route crashes or queries with undefined orgId.
+- platform_admin global routes still work.
+- Tests cover missing-org JWT.
+- npm test passes.
+
+
+Task 6 — Improve integration-test ergonomics
+--------------------------------------------
+
+Current state:
+
+npm run test:integration requires DATABASE_URL.
+
+There is now:
+
+    npm run test:integration:setup
+
+which runs:
+
+    npm run db:push && npm run test:integration
+
+Required improvement:
+
+Document exact usage in README or PRODUCTION-HARDENING.md.
+
+Example:
+
+    DATABASE_URL=postgres://rovelink:changeme@localhost:5432/rovelink_test npm run test:integration:setup
+
+Also document Docker Compose option if available.
+
+Acceptance criteria:
+
+- README or PRODUCTION-HARDENING.md explains exactly how to run integration tests.
+- Example DATABASE_URL is included.
+- It is clear integration tests are not part of npm test.
+- Replit can run them with a provisioned database.
+
+
+Task 7 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current state:
+
+Project sync is simulated:
+
+    site.yml
+    deploy.yml
+    rollback.yml
+
+Option A — keep demo:
+
+- UI button continues to say Demo Sync.
+- API response continues to say simulated repository.
+- Docs say no real Git checkout is performed.
+- Local Ansible fails safely without project.checkoutPath.
+
+Option B — implement real Git sync:
+
+- Clone/pull into:
+
+    runtime/projects/<orgId>/<projectId>/
+
+- Save project.checkoutPath.
+- Discover .yml/.yaml playbooks from real checkout.
+- Use credential store for private Git credentials.
+- Never log credentials.
+- Use spawn argument arrays, not shell interpolation.
+- Continue using resolveSafePlaybookPath before execution.
+
+Acceptance criteria:
+
+- Either real Git sync works safely,
+  OR demo sync is clearly labeled everywhere and local production execution remains disabled.
+
+
+Task 8 — Optional production polish: replace demo inventory endpoints
+--------------------------------------------------------------------
+
+Affected endpoints:
+
+    GET /api/inventory/groups
+    GET /api/inventory/hosts
+    POST /api/inventory/preflight
+
+Current state:
+
+These are backwards-compatible demo endpoints.
+
+Production direction:
+
+- Prefer automation inventory endpoints for real workflows.
+- Either replace these with org-scoped automation inventory data,
+  or deprecate them and remove them from production UI.
+
+Acceptance criteria:
+
+- Dashboard and reports do not rely on demo endpoints.
+- Demo endpoints are hidden or clearly marked.
+- Production docs point users to automation inventories.
+
+
+Task 9 — Optional implementation: real token rotation
+-----------------------------------------------------
+
+Current state:
+
+POST /api/housekeeping/rotate-tokens returns 501 Not Implemented.
+
+Option A — keep as planned feature:
+
+- Hide from UI.
+- Leave as 501.
+- Document as future work.
+
+Option B — implement:
+
+- Define which tokens are rotatable.
+- Org admins can rotate only org-owned credentials.
+- platform_admin can rotate platform/global tokens.
+- Never return raw token values.
+- Add audit log entry.
+- Add tests.
+
+Acceptance criteria:
+
+- Product does not imply token rotation exists unless implemented.
+- If implemented, scope and secret handling are safe.

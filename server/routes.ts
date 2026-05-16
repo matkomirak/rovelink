@@ -124,6 +124,22 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
   next();
 }
 
+/**
+ * Org-context guard — ensures tenant-owned routes always have req.orgId set.
+ * platform_admin users bypass this check (they operate across all orgs).
+ * Any other authenticated user without an orgId receives 403.
+ */
+function requireOrgContext(req: AuthRequest, res: Response, next: NextFunction) {
+  if (req.user?.role === "platform_admin") return next();
+  if (!req.orgId) {
+    return res.status(403).json({
+      message: "Organization context required — contact your platform administrator.",
+      code: "ORG_CONTEXT_REQUIRED",
+    });
+  }
+  next();
+}
+
 // Role middleware — see server/auth/roles.ts for the full hierarchy.
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -141,21 +157,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Mount RDP modular routes with auth middleware
-  app.use("/api/pipelines", authMiddleware, pipelineRoutes);
-  app.use("/api/pipelines", authMiddleware, pipelineMappingRoutes);
-  app.use("/api/providers", authMiddleware, providerDiscoveryRoutes);
-  app.use("/api/inventories", authMiddleware, automationInventoryRoutes);
-  app.use("/api/gate", authMiddleware, gateRoutes);
-  app.use("/api/templates", authMiddleware, templateRoutes);
-  app.use("/api/runs", authMiddleware, runsRoutes);
-  app.use("/api/notifications", authMiddleware, notificationRoutes);
+  // Mount RDP modular routes with auth + org-context middleware
+  app.use("/api/pipelines", authMiddleware, requireOrgContext, pipelineRoutes);
+  app.use("/api/pipelines", authMiddleware, requireOrgContext, pipelineMappingRoutes);
+  app.use("/api/providers", authMiddleware, requireOrgContext, providerDiscoveryRoutes);
+  app.use("/api/inventories", authMiddleware, requireOrgContext, automationInventoryRoutes);
+  app.use("/api/gate", authMiddleware, requireOrgContext, gateRoutes);
+  app.use("/api/templates", authMiddleware, requireOrgContext, templateRoutes);
+  app.use("/api/runs", authMiddleware, requireOrgContext, runsRoutes);
+  app.use("/api/notifications", authMiddleware, requireOrgContext, notificationRoutes);
   app.use("/api/settings", authMiddleware, settingsRoutes);
-  app.use("/api/netbox", authMiddleware, netboxRoutes);
-  app.use("/api/netbox-sources", authMiddleware, netboxRoutes);
+  app.use("/api/netbox", authMiddleware, requireOrgContext, netboxRoutes);
+  app.use("/api/netbox-sources", authMiddleware, requireOrgContext, netboxRoutes);
   app.use("/api/organizations", authMiddleware, orgRoutes);
   app.use("/api/admin/organizations", authMiddleware, orgRoutes);
-  app.use("/api/org", authMiddleware, orgRoutes);
+  app.use("/api/org", authMiddleware, requireOrgContext, orgRoutes);
+
+  // Org-context guard for inline tenant-owned route prefixes.
+  // authMiddleware runs here first so req.orgId is set before the guard.
+  // Inline route handlers below also call authMiddleware (idempotent).
+  for (const prefix of [
+    "/api/inventory", "/api/reports", "/api/projects",
+    "/api/credentials", "/api/providers", "/api/cmdbs", "/api/stats",
+  ] as const) {
+    app.use(prefix, authMiddleware, requireOrgContext);
+  }
 
   // ─── Auth routes ────────────────────────────────────────────────────────────
 
@@ -169,6 +195,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   app.post("/api/auth/signup", loginRateLimiter, async (req, res) => {
+    // Open signup is disabled in production. Users must be created by a platform_admin
+    // via POST /api/users, which assigns orgId and role explicitly.
+    if (isProduction) {
+      return res.status(403).json({
+        message: "Open signup is disabled. Contact your platform administrator to create an account.",
+        code: "SIGNUP_DISABLED",
+      });
+    }
     try {
       const { username, password } = insertUserSchema.parse(req.body);
       
@@ -239,11 +273,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ id: req.user.id, username: req.user.username, role: req.user.role });
   });
 
+  // platform_admin-only: create a user with explicit orgId and role assignment.
+  // This is the production path for onboarding users (open signup is blocked in production).
+  app.post("/api/users", authMiddleware, requireRole("platform_admin"), async (req: AuthRequest, res) => {
+    try {
+      const { username, password, role, orgId } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ message: "username and password are required" });
+      }
+      const allowedRoles = ["viewer", "operator", "admin", "platform_admin"];
+      if (role && !allowedRoles.includes(role)) {
+        return res.status(400).json({ message: `role must be one of: ${allowedRoles.join(", ")}` });
+      }
+      const existing = await storage.getUserByUsername(username);
+      if (existing) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+      const hashedPassword = await bcrypt.hash(password, 12);
+      const user = await storage.createUser({
+        username,
+        password: hashedPassword,
+        role: role ?? "viewer",
+        orgId: orgId ?? null,
+      });
+      res.status(201).json({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        orgId: user.orgId,
+      });
+    } catch (error: any) {
+      res.status(400).json({ message: error.message || "Failed to create user" });
+    }
+  });
+
   // Inventory routes (NetBox integration)
+  // DEMO-ONLY: returns hardcoded mock groups — not org-scoped.
+  // Production use: derive groups from org-scoped automation inventory or NetBox VM data.
   app.get("/api/inventory/groups", authMiddleware, async (req, res) => {
     try {
       const groups = await netboxService.getGroups();
-      res.json(groups);
+      res.json({
+        _demo: true,
+        _note: "Demo data only — not org-scoped. Use automation inventory endpoints in production.",
+        groups,
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch groups" });
     }

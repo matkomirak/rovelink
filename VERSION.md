@@ -2,6 +2,46 @@
 
 ---
 
+## v26 — Platform Admin Org Existence Validation + Demo Endpoint Decision + Browserslist
+**Date:** 2026-05-17
+**Status:** Pre-production MVP
+
+### Middleware Change
+- **`requireOrgContext` — platform_admin selected org existence check** — `requireOrgContext`
+  is now `async`. After accepting an `X-Org-Id` header, it calls `storage.getOrganization()`
+  to verify the org exists before setting `req.orgId`. A non-existent org returns
+  `404 { code: "ORGANIZATION_NOT_FOUND" }`. DB unavailability is treated as fail-open so the
+  downstream route surfaces the DB error with full context rather than a misleading 404.
+
+### Decisions Documented
+- **Legacy demo inventory endpoints (T3) — Option A retained:** `GET /api/inventory/groups`,
+  `GET /api/inventory/hosts`, and `POST /api/inventory/preflight` remain in place and clearly
+  demo-labeled (`_demo:true`). The frontend actively calls them; coordinated UI migration to
+  `/api/inventories/...` is required before these can be removed or replaced with 410 Gone.
+  Decision and production replacement path documented in `PRODUCTION-HARDENING.md`.
+- **Ansible project sync (T4) — Option A retained:** Demo sync remains clearly labeled with
+  no behavior change.
+
+### Build Improvement
+- **Browserslist database updated** — `caniuse-lite` updated via
+  `npx update-browserslist-db@latest`. Build warning about outdated browser data is resolved.
+
+### Test Coverage
+- 2 new tests in `tests/org-context.test.ts` covering:
+  - platform_admin with non-existent X-Org-Id → 404 `ORGANIZATION_NOT_FOUND` (or 500 if DB unavail)
+  - redundant presence check: missing header still → 400 `ORG_SELECTION_REQUIRED`
+- DB-free suite: **163 tests, 0 failures**.
+
+### Validation Gate
+```
+npm run check    → 0 TypeScript errors
+npm test         → 163 tests, 0 failures
+npm run build    → ✓ built, no Browserslist warning
+npm audit        → found 0 vulnerabilities
+```
+
+---
+
 ## v25 — Drizzle Upgrade + Platform Admin Org-Selection + Org Existence Check
 **Date:** 2026-05-17
 **Status:** Pre-production MVP

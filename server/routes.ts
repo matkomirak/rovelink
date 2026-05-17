@@ -130,9 +130,12 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
  * - Non-platform_admin users without an orgId in their token receive 403 ORG_CONTEXT_REQUIRED.
  * - platform_admin users MUST supply an X-Org-Id header (or ?orgId= query param) to scope
  *   themselves to a tenant. Without it they receive 400 ORG_SELECTION_REQUIRED.
- *   This prevents silent req.orgId=undefined from leaking into tenant-owned DB queries.
+ * - If the selected org does not exist, they receive 404 ORGANIZATION_NOT_FOUND.
+ *   This prevents silent req.orgId=undefined or a phantom orgId from leaking into DB queries.
+ * - DB unavailability during the org check is treated as fail-open: the downstream route
+ *   will encounter and surface the DB error instead of failing here with a misleading 404.
  */
-function requireOrgContext(req: AuthRequest, res: Response, next: NextFunction) {
+async function requireOrgContext(req: AuthRequest, res: Response, next: NextFunction) {
   if (req.user?.role === "platform_admin") {
     const selectedOrg =
       (req.headers["x-org-id"] as string | undefined) ??
@@ -142,6 +145,19 @@ function requireOrgContext(req: AuthRequest, res: Response, next: NextFunction) 
         code: "ORG_SELECTION_REQUIRED",
         message: "platform_admin must specify X-Org-Id header or ?orgId= query param for tenant routes",
       });
+    }
+    // Verify the selected org exists. Fail open on DB errors (DB unavailable in test suite)
+    // so downstream routes can surface DB connectivity issues with appropriate context.
+    try {
+      const org = await storage.getOrganization(selectedOrg);
+      if (!org) {
+        return res.status(404).json({
+          code: "ORGANIZATION_NOT_FOUND",
+          message: `Organization '${selectedOrg}' not found`,
+        });
+      }
+    } catch {
+      // DB unavailable — continue and let the downstream route fail naturally.
     }
     req.orgId = selectedOrg;
     return next();

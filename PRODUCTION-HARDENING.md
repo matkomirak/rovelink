@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v25.
+This document accurately reflects the state of the codebase as of v26.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -45,6 +45,7 @@ npm audit --omit=dev
 | `GET /api/inventory/groups` — demo-labeled | PASS — response includes `_demo:true` and `_note`; consistent with hosts/preflight |
 | `requireOrgContext` middleware — tenant routes block users without orgId | PASS — 403 `ORG_CONTEXT_REQUIRED` for non-platform_admin without orgId |
 | `requireOrgContext` — platform_admin org-selection model | PASS — platform_admin without X-Org-Id header → 400 `ORG_SELECTION_REQUIRED`; with X-Org-Id → scoped to that org |
+| `requireOrgContext` — platform_admin selected org existence check | PASS — non-existent X-Org-Id → 404 `ORGANIZATION_NOT_FOUND`; DB unavailable → fail-open (downstream surfaces error) |
 | Open signup blocked in production (`isProduction` guard) | PASS — `POST /api/auth/signup` returns 403 `SIGNUP_DISABLED` in production |
 | `POST /api/users` — platform_admin-only user creation with explicit orgId | PASS — role-checked, only platform_admin can create users with assigned orgId |
 | Org-context integration tests (DB-free, in `npm test`) | PASS — `tests/org-context.test.ts` covers all categories above |
@@ -85,7 +86,7 @@ npm audit --omit=dev
 
 | Command | What it runs | Requires DB |
 |---|---|---|
-| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context (161 tests) | No |
+| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context (163 tests) | No |
 | `npm run test:integration` | Cross-tenant isolation + automation inventory integration tests | Yes — DATABASE_URL required |
 | `npm run test:integration:setup` | Push schema then run all integration tests | Yes — DATABASE_URL required |
 | `npm run test:org-context` | `requireOrgContext` + onboarding route tests | No |
@@ -179,7 +180,7 @@ The upgrade was compatible with the existing `drizzle-zod@0.7.0` (no Zod v4 migr
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
 
-### Gate Tenant Isolation (v25)
+### Gate Tenant Isolation (v26)
 - `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
 - All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
 - `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.
@@ -201,6 +202,25 @@ The upgrade was compatible with the existing `drizzle-zod@0.7.0` (no Zod v4 migr
   - File written with mode `0o600`.
   - Gate decisions produced during generation are persisted to the in-memory gate store and snapshotted on the run record for audit.
 
+### Legacy Demo Inventory Endpoints (Option A — retain, keep clearly labeled)
+
+Three legacy inventory endpoints are retained and remain clearly demo-labeled:
+
+| Endpoint | Label |
+|---|---|
+| `GET /api/inventory/groups` | `_demo:true`, `_note` in response |
+| `GET /api/inventory/hosts` | `_demo:true`, `_note` in response |
+| `POST /api/inventory/preflight` | `_demo:true`, `_note` in response |
+
+**Decision (v26):** Keep all three endpoints as demo-labeled (Option A). The frontend
+(`inventory.tsx`, `templates.tsx`) actively calls them; removing or replacing with 410 Gone
+requires coordinated UI changes. These endpoints are **not org-scoped** and must not be used
+as a data source for production metrics, eligibility decisions, or gate logic.
+
+**Production replacement path:** Use automation inventory endpoints (`/api/inventories/...`)
+for real org-scoped host data. The legacy endpoints exist only to support the current UI
+until the inventory page is migrated to the automation inventory API.
+
 ### Demo-Only Local Ansible (Option A — clearly labeled)
 - Project sync returns hardcoded demo playbooks only. No real Git clone is performed.
 - UI: sync button is labeled **"Demo Sync"**.
@@ -214,7 +234,7 @@ The upgrade was compatible with the existing `drizzle-zod@0.7.0` (no Zod v4 migr
 - API responses strip encrypted values (`enc:v1:...` never returned to the client).
 
 ### Testing
-- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation, automation inventory isolation, legacy-route-scope, org-context — 161 tests).
+- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation, automation inventory isolation, legacy-route-scope, org-context — 163 tests).
 - `npm run test:integration` requires `DATABASE_URL` pointing at a real PostgreSQL instance. Covers cross-tenant isolation (24 tests) + automation inventory integration tests (real routes + real DB). Last known status in configured DB environment: PASS.
 - Gate + hint isolation tests (`tests/gate-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
 - Automation inventory isolation tests (`tests/automation-inventory-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.

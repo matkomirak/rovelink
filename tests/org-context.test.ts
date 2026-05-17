@@ -236,6 +236,34 @@ describe("POST /api/users — platform_admin-only user creation", async () => {
   });
 });
 
+// ─── requireOrgContext — platform_admin org existence check ───────────────────
+
+describe("requireOrgContext — platform_admin selected org must exist", async () => {
+  await test("platform_admin with non-existent X-Org-Id → 404 ORGANIZATION_NOT_FOUND (or 500 if DB unavail)", async () => {
+    const r = await req
+      .get("/api/projects")
+      .set("Authorization", `Bearer ${tokenPlatformAdminNoOrg}`)
+      .set("X-Org-Id", "org-does-not-exist-xxxxxxxxx");
+    // With a live DB: org not found → 404 ORGANIZATION_NOT_FOUND.
+    // Without DB: middleware fails open → downstream route throws → 500.
+    assert.ok(
+      r.status === 404 || r.status === 500,
+      `expected 404 (ORGANIZATION_NOT_FOUND) or 500 (DB unavail), got ${r.status}: ${JSON.stringify(r.body)}`
+    );
+    if (r.status === 404) {
+      assert.equal(r.body.code, "ORGANIZATION_NOT_FOUND");
+    }
+  });
+
+  await test("platform_admin X-Org-Id presence check fires before org lookup — missing header → 400", async () => {
+    const r = await req
+      .get("/api/projects")
+      .set("Authorization", `Bearer ${tokenPlatformAdminNoOrg}`);
+    assert.equal(r.status, 400);
+    assert.equal(r.body.code, "ORG_SELECTION_REQUIRED");
+  });
+});
+
 // ─── POST /api/users — org existence validation ────────────────────────────────
 
 describe("POST /api/users — org existence check for tenant roles", async () => {

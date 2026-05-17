@@ -1,0 +1,122 @@
+NetBoxBridge / Rovelink — v26 Remaining Tasks
+=============================================
+
+Current validation:
+- npm ci/install: PASS
+- npm run check: PASS
+- npm test: PASS, 161 tests
+- npm run build: PASS
+- npm audit --omit=dev: PASS, 0 vulnerabilities
+- npm run test:integration requires real DATABASE_URL
+
+
+Task 1 — Validate platform_admin selected organization
+------------------------------------------------------
+
+Problem:
+platform_admin users can select an organization using:
+
+  X-Org-Id
+  ?orgId=
+
+requireOrgContext sets req.orgId to that value but does not verify that the organization exists.
+
+Required behavior:
+- platform_admin without selected org on tenant route -> 400 ORG_SELECTION_REQUIRED
+- platform_admin with non-existent selected org -> 404 ORGANIZATION_NOT_FOUND
+- platform_admin with valid selected org -> continue
+
+Implementation options:
+- Make requireOrgContext async and call storage.getOrganization(selectedOrg)
+- Or add a separate validateSelectedOrg middleware after requireOrgContext
+
+Acceptance:
+- Non-existent X-Org-Id returns 404.
+- Valid X-Org-Id continues.
+- Tests added.
+- npm test passes.
+
+
+Task 2 — Add integration test run documentation / helper
+--------------------------------------------------------
+
+Current:
+npm run test:integration requires DATABASE_URL and fails clearly when missing.
+
+Improve:
+Document a clean command path for local/Replit DB-backed integration tests.
+
+Example:
+
+  DATABASE_URL=postgres://rovelink:changeme@localhost:5432/rovelink_test npm run test:integration:setup
+
+Acceptance:
+- README or PRODUCTION-HARDENING.md explains how to run integration tests.
+- Example DATABASE_URL is included.
+- It is clear that integration tests are not part of npm test.
+
+
+Task 3 — Decide fate of legacy demo inventory endpoints
+-------------------------------------------------------
+
+Affected endpoints:
+- GET /api/inventory/groups
+- GET /api/inventory/hosts
+- POST /api/inventory/preflight
+
+Current:
+They are clearly demo-labeled.
+
+Production options:
+A. Keep demo-labeled and hide from production UI.
+B. Return 410 Gone and direct users to automation inventories.
+C. Replace with real org-scoped automation inventory data.
+
+Recommended:
+For production, use option B or C.
+
+Acceptance:
+- Production UI does not depend on demo endpoints.
+- Docs direct users to automation inventory endpoints.
+- If endpoints remain, demo labeling stays explicit.
+
+
+Task 4 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current:
+Project sync is simulated.
+
+Option A:
+Keep demo mode:
+- UI says Demo Sync.
+- API says simulated repository.
+- local execution fails safely without checkoutPath.
+
+Option B:
+Implement real Git sync:
+- clone/pull into runtime/projects/<orgId>/<projectId>/
+- save checkoutPath
+- discover .yml/.yaml playbooks
+- use credential store for private Git credentials
+- never log credentials
+- continue using resolveSafePlaybookPath
+
+Acceptance:
+- Either demo mode is obvious,
+  OR real Git-backed local execution works safely.
+
+
+Task 5 — Optional production polish: upgrade Browserslist data
+--------------------------------------------------------------
+
+Build warning:
+Browserslist data is old.
+
+Run:
+
+  npx update-browserslist-db@latest
+
+Acceptance:
+- Build still passes.
+- Warning is reduced or gone.

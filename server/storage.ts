@@ -2,8 +2,9 @@
 import { 
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
   providerAccounts, syncRuns, externalObjects, groupCache, netboxVms, netboxInventorySources,
-  cmdbAccounts, pipelines, pipelineMappings, pipelineRuns,
+  cmdbAccounts, pipelines, pipelineMappings, pipelineRuns, organizations,
   type User, type InsertUser,
+  type Organization,
   type Project, type InsertProject,
   type Credential, type InsertCredential,
   type JobTemplate, type InsertJobTemplate,
@@ -25,6 +26,9 @@ import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql, inArray } from "drizzle-orm";
 
 export interface IStorage {
+  // Organization lookup (cross-tenant safe — used for existence checks in user creation)
+  getOrganization(id: string): Promise<Organization | undefined>;
+
   // User operations
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -141,6 +145,12 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  // Organization lookup
+  async getOrganization(id: string): Promise<Organization | undefined> {
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, id));
+    return org ?? undefined;
+  }
+
   // User operations
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));

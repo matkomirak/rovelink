@@ -1,0 +1,133 @@
+NetBoxBridge / Rovelink — v25 Remaining Tasks
+=============================================
+
+Current validation:
+- npm install/ci: PASS
+- npm run check: PASS
+- npm test: PASS, 156 tests
+- npm run build: PASS
+- npm audit --omit=dev: 1 high remains, drizzle-orm GHSA-gpj5-g38j-94v9
+- npm run test:integration requires real DATABASE_URL
+
+
+Task 1 — Resolve or formally sign off Drizzle vulnerability
+-----------------------------------------------------------
+
+Problem:
+npm audit --omit=dev still reports:
+
+  drizzle-orm <0.45.2
+  GHSA-gpj5-g38j-94v9
+  Severity: high
+
+Option A:
+Upgrade drizzle-orm to >=0.45.2 and align drizzle-zod/zod versions.
+
+Then run:
+
+  npm run check
+  npm test
+  npm run build
+  npm audit --omit=dev
+
+Option B:
+Keep ROVELINK-SEC-001 as a formal accepted production risk with owner/security sign-off.
+
+Acceptance:
+- Either audit has no high vulnerabilities,
+  OR the risk is formally accepted for production with owner, review date, mitigation, and upgrade plan.
+
+
+Task 2 — Validate orgId exists in POST /api/users
+-------------------------------------------------
+
+Problem:
+POST /api/users now requires orgId for viewer/operator/admin, but should also verify that the org exists.
+
+Required behavior:
+- platform_admin can be created with orgId null.
+- viewer/operator/admin require orgId.
+- viewer/operator/admin orgId must reference an existing organization.
+
+Acceptance:
+- Creating tenant user with missing orgId returns 400.
+- Creating tenant user with non-existent orgId returns 404.
+- Creating tenant user with valid orgId succeeds.
+- Tests added.
+- npm test passes.
+
+
+Task 3 — Define platform_admin tenant-route org-selection model
+---------------------------------------------------------------
+
+Problem:
+platform_admin bypasses requireOrgContext, but many tenant routes still expect req.orgId.
+
+Choose one model:
+
+Option A — recommended:
+platform_admin must select an org for tenant routes using X-Org-Id or query param.
+
+Example:
+  GET /api/projects as platform_admin without X-Org-Id -> 400 ORG_SELECTION_REQUIRED
+  GET /api/projects as platform_admin with X-Org-Id -> scoped to that org
+
+Option B:
+platform_admin sees cross-org results on tenant routes.
+
+Option C:
+platform_admin cannot use tenant routes unless acting as an org user.
+
+Acceptance:
+- Behavior is explicit and consistent.
+- No platform_admin tenant route returns accidental 500 because orgId is undefined.
+- Tests added.
+
+
+Task 4 — Improve integration-test ergonomics
+--------------------------------------------
+
+Current:
+npm run test:integration requires DATABASE_URL.
+
+Improve docs or scripts:
+
+  DATABASE_URL=postgres://rovelink:changeme@localhost:5432/rovelink_test npm run test:integration:setup
+
+Acceptance:
+- README or PRODUCTION-HARDENING.md explains how to run integration tests.
+- Replit/local setup path is clear.
+- Integration tests remain separate from npm test.
+
+
+Task 5 — Keep local Ansible demo-labeled or implement real Git sync
+-------------------------------------------------------------------
+
+Current:
+Project sync is simulated.
+
+Option A:
+Keep demo clearly labeled and keep local execution disabled without checkoutPath.
+
+Option B:
+Implement real Git sync:
+- clone/pull into runtime/projects/<orgId>/<projectId>/
+- save checkoutPath
+- discover YAML playbooks
+- use credential store
+- never log credentials
+- continue using resolveSafePlaybookPath
+
+Acceptance:
+- Either demo mode remains obvious,
+  OR real local Git-backed execution works safely.
+
+
+Task 6 — Optional: bump docs from v24 to v25
+--------------------------------------------
+
+If this archive is intended to represent product version v25:
+- update PRODUCTION-HARDENING.md from v24 to v25
+- add VERSION.md v25 section
+- mention 156 passing DB-free tests
+- mention POST /api/users org-existence validation if implemented

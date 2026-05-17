@@ -126,11 +126,26 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
 
 /**
  * Org-context guard — ensures tenant-owned routes always have req.orgId set.
- * platform_admin users bypass this check (they operate across all orgs).
- * Any other authenticated user without an orgId receives 403.
+ *
+ * - Non-platform_admin users without an orgId in their token receive 403 ORG_CONTEXT_REQUIRED.
+ * - platform_admin users MUST supply an X-Org-Id header (or ?orgId= query param) to scope
+ *   themselves to a tenant. Without it they receive 400 ORG_SELECTION_REQUIRED.
+ *   This prevents silent req.orgId=undefined from leaking into tenant-owned DB queries.
  */
 function requireOrgContext(req: AuthRequest, res: Response, next: NextFunction) {
-  if (req.user?.role === "platform_admin") return next();
+  if (req.user?.role === "platform_admin") {
+    const selectedOrg =
+      (req.headers["x-org-id"] as string | undefined) ??
+      (req.query.orgId as string | undefined);
+    if (!selectedOrg) {
+      return res.status(400).json({
+        code: "ORG_SELECTION_REQUIRED",
+        message: "platform_admin must specify X-Org-Id header or ?orgId= query param for tenant routes",
+      });
+    }
+    req.orgId = selectedOrg;
+    return next();
+  }
   if (!req.orgId) {
     return res.status(403).json({
       message: "Organization context required — contact your platform administrator.",
@@ -289,6 +304,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Tenant roles require an orgId — platform_admin operates globally without one.
       if (effectiveRole !== "platform_admin" && !orgId) {
         return res.status(400).json({ message: "orgId is required for viewer, operator, and admin users" });
+      }
+      // Verify the org actually exists — prevent orphaned users referencing a phantom org.
+      if (effectiveRole !== "platform_admin" && orgId) {
+        const org = await storage.getOrganization(orgId);
+        if (!org) {
+          return res.status(404).json({ message: `Organization '${orgId}' not found` });
+        }
       }
       const existing = await storage.getUserByUsername(username);
       if (existing) {

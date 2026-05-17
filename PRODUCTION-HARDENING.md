@@ -2,7 +2,7 @@
 
 **Current status: pre-production MVP — not production-ready**
 
-This document accurately reflects the state of the codebase as of v24.
+This document accurately reflects the state of the codebase as of v25.
 Do not mark as production-ready until the final acceptance gate below passes clean.
 
 ---
@@ -44,13 +44,14 @@ npm audit --omit=dev
 | Legacy route scope tests (housekeeping roles + demo labels) | PASS — `tests/legacy-route-scope.test.ts`, DB-free, included in `npm test` |
 | `GET /api/inventory/groups` — demo-labeled | PASS — response includes `_demo:true` and `_note`; consistent with hosts/preflight |
 | `requireOrgContext` middleware — tenant routes block users without orgId | PASS — 403 `ORG_CONTEXT_REQUIRED` for non-platform_admin without orgId |
-| `requireOrgContext` — platform_admin bypasses org guard | PASS — platform_admin can operate without orgId across all tenants |
+| `requireOrgContext` — platform_admin org-selection model | PASS — platform_admin without X-Org-Id header → 400 `ORG_SELECTION_REQUIRED`; with X-Org-Id → scoped to that org |
 | Open signup blocked in production (`isProduction` guard) | PASS — `POST /api/auth/signup` returns 403 `SIGNUP_DISABLED` in production |
 | `POST /api/users` — platform_admin-only user creation with explicit orgId | PASS — role-checked, only platform_admin can create users with assigned orgId |
-| Org-context integration tests (DB-free, in `npm test`) | PASS — `tests/org-context.test.ts` covers all six categories above |
+| Org-context integration tests (DB-free, in `npm test`) | PASS — `tests/org-context.test.ts` covers all categories above |
 | `POST /api/users` — orgId required for viewer/operator/admin | PASS — 400 returned if tenant-role user created without orgId; platform_admin exempt |
+| `POST /api/users` — org existence check for tenant roles | PASS — 404 returned if orgId does not reference a known organization |
 | `GET /api/auth/me` — returns orgId | PASS — response includes `orgId` field; null for users without org context |
-| `npm audit --omit=dev` — no high/critical vulnerabilities | **OPEN** — 1 high (see ROVELINK-SEC-001 below) |
+| `npm audit --omit=dev` — no high/critical vulnerabilities | PASS — 0 vulnerabilities (drizzle-orm upgraded to 0.45.2, resolving GHSA-gpj5-g38j-94v9) |
 | Auth middleware does not turn DB errors into 401 | PASS |
 | Auth/security tests use in-process supertest, no live DB needed | PASS |
 | Tenant isolation tests available under `test:integration` | PASS |
@@ -84,7 +85,7 @@ npm audit --omit=dev
 
 | Command | What it runs | Requires DB |
 |---|---|---|
-| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context (156 tests) | No |
+| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context (161 tests) | No |
 | `npm run test:integration` | Cross-tenant isolation + automation inventory integration tests | Yes — DATABASE_URL required |
 | `npm run test:integration:setup` | Push schema then run all integration tests | Yes — DATABASE_URL required |
 | `npm run test:org-context` | `requireOrgContext` + onboarding route tests | No |
@@ -129,49 +130,20 @@ Integration tests are **always excluded** from `npm test`. The default test suit
 
 ## Open Security Items
 
-### ROVELINK-SEC-001 — drizzle-orm SQL Injection Risk (Formally Accepted)
+### ROVELINK-SEC-001 — drizzle-orm SQL Injection Risk (RESOLVED in v25)
 
 ```
 Risk ID:       ROVELINK-SEC-001
 Package:       drizzle-orm
 Advisory:      GHSA-gpj5-g38j-94v9
 Severity:      High
-Status:        Formally accepted — upgrade blocked by dependency chain
-Owner:         Platform Engineering
-Date accepted: 2026-05-15
-Review date:   2026-06-15 (30 days)
-Upgrade plan:  Zod v3 → v4 migration sprint, then drizzle-orm@0.45.2 + drizzle-zod@0.8.x
+Status:        RESOLVED — drizzle-orm upgraded to 0.45.2 in v25
+Resolution:    2026-05-17
 ```
 
-**What the advisory says:**
-SQL injection via improperly escaped SQL identifiers. Affects `drizzle-orm < 0.45.2`.
+**Resolution:** `drizzle-orm` was upgraded from `0.39.1` to `0.45.2` in v25. TypeScript check, full test suite (`npm test` — 161 tests), and production build (`npm run build`) all pass with the upgraded package. `npm audit --omit=dev` now reports **0 vulnerabilities**.
 
-**Current installed version:** `0.39.1`
-
-**Why upgrade is blocked:**
-`npm audit fix --force` would install `drizzle-orm@0.45.2`, which is a breaking change
-requiring `drizzle-zod@0.8.x`. `drizzle-zod@0.8.x` depends on Zod v4 internal types.
-The entire frontend and backend use Zod v3 across 50+ files (`z.object`, `z.string`,
-`createInsertSchema`, `zodResolver`, form validation). Upgrading to Zod v4 is a
-sprint-sized migration with high regression risk — it must be done as a dedicated task.
-
-**Mitigation in place:**
-The vulnerable query patterns (dynamic SQL identifier interpolation — table/column names
-passed as runtime variables) are **not used in this codebase**. All queries use Drizzle's
-typed query builder with schema-defined table and column references. No user-supplied values
-are ever interpolated as SQL identifiers.
-
-Peer-reviewed: no `sql.identifier()`, `sql.raw()`, or equivalent patterns found in any
-server file. The attack surface described in the advisory does not exist in the current code.
-
-**Upgrade plan:**
-1. Dedicate a sprint to migrating from Zod v3 → v4 (update all `z.object`, `z.infer`, `createInsertSchema`, `zodResolver` usages — estimated 50+ files).
-2. Upgrade `drizzle-zod` to `@0.8.x`.
-3. Upgrade `drizzle-orm` to `>=0.45.2`.
-4. Run `npm audit --omit=dev` to verify 0 vulnerabilities.
-5. Re-run full test suite (`npm test` + `npm run test:integration`).
-
-`npm audit --omit=dev` currently reports **1 high vulnerability** (this item only).
+The upgrade was compatible with the existing `drizzle-zod@0.7.0` (no Zod v4 migration was required — the concern documented previously proved not to be a blocker for this specific version step).
 
 ---
 
@@ -207,7 +179,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - **Sync runs** list/detail are org-scoped via `provider_accounts.org_id` (join-based).
 - **Notification webhook triggers** are scoped to the run's org — no cross-tenant webhook fire.
 
-### Gate Tenant Isolation (v24)
+### Gate Tenant Isolation (v25)
 - `GateStore` uses composite key `orgId:assetId` — same `assetId` across two orgs never collides.
 - All `GateStore` methods (`getDecision`, `getAllowedVms`, `getBlockedVms`, `getAllDecisions`, `getSummary`, `getDecisionByVmName`, `isEvaluationComplete`, `getLastEvaluationTime`) require `orgId: string` — enforced by TypeScript.
 - `GateEvaluator`, `runGatePhase`, `readAllowedAssets`, `readBlockedAssets`, `getGateSummary` all require `orgId`.
@@ -242,7 +214,7 @@ server file. The attack surface described in the advisory does not exist in the 
 - API responses strip encrypted values (`enc:v1:...` never returned to the client).
 
 ### Testing
-- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation, automation inventory isolation, legacy-route-scope, org-context — 156 tests).
+- `npm test` runs without DATABASE_URL (authz, security, playbook-path, gate/hint isolation, automation inventory isolation, legacy-route-scope, org-context — 161 tests).
 - `npm run test:integration` requires `DATABASE_URL` pointing at a real PostgreSQL instance. Covers cross-tenant isolation (24 tests) + automation inventory integration tests (real routes + real DB). Last known status in configured DB environment: PASS.
 - Gate + hint isolation tests (`tests/gate-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.
 - Automation inventory isolation tests (`tests/automation-inventory-isolation.test.ts`) are DB-free, in-memory, included in `npm test`.

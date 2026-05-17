@@ -2,6 +2,45 @@
 
 ---
 
+## v25 — Drizzle Upgrade + Platform Admin Org-Selection + Org Existence Check
+**Date:** 2026-05-17
+**Status:** Pre-production MVP
+
+### Security
+- **GHSA-gpj5-g38j-94v9 RESOLVED — drizzle-orm upgraded to 0.45.2** — Formally accepted risk
+  ROVELINK-SEC-001 is now closed. The upgrade from `0.39.1` to `0.45.2` required no API changes
+  and was compatible with existing `drizzle-zod@0.7.0`. `npm audit --omit=dev` reports **0
+  vulnerabilities**.
+
+### Endpoint Changes
+- **`requireOrgContext` — platform_admin org-selection model (Option A)** — `platform_admin` users
+  no longer silently bypass the org-context guard with an undefined `req.orgId`. They must now
+  supply an `X-Org-Id` header (or `?orgId=` query param) when accessing any tenant-owned route.
+  Without it they receive `400 { code: "ORG_SELECTION_REQUIRED" }`. This eliminates the class of
+  silent 500 errors caused by `undefined` leaking into tenant-scoped DB queries.
+- **`POST /api/users` — org existence validation** — After the `orgId` presence check, the route
+  now calls `storage.getOrganization(orgId)` to verify the referenced org exists. A non-existent
+  `orgId` returns `404 { message: "Organization '<id>' not found" }` instead of creating an
+  orphaned user. `platform_admin` creation (no orgId) skips this check.
+- **`getOrganization(id)` added to `IStorage` and `DatabaseStorage`** — Cross-tenant safe lookup
+  used exclusively by the user creation path.
+
+### Test Coverage
+- 9 new tests in `tests/org-context.test.ts` covering:
+  - platform_admin without X-Org-Id → 400 `ORG_SELECTION_REQUIRED` (3 routes)
+  - platform_admin with X-Org-Id header → passes org guard (3 routes)
+  - viewer with non-existent orgId → 404 from `POST /api/users`
+  - platform_admin creation not blocked by org-existence check
+  - 3 pre-existing "platform_admin bypasses guard" tests updated to assert 400 + code
+- DB-free suite: **161 tests, 0 failures**.
+
+### Unchanged from v24
+- Open signup blocked in production (`SIGNUP_DISABLED`).
+- Ansible project sync remains demo-only (clearly labeled).
+- `rotate-tokens` remains 501 Not Implemented.
+
+---
+
 ## v24 — User Creation Validation + /api/auth/me orgId
 **Date:** 2026-05-16
 **Status:** Pre-production MVP

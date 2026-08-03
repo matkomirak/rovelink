@@ -1,12 +1,15 @@
-// Database connection using Neon serverless PostgreSQL (from javascript_database blueprint)
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
+// Database connection using Neon serverless PostgreSQL by default.
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
+import pg from "pg";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import ws from "ws";
 import * as schema from "@shared/schema";
 
 neonConfig.webSocketConstructor = ws;
 
 const DATABASE_URL = process.env.DATABASE_URL;
+const DATABASE_CLIENT = process.env.DATABASE_CLIENT;
 
 // In test environments, allow import without DATABASE_URL.
 // Queries will throw at runtime if they actually reach the DB — but auth/security
@@ -17,10 +20,30 @@ if (!DATABASE_URL && process.env.NODE_ENV !== "test") {
   );
 }
 
-export const pool = DATABASE_URL
-  ? new Pool({ connectionString: DATABASE_URL })
-  : (null as unknown as Pool);
+function createDatabaseClient(connectionString: string) {
+  if (DATABASE_CLIENT === "pg") {
+    const pool = new pg.Pool({ connectionString });
+    return {
+      pool,
+      db: drizzlePg(pool, { schema }),
+    };
+  }
 
-export const db = DATABASE_URL
-  ? drizzle({ client: pool, schema })
-  : (null as unknown as ReturnType<typeof drizzle<typeof schema>>);
+  const pool = new NeonPool({ connectionString });
+  return {
+    pool,
+    db: drizzleNeon({ client: pool, schema }),
+  };
+}
+
+const databaseClient = DATABASE_URL
+  ? createDatabaseClient(DATABASE_URL)
+  : undefined;
+
+export const pool = databaseClient
+  ? databaseClient.pool
+  : (null as unknown as ReturnType<typeof createDatabaseClient>["pool"]);
+
+export const db = databaseClient
+  ? databaseClient.db
+  : (null as unknown as ReturnType<typeof createDatabaseClient>["db"]);

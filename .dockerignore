@@ -1,0 +1,12 @@
+.git
+.local/
+node_modules
+dist
+server/public
+.env
+.env.*
+!.env.example
+*.log
+*.tar.gz
+bootstrap-credentials.txt
+npm-debug.log*

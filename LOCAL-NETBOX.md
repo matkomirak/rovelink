@@ -7,7 +7,7 @@ It uses its own Postgres, Redis services, and Docker volumes.
 
 ```bash
 cp .env.netbox.example .env.netbox
-# Edit .env.netbox and replace the placeholder passwords, secret key, and API token.
+# Edit .env.netbox and replace the placeholder passwords, secret key, API token, and API token pepper.
 docker compose -p rovelink-netbox --env-file .env.netbox -f docker-compose.netbox.yml up -d
 ```
 
@@ -36,6 +36,12 @@ The API token comes from:
 
 ```text
 NETBOX_SUPERUSER_API_TOKEN
+```
+
+NetBox also requires `API_TOKEN_PEPPERS` to save and use v2 API tokens. The Docker image populates that setting from:
+
+```text
+NETBOX_API_TOKEN_PEPPER_1
 ```
 
 ## Rovelink Docker Access

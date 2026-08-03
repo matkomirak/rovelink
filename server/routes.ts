@@ -13,6 +13,7 @@ import { notificationService } from "./services/notificationService";
 import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
+import { sanitizeGitSyncError, syncGitProject } from "./services/git-project-sync";
 import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema } from "@shared/schema";
 import { db } from "./db";
 import { eq, sql } from "drizzle-orm";
@@ -421,7 +422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/projects", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const { orgId: _o, id: _i, ...safeBody } = req.body;
+      const { orgId: _o, id: _i, checkoutPath: _c, ...safeBody } = req.body;
       const data = insertProjectSchema.parse({ ...safeBody, orgId: req.orgId! });
       const project = await storage.createProject(data);
       res.json(project);
@@ -437,20 +438,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Project not found" });
       }
 
-      // Demo sync — simulates Git sync (no real checkout in this environment)
-      await storage.updateProject(req.params.id, { syncStatus: "syncing" }, req.orgId!);
+      if (project.syncStatus === "syncing") {
+        return res.status(409).json({ message: "Project sync is already running" });
+      }
 
-      // Simulate async sync with demo playbook discovery
-      setTimeout(async () => {
-        const demoPlaybooks = ["site.yml", "deploy.yml", "rollback.yml"];
-        await storage.updateProject(req.params.id, {
+      await storage.updateProject(req.params.id, { syncStatus: "syncing", syncError: null }, req.orgId!);
+
+      try {
+        const result = await syncGitProject(project);
+        const updated = await storage.updateProject(req.params.id, {
           syncStatus: "success",
+          syncError: null,
           lastSyncAt: new Date(),
-          playbooks: demoPlaybooks,
+          checkoutPath: result.checkoutPath,
+          playbooks: result.playbooks,
         }, req.orgId!);
-      }, 2000);
-
-      res.json({ message: "Demo sync started — playbooks discovered from simulated repository" });
+        res.json({ message: "Project synced successfully", project: updated });
+      } catch (syncError: any) {
+        const message = sanitizeGitSyncError(syncError);
+        await storage.updateProject(req.params.id, {
+          syncStatus: "error",
+          syncError: message,
+        }, req.orgId!);
+        res.status(400).json({ message });
+      }
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Sync failed" });
     }
@@ -458,7 +469,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/projects/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const data = insertProjectSchema.partial().parse(req.body);
+      const { orgId: _o, id: _i, checkoutPath: _c, ...safeBody } = req.body;
+      const data = insertProjectSchema.partial().parse(safeBody);
       const project = await storage.updateProject(req.params.id, data, req.orgId!);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });

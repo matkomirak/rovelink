@@ -430,6 +430,7 @@ export const insertProjectSchema = createInsertSchema(projects).omit({
   playbooks: true,
   syncStatus: true,
   syncError: true,
+  checkoutPath: true,
 });
 
 export const insertCredentialSchema = createInsertSchema(credentials).omit({

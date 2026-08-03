@@ -10,6 +10,7 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx server/seed.ts",
+    "netbox:seed:demo": "tsx server/scripts/seed-local-netbox-demo.ts",
     "test": "cross-env NODE_ENV=test tsx --test tests/authz.test.ts tests/security.test.ts tests/playbook-paths.test.ts tests/gate-isolation.test.ts tests/automation-inventory-isolation.test.ts tests/legacy-route-scope.test.ts tests/org-context.test.ts",
     "test:integration": "NODE_ENV=test tsx --test tests/tenant-isolation.test.ts tests/automation-inventory-integration.test.ts",
     "test:integration:setup": "npm run db:push && npm run test:integration",

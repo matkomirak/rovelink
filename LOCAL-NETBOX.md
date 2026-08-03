@@ -44,6 +44,43 @@ NetBox also requires `API_TOKEN_PEPPERS` to save and use v2 API tokens. The Dock
 NETBOX_API_TOKEN_PEPPER_1
 ```
 
+For Rovelink and local seed scripts, create or copy a NetBox API token from the NetBox UI:
+
+```text
+Admin menu -> API Tokens -> Add a token
+```
+
+Copy the token into `.env.netbox` as:
+
+```text
+NETBOX_TOKEN=<local-netbox-api-token>
+```
+
+Use the base NetBox URL in the same file:
+
+```text
+NETBOX_URL=http://localhost:8000
+```
+
+## Optional Demo Seed
+
+The demo seed is opt-in only and never runs automatically during `docker compose up`.
+
+After NetBox is running and `.env.netbox` has `NETBOX_URL` and `NETBOX_TOKEN`, run:
+
+```powershell
+npm.cmd run netbox:seed:demo
+```
+
+The script creates or reuses:
+
+```text
+site: rovelink-lab
+cluster type: docker-lab
+cluster: local-netbox-lab
+VMs: demo-vm-001 through demo-vm-020
+```
+
 ## Rovelink Docker Access
 
 When Rovelink is running in Docker, configure its NetBox URL as:

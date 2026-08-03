@@ -1,0 +1,63 @@
+services:
+  netbox:
+    image: netboxcommunity/netbox:latest
+    depends_on:
+      netbox-postgres:
+        condition: service_healthy
+      netbox-redis:
+        condition: service_started
+      netbox-redis-cache:
+        condition: service_started
+    ports:
+      - "8000:8080"
+    environment:
+      ALLOWED_HOSTS: ${NETBOX_ALLOWED_HOSTS:-localhost 127.0.0.1 host.docker.internal}
+      DB_HOST: netbox-postgres
+      DB_NAME: ${NETBOX_DB_NAME:-netbox}
+      DB_USER: ${NETBOX_DB_USER:-netbox}
+      DB_PASSWORD: ${NETBOX_DB_PASSWORD:?set NETBOX_DB_PASSWORD in .env.netbox}
+      REDIS_HOST: netbox-redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: 0
+      REDIS_CACHE_HOST: netbox-redis-cache
+      REDIS_CACHE_PORT: 6379
+      REDIS_CACHE_DATABASE: 1
+      SECRET_KEY: ${NETBOX_SECRET_KEY:?set NETBOX_SECRET_KEY in .env.netbox}
+      SUPERUSER_NAME: ${NETBOX_SUPERUSER_NAME:-admin}
+      SUPERUSER_EMAIL: ${NETBOX_SUPERUSER_EMAIL:-admin@example.com}
+      SUPERUSER_PASSWORD: ${NETBOX_SUPERUSER_PASSWORD:?set NETBOX_SUPERUSER_PASSWORD in .env.netbox}
+      SUPERUSER_API_TOKEN: ${NETBOX_SUPERUSER_API_TOKEN:?set NETBOX_SUPERUSER_API_TOKEN in .env.netbox}
+    restart: unless-stopped
+
+  netbox-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${NETBOX_DB_NAME:-netbox}
+      POSTGRES_USER: ${NETBOX_DB_USER:-netbox}
+      POSTGRES_PASSWORD: ${NETBOX_DB_PASSWORD:?set NETBOX_DB_PASSWORD in .env.netbox}
+    volumes:
+      - netbox_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NETBOX_DB_USER:-netbox} -d ${NETBOX_DB_NAME:-netbox}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  netbox-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - netbox_redis_data:/data
+    restart: unless-stopped
+
+  netbox-redis-cache:
+    image: redis:7-alpine
+    volumes:
+      - netbox_redis_cache_data:/data
+    restart: unless-stopped
+
+volumes:
+  netbox_pg_data:
+  netbox_redis_data:
+  netbox_redis_cache_data:

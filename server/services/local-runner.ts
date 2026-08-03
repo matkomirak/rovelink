@@ -14,6 +14,7 @@ import { spawn } from "child_process";
 export interface LocalRunOptions {
   playbookPath: string;
   inventoryPath: string;
+  workingDirectory?: string;
   limitExpr?: string;
   extraVars?: Record<string, any>;
   checkMode?: boolean;
@@ -34,9 +35,22 @@ export interface LocalRunResult {
   };
 }
 
+export interface LocalRunnerOptions {
+  command?: string;
+  commandArgsPrefix?: string[];
+}
+
 export class LocalRunner {
+  private readonly command: string;
+  private readonly commandArgsPrefix: string[];
+
+  constructor(options: LocalRunnerOptions = {}) {
+    this.command = options.command ?? "ansible-playbook";
+    this.commandArgsPrefix = options.commandArgsPrefix ?? [];
+  }
+
   async execute(options: LocalRunOptions, onLog: (line: string) => void): Promise<LocalRunResult> {
-    const args: string[] = ["-i", options.inventoryPath, options.playbookPath];
+    const args: string[] = [...this.commandArgsPrefix, "-i", options.inventoryPath, options.playbookPath];
 
     if (options.limitExpr) args.push("--limit", options.limitExpr);
     if (options.checkMode) args.push("--check");
@@ -50,7 +64,8 @@ export class LocalRunner {
       const logs: string[] = [];
       const summary = { hosts: 0, ok: 0, changed: 0, failed: 0, unreachable: 0 };
 
-      const proc = spawn("ansible-playbook", args, {
+      const proc = spawn(this.command, args, {
+        cwd: options.workingDirectory,
         env: { ...process.env, ANSIBLE_FORCE_COLOR: "0", ANSIBLE_NOCOLOR: "1" },
       });
 
@@ -90,7 +105,7 @@ export class LocalRunner {
       });
 
       proc.on("error", (err) => {
-        onLog(`[rovelink] Failed to start ansible-playbook: ${err.message}\n`);
+        onLog(`[rovelink] Failed to start ${this.command}: ${err.message}\n`);
         resolve({ status: "error", exitCode: -1, logs: err.message, summary });
       });
     });

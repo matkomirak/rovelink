@@ -15,7 +15,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN apk add --no-cache git
+RUN apk add --no-cache ansible-core git openssh-client
 
 COPY package*.json ./
 COPY --from=builder /app/node_modules ./node_modules

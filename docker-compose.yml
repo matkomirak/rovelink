@@ -16,6 +16,9 @@ services:
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
       NETBOX_URL: ${NETBOX_URL:-}
       NETBOX_TOKEN: ${NETBOX_TOKEN:-}
+      ROVELINK_PROJECTS_ROOT: /data/git-projects
+    volumes:
+      - git_project_checkouts:/data/git-projects
     depends_on:
       db:
         condition: service_healthy
@@ -38,3 +41,4 @@ services:
 
 volumes:
   pg_data:
+  git_project_checkouts:

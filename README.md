@@ -4,7 +4,7 @@ Rovelink is a full-stack infrastructure automation platform that centralises IT 
 
 - **Provider Inventory** — sync VM inventories from Proxmox, Azure, VMware vCenter, and a deterministic Fake generator into NetBox.
 - **Automation GATE** — an inescapable governance layer that enforces tenant, role, and `automatable` custom-field checks in NetBox before any playbook can run against a VM.
-- **Job Templates & Runs** — launch Ansible playbooks either locally (`ansible-playbook`) or via AWX / Ansible Automation Platform, with real-time log streaming over WebSockets.
+- **Job Templates & Runs** — launch Ansible playbooks with local `ansible-playbook` execution for localhost and reachable Linux SSH targets, with real-time log streaming over WebSockets.
 - **Rovelink Data Pipelines (RDP)** — configurable source→CMDB pipelines supporting NetBox, i-doit, and ServiceNow targets with a visual mapping editor, dry-run support, and a rules engine.
 - **Automation Inventories** — unified Ansible inventory management (Linked / File / Script) with per-inventory Eligibility Policy.
 - **Reports Dashboard** — inventory health widgets, run statistics, and provider sync history.
@@ -87,7 +87,16 @@ See [`.env.example`](.env.example) for a full list. The minimum set required to 
 - Secrets are never returned in API responses — all endpoints call `redactForLog` before serialising.
 - The automation GATE system is non-optional: no VM can be targeted by automation without explicit governance in NetBox.
 - JWT tokens are stored as HttpOnly cookies; `localStorage` is never used for auth state.
+- Login and signup responses do not return JWTs in JSON.
 - `AUTH_DISABLE` is a dev-only flag that causes HTTP 403 in production.
+
+## Current MVP Limits
+
+- AWX / Ansible Automation Platform execution is out of scope for the current local MVP.
+- Git project sync supports public HTTPS repositories only; private Git, SSH Git, Git tokens, and embedded URL credentials are not supported.
+- SSH private keys can be stored encrypted for Ansible execution, but SSH key passphrases are not supported yet.
+- The local runner must be intentionally enabled with `ROVELINK_LOCAL_RUNNER_ENABLED=true` before production use.
+- Remote SSH playbooks require Linux targets reachable from the app container and gate-approved inventory.
 
 ## License
 

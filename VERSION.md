@@ -2,6 +2,27 @@
 
 ---
 
+## vNext — Final Local MVP Cleanup
+**Date:** 2026-08-04
+**Status:** Local MVP ready; production deployment still requires final hardening gate
+
+### Current MVP State
+- Public HTTPS Git project sync performs real clone/fetch and discovers real Ansible playbooks.
+- Local Ansible execution uses `ansible-playbook` with server-managed checkout paths.
+- Remote SSH Ansible execution supports reachable Linux targets with gate-approved inventory.
+- SSH private-key credentials are encrypted at rest and sanitized from API responses.
+- Login/signup continue setting HttpOnly auth cookies but no longer return JWTs in JSON.
+- Production auth fails closed when DB user lookup fails; JWT-claim fallback is test-only.
+- Template launch dispatcher failures are stored as sanitized run logs/result summaries.
+
+### Current Limits
+- AWX / Ansible Automation Platform execution is out of scope for the current local MVP.
+- Private Git, SSH Git, Git tokens, and embedded Git URL credentials are not supported.
+- SSH key passphrases are not supported.
+- Local runner must be intentionally enabled with `ROVELINK_LOCAL_RUNNER_ENABLED=true`.
+
+---
+
 ## v26 — Platform Admin Org Existence Validation + Demo Endpoint Decision + Browserslist
 **Date:** 2026-05-17
 **Status:** Pre-production MVP
@@ -19,8 +40,8 @@
   demo-labeled (`_demo:true`). The frontend actively calls them; coordinated UI migration to
   `/api/inventories/...` is required before these can be removed or replaced with 410 Gone.
   Decision and production replacement path documented in `PRODUCTION-HARDENING.md`.
-- **Ansible project sync (T4) — Option A retained:** Demo sync remains clearly labeled with
-  no behavior change.
+- **Historical Ansible project sync decision (T4):** This version retained demo sync. Current
+  MVP behavior has since been superseded by real public HTTPS Git sync.
 
 ### Build Improvement
 - **Browserslist database updated** — `caniuse-lite` updated via
@@ -76,7 +97,8 @@ npm audit        → found 0 vulnerabilities
 
 ### Unchanged from v24
 - Open signup blocked in production (`SIGNUP_DISABLED`).
-- Ansible project sync remains demo-only (clearly labeled).
+- Historical note: Ansible project sync used a non-production placeholder in this release. Current MVP
+  behavior has since been superseded by real public HTTPS Git sync.
 - `rotate-tokens` remains 501 Not Implemented.
 
 ---
@@ -114,7 +136,8 @@ npm audit        → found 0 vulnerabilities
 ### Unchanged from v23
 - `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
   (ROVELINK-SEC-001). Review date 2026-06-15.
-- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- Historical note: project sync used a non-production placeholder in this release. Current MVP behavior
+  has since been superseded by real public HTTPS Git sync and local/remote Ansible execution.
 - `rotate-tokens` remains 501 Not Implemented.
 
 ---
@@ -160,7 +183,8 @@ npm audit        → found 0 vulnerabilities
 ### Unchanged from v22
 - `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
   (ROVELINK-SEC-001). Review date 2026-06-15.
-- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- Historical note: project sync used a non-production placeholder in this release. Current MVP behavior
+  has since been superseded by real public HTTPS Git sync and local/remote Ansible execution.
 - `rotate-tokens` remains 501 Not Implemented.
 
 ---
@@ -204,7 +228,8 @@ npm audit        → found 0 vulnerabilities
 ### Unchanged from v21
 - `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
   (ROVELINK-SEC-001). Review date 2026-06-15.
-- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- Historical note: project sync used a non-production placeholder in this release. Current MVP behavior
+  has since been superseded by real public HTTPS Git sync and local/remote Ansible execution.
 
 ---
 
@@ -247,7 +272,8 @@ npm audit        → found 0 vulnerabilities
 - `npm test` (DB-free): 110 tests, 0 failures.
 - `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally accepted
   (ROVELINK-SEC-001). Review date 2026-06-15.
-- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- Historical note: project sync used a non-production placeholder in this release. Current MVP behavior
+  has since been superseded by real public HTTPS Git sync and local/remote Ansible execution.
 - Integration test ergonomics documented in `PRODUCTION-HARDENING.md`.
 
 ---
@@ -290,7 +316,8 @@ npm audit        → found 0 vulnerabilities
 - `npm test` (DB-free): 110 tests, 0 failures.
 - `npm audit --omit=dev`: 1 high — `drizzle-orm` GHSA-gpj5-g38j-94v9, formally
   accepted (ROVELINK-SEC-001). Review date 2026-06-15.
-- Project sync remains demo-only. `runLocally` fails closed without `checkoutPath`.
+- Historical note: project sync used a non-production placeholder in this release. Current MVP behavior
+  has since been superseded by real public HTTPS Git sync and local/remote Ansible execution.
 
 ---
 
@@ -322,8 +349,8 @@ npm audit        → found 0 vulnerabilities
   Zod v3 → v4 migration. Review date: 2026-06-15.
 
 ### Local Ansible / Project Sync
-- Project sync remains demo-only. UI button reads "Demo Sync". No real Git clone.
-  `runLocally` fails closed without `project.checkoutPath`.
+- Historical note: project sync used a non-production placeholder in this release. Current MVP behavior
+  has since been superseded by real public HTTPS Git sync and local/remote Ansible execution.
 
 ---
 
@@ -431,13 +458,14 @@ npm audit        → found 0 vulnerabilities
 - Multi-source NetBox inventory management.
 
 ### Project & Credentials Management
-- CRUD for Git repositories. Project sync is demo-only — returns hardcoded playbooks from a
-  simulated repository. UI button reads "Demo Sync". No real Git clone is performed.
-  Local Ansible execution fails safely without `project.checkoutPath`.
+- CRUD for public HTTPS Git repositories. Project sync performs real clone/fetch into a
+  server-managed checkout path and discovers real Ansible playbooks. Private Git, SSH Git,
+  Git tokens, and embedded URL credentials are not supported in the current MVP.
 
 ### Job Templates & Runs
 - Creation and scheduling of job templates linked to projects, playbooks, and credentials.
-- Simulated Ansible execution (FakeRunner) with real-time log streaming via WebSockets.
+- Local `ansible-playbook` execution for localhost and reachable remote Linux SSH targets,
+  with real-time log streaming via WebSockets.
 - Persistent log storage.
 - Unified Runs View consolidating playbook, pipeline sync, and provider sync runs.
 
@@ -478,9 +506,10 @@ npm audit        → found 0 vulnerabilities
 - Owner: Platform Engineering. Review date: 2026-06-15. See `PRODUCTION-HARDENING.md` for
   full upgrade plan.
 
-### Local Ansible — Demo Only
-- Project sync is simulated. No real Git clone. `runLocally` fails closed without `checkoutPath`.
-- Not production-ready for real Ansible execution until real Git sync is implemented.
+### Local and Remote Ansible
+- Public HTTPS Git sync and local/remote SSH Ansible execution are implemented for the local MVP.
+- Remote SSH targets must be reachable from the app container and pass gate-approved inventory.
+- Local runner must be intentionally enabled with `ROVELINK_LOCAL_RUNNER_ENABLED=true`.
 
 ### Integration Tests Require External DB
 - `npm run test:integration` requires `DATABASE_URL` pointing at a real PostgreSQL instance.

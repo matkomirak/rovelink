@@ -6,7 +6,7 @@ import { dispatchRun } from "../services/runner-dispatcher";
 import { notificationService } from "../services/notificationService";
 import { insertJobTemplateSchema } from "@shared/schema";
 import { requireRole } from "../auth/roles";
-import { sendInternalError } from "../services/api-errors";
+import { getSafeErrorMessage, sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -106,10 +106,13 @@ router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res
         if (updatedRun) {
           await notificationService.triggerNotifications(updatedRun);
         }
-      } catch {
+      } catch (error) {
+        const failureLog = `[rovelink] Run failed: ${getSafeErrorMessage(error, "Run failed")}\n`;
         const failedRun = await storage.updateJobRun(run.id, {
           status: "failed",
           completedAt: new Date(),
+          logs: failureLog,
+          resultSummary: { error: failureLog.trim() },
         }, run.orgId!);
         if (failedRun) {
           await notificationService.triggerNotifications(failedRun);

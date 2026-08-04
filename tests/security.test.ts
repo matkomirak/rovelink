@@ -36,6 +36,11 @@ import {
   CMDB_SECRET_FIELDS,
 } from "../server/services/secrets";
 import { sanitizeErrorForLog } from "../server/services/api-errors";
+import {
+  buildAuthUserResponse,
+  buildRunFailureLog,
+  shouldFallbackToJwtClaimsOnDbLookupError,
+} from "../server/routes";
 
 // Provide a test encryption key (64-char hex = 32 bytes)
 const TEST_KEY = "a".repeat(64);
@@ -284,5 +289,40 @@ describe("sanitizeErrorForLog", () => {
     assert.ok(!json.includes("jwt.secret.value"));
     assert.ok(!json.includes("password@example.com"));
     assert.ok(json.includes("[REDACTED]"));
+  });
+});
+
+describe("auth response and production fallback hardening", () => {
+  it("auth response omits JWT token and returns only safe user fields", () => {
+    const response = buildAuthUserResponse({
+      id: "u1",
+      username: "admin",
+      role: "admin",
+      orgId: "org-1",
+    });
+
+    assert.deepStrictEqual(response, {
+      user: { id: "u1", username: "admin", role: "admin", orgId: "org-1" },
+    });
+    assert.ok(!("token" in response));
+  });
+
+  it("JWT claim fallback on DB lookup errors is test-only", () => {
+    assert.strictEqual(shouldFallbackToJwtClaimsOnDbLookupError({ NODE_ENV: "test" }), true);
+    assert.strictEqual(shouldFallbackToJwtClaimsOnDbLookupError({ NODE_ENV: "production" }), false);
+    assert.strictEqual(shouldFallbackToJwtClaimsOnDbLookupError({ NODE_ENV: "development" }), false);
+  });
+});
+
+describe("run failure observability", () => {
+  it("sanitizes dispatcher failure messages before storing them in run logs", () => {
+    const log = buildRunFailureLog(
+      new Error("credential load failed with token=abc123 at https://user:password@example.com/repo.git")
+    );
+
+    assert.match(log, /^\[rovelink\] Run failed:/);
+    assert.ok(!log.includes("abc123"));
+    assert.ok(!log.includes("password@example.com"));
+    assert.ok(log.includes("[REDACTED]"));
   });
 });

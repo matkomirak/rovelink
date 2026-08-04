@@ -42,6 +42,13 @@ export function sendInternalError(
   return res.status(500).json({ message: publicMessage });
 }
 
+export function getSafeErrorMessage(error: unknown, fallback = "Request failed"): string {
+  const safe = sanitizeErrorForLog(error);
+  return typeof safe.message === "string" && safe.message.trim()
+    ? safe.message.trim()
+    : fallback;
+}
+
 function sanitizeText(text: string): string {
   let sanitized = text;
   for (const [pattern, replacement] of SECRET_TEXT_PATTERNS) {

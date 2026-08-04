@@ -1,7 +1,8 @@
 # Local Development
 
-This workflow starts Rovelink, optional local NetBox, demo VM data, public Git
-project sync, and localhost-only Ansible execution.
+This workflow starts Rovelink, optional local NetBox, demo VM data, public HTTPS
+Git project sync, and local Ansible execution for both localhost playbooks and
+reachable remote Linux SSH targets.
 
 ## Start Rovelink
 
@@ -110,12 +111,12 @@ Then click `Sync`. The checkout path should be under:
 /data/git-projects/<org-id>/<project-id>/repo
 ```
 
-Private Git URLs, SSH Git URLs, and embedded URL credentials are intentionally
-not supported in local slice 1. Git hosts must be listed in
+Private Git URLs, SSH Git URLs, Git tokens, and embedded URL credentials are
+intentionally not supported in the current MVP. Git hosts must be listed in
 `ROVELINK_GIT_ALLOWED_HOSTS`, and localhost/private/link-local addresses are
 rejected.
 
-## Run A Localhost Playbook
+## Run Ansible Playbooks
 
 Create a Job Template that uses:
 
@@ -124,7 +125,7 @@ runnerMode: local
 playbook: path/to/localhost-playbook.yml
 ```
 
-For this local slice, the playbook must target only:
+For localhost-only playbooks, the playbook can target:
 
 ```text
 localhost
@@ -132,14 +133,21 @@ localhost
 ::1
 ```
 
-Rovelink still computes and stores the gate snapshot before execution. For
-localhost-only playbooks, it uses a generated local inventory with
-`ansible_connection: local`.
+These playbooks do not require SSH credentials. Rovelink uses a generated local
+inventory with `ansible_connection: local`.
 
-Remote SSH execution and SSH/private key credential storage are not implemented
-in this local workflow yet.
+For remote SSH playbooks:
 
-Local runner execution is bounded by:
+- Create an `ssh_key` credential in Rovelink with a username and private key.
+- SSH key passphrases are not supported yet.
+- Targets must be reachable from the app container.
+- Inventory must still pass the automation GATE; blocked hosts are excluded.
+- `strictHostKeyChecking` controls whether Ansible disables host key checking.
+
+Rovelink computes and stores the gate snapshot before execution for both
+localhost and remote SSH runs. The local runner must be intentionally enabled;
+Docker Compose does this for local development with
+`ROVELINK_LOCAL_RUNNER_ENABLED=true`. Local runner execution is bounded by:
 
 ```text
 ROVELINK_LOCAL_RUNNER_TIMEOUT_MS=600000

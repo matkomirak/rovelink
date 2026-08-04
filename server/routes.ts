@@ -28,7 +28,7 @@ import {
   encryptNetboxToken,
   decryptNetboxToken,
 } from "./services/secrets";
-import { sendClientError, sendInternalError } from "./services/api-errors";
+import { getSafeErrorMessage, sanitizeErrorForLog, sendClientError, sendInternalError } from "./services/api-errors";
 import {
   buildCredentialCreate,
   buildCredentialUpdate,
@@ -66,6 +66,19 @@ if (isProduction && isLocalDevRuntime()) {
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 const JWT_EXPIRES_IN = "24h";
+
+export function shouldFallbackToJwtClaimsOnDbLookupError(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === "test";
+}
+
+export function buildAuthUserResponse(user: { id: string; username: string; role: string; orgId?: string | null }) {
+  return { user: { id: user.id, username: user.username, role: user.role, orgId: user.orgId ?? null } };
+}
+
+export function buildRunFailureLog(error: unknown): string {
+  const message = getSafeErrorMessage(error, "Run failed");
+  return `[rovelink] Run failed: ${message}\n`;
+}
 
 // ─── Rate limiter for login ───────────────────────────────────────────────────
 const loginRateLimiter = rateLimit({
@@ -118,17 +131,19 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
       } as any)
     : undefined;
 
-  // Step 3: Attempt to hydrate from DB — DB errors must NOT invalidate a valid token.
+  // Step 3: Hydrate from DB. In production, a missing/unreachable DB user is unauthorized;
+  // JWT-claim fallback is allowed only in DB-free tests.
   try {
     const dbUser = await storage.getUser(decoded.userId);
-    if (dbUser) {
-      req.user = dbUser;
-      req.orgId = dbUser.orgId ?? undefined;
+    if (!dbUser) {
+      return res.status(401).json({ message: "Unauthorized" });
     }
+    req.user = dbUser;
+    req.orgId = dbUser.orgId ?? undefined;
   } catch (error) {
-    // Log in non-test environments but do not reject the request.
-    if (process.env.NODE_ENV !== "test") {
-      console.error("[auth] DB user lookup failed, continuing with JWT claims:", (error as any)?.message);
+    if (!shouldFallbackToJwtClaimsOnDbLookupError()) {
+      console.error("[auth] DB user lookup failed:", JSON.stringify(sanitizeErrorForLog(error)));
+      return res.status(401).json({ message: "Unauthorized" });
     }
   }
 
@@ -266,7 +281,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const token = jwt.sign({ userId: user.id, username: user.username, role: user.role, orgId: user.orgId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       setAuthCookie(res, token);
-      res.json({ token, user: { id: user.id, username: user.username, role: user.role, orgId: user.orgId } });
+      res.json(buildAuthUserResponse(user));
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Signup failed" });
     }
@@ -284,7 +299,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const stubUser = { id: "stub-admin-id", username: "admin", role: "admin", orgId: null as null };
         const token = jwt.sign({ userId: stubUser.id, username: stubUser.username, role: stubUser.role, orgId: stubUser.orgId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
         setAuthCookie(res, token);
-        return res.json({ token, user: stubUser });
+        return res.json(buildAuthUserResponse(stubUser));
       }
 
       const { username, password } = insertUserSchema.parse(req.body);
@@ -301,7 +316,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const token = jwt.sign({ userId: user.id, username: user.username, role: user.role, orgId: user.orgId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       setAuthCookie(res, token);
-      res.json({ token, user: { id: user.id, username: user.username, role: user.role, orgId: user.orgId } });
+      res.json(buildAuthUserResponse(user));
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Login failed" });
     }

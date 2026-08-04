@@ -1,9 +1,11 @@
 # Rovelink — Production Hardening Status
 
-**Current status: pre-production MVP — not production-ready**
+**Current status: local MVP ready; production deployment still requires the hardening gate below**
 
-This document accurately reflects the state of the codebase as of v26.
-Do not mark as production-ready until the final acceptance gate below passes clean.
+This document tracks the remaining production hardening work. The local Docker
+MVP supports NetBox integration, public HTTPS Git sync, local/remote SSH Ansible
+execution, and encrypted SSH private-key credential storage. Do not mark a
+production deployment ready until the final acceptance gate below passes clean.
 
 ---
 
@@ -77,7 +79,8 @@ npm audit --omit=dev
 | Local execution blocked when no `checkoutPath` on project | PASS |
 | Inventory file generated from gate-approved hosts | PASS — gate-filtered, blocked hosts excluded |
 | Inventory file written to runtime/inventories/<orgId>/<runId>/ | PASS |
-| Project sync is clearly labeled as demo | PASS — UI button reads "Demo Sync" |
+| Public HTTPS Git project sync | PASS — real clone/fetch, server-managed checkout path, host allowlist, private-address rejection |
+| Local and remote Ansible execution | PASS — local runner executes `ansible-playbook`, preserves GATE checks, supports encrypted SSH key materialization |
 | Logo asset optimized | PASS — 3.4 MB PNG → 12 KB WebP |
 
 ---
@@ -86,7 +89,7 @@ npm audit --omit=dev
 
 | Command | What it runs | Requires DB |
 |---|---|---|
-| `npm test` | authz, security, playbook-path, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context (163 tests) | No |
+| `npm test` | authz, security, credential secrets, bootstrap seed, runtime config, playbook paths, Git sync, local runner, SSH credential materialization, gate + hint isolation, automation inventory isolation, legacy-route-scope, org-context | No |
 | `npm run test:integration` | Cross-tenant isolation + automation inventory integration tests | Yes — DATABASE_URL required |
 | `npm run test:integration:setup` | Push schema then run all integration tests | Yes — DATABASE_URL required |
 | `npm run test:org-context` | `requireOrgContext` + onboarding route tests | No |
@@ -142,7 +145,7 @@ Status:        RESOLVED — drizzle-orm upgraded to 0.45.2 in v25
 Resolution:    2026-05-17
 ```
 
-**Resolution:** `drizzle-orm` was upgraded from `0.39.1` to `0.45.2` in v25. TypeScript check, full test suite (`npm test` — 161 tests), and production build (`npm run build`) all pass with the upgraded package. `npm audit --omit=dev` now reports **0 vulnerabilities**.
+**Resolution:** `drizzle-orm` was upgraded from `0.39.1` to `0.45.2` in v25. TypeScript check, full test suite, and production build all pass with the upgraded package. `npm audit --omit=dev` now reports **0 vulnerabilities**.
 
 The upgrade was compatible with the existing `drizzle-zod@0.7.0` (no Zod v4 migration was required — the concern documented previously proved not to be a blocker for this specific version step).
 
@@ -151,8 +154,9 @@ The upgrade was compatible with the existing `drizzle-zod@0.7.0` (no Zod v4 migr
 ## Completed Hardening
 
 ### Authentication
-- JWT verification is decoupled from DB user lookup. DB errors never cause 401 on valid tokens.
-- JWT claims provide identity fallback when DB is unreachable (`NODE_ENV=test`).
+- Auth tokens are stored as HttpOnly cookies and are not returned in login/signup JSON responses.
+- Production auth fails closed if DB user lookup fails or the user no longer exists.
+- JWT-claim fallback is test-only for DB-free unit tests (`NODE_ENV=test`).
 - `AUTH_DISABLE` hard-fails with HTTP 403 in production.
 - Auth tokens stored as HttpOnly cookies, never localStorage.
 
@@ -221,12 +225,14 @@ as a data source for production metrics, eligibility decisions, or gate logic.
 for real org-scoped host data. The legacy endpoints exist only to support the current UI
 until the inventory page is migrated to the automation inventory API.
 
-### Demo-Only Local Ansible (Option A — clearly labeled)
-- Project sync returns hardcoded demo playbooks only. No real Git clone is performed.
-- UI: sync button is labeled **"Demo Sync"**.
-- API response includes: `"Demo sync started — playbooks discovered from simulated repository"`.
-- Local Ansible execution fails safely without `checkoutPath` — see Local Runner Safety above.
-- **NOT production-ready for local Ansible execution** until real Git sync is implemented.
+### Real Git and Local/Remote Ansible
+- Project sync performs real public HTTPS Git clone/fetch into a server-managed checkout root.
+- Git sync rejects embedded credentials, localhost/private/link-local targets, unsafe refs, and hosts outside `ROVELINK_GIT_ALLOWED_HOSTS`.
+- Private Git, SSH Git, and Git tokens are intentionally out of scope for the current MVP.
+- Local runner executes real `ansible-playbook` for localhost playbooks and reachable Linux SSH targets.
+- SSH private keys are stored encrypted at rest, materialized only in per-run temporary files, and cleaned up after execution.
+- SSH key passphrases are not supported yet.
+- Local runner must be intentionally enabled with `ROVELINK_LOCAL_RUNNER_ENABLED=true`, especially for production use.
 
 ### Secrets
 - All provider and CMDB tokens encrypted at rest with AES-256-GCM (`ENCRYPTION_KEY`).

@@ -106,6 +106,58 @@ describe("LocalRunner", () => {
     assert.match(logs.join(""), /localhost : ok=1/);
   });
 
+  it("passes remote SSH key path without exposing private key content", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rovelink-runner-ssh-"));
+    const fakeRunnerPath = path.join(tempDir, "fake-runner.mjs");
+    const outputPath = path.join(tempDir, "args.json");
+    const inventoryPath = path.join(tempDir, "inventory.yml");
+    const playbookPath = path.join(tempDir, "remote-playbook.yml");
+    const privateKeyPath = path.join(tempDir, "id_ansible");
+    const privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-test-key\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    await fs.writeFile(inventoryPath, "all:\n  hosts:\n    demo:\n      ansible_host: 192.0.2.10\n");
+    await fs.writeFile(playbookPath, "- hosts: all\n");
+    await fs.writeFile(privateKeyPath, privateKey);
+    await fs.writeFile(
+      fakeRunnerPath,
+      [
+        "import fs from 'node:fs';",
+        "const payload = {",
+        "  args: process.argv.slice(2),",
+        "  hostKeyChecking: process.env.ANSIBLE_HOST_KEY_CHECKING,",
+        "  sshArgs: process.env.ANSIBLE_SSH_ARGS,",
+        "};",
+        `fs.writeFileSync(${JSON.stringify(outputPath)}, JSON.stringify(payload));`,
+        "console.log('demo : ok=1 changed=0 unreachable=0 failed=0');",
+      ].join("\n")
+    );
+
+    const runner = new LocalRunner({
+      command: process.execPath,
+      commandArgsPrefix: [fakeRunnerPath],
+    });
+    const logs: string[] = [];
+
+    const result = await runner.execute(
+      {
+        playbookPath,
+        inventoryPath,
+        credentialPath: privateKeyPath,
+        strictHostKeyChecking: false,
+      },
+      (line) => logs.push(line)
+    );
+
+    const observed = JSON.parse(await fs.readFile(outputPath, "utf8"));
+
+    assert.equal(result.status, "ok");
+    assert.deepEqual(observed.args, ["-i", inventoryPath, playbookPath, "--private-key", privateKeyPath]);
+    assert.equal(observed.hostKeyChecking, "False");
+    assert.match(observed.sshArgs, /StrictHostKeyChecking=no/);
+    assert.doesNotMatch(logs.join(""), /secret-test-key/);
+    assert.doesNotMatch(JSON.stringify(observed), /secret-test-key/);
+  });
+
   it("times out long-running commands", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rovelink-timeout-"));
     const slowRunnerPath = path.join(tempDir, "slow-runner.mjs");

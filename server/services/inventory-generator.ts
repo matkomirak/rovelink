@@ -34,6 +34,8 @@ export interface InventoryOptions {
   templateId?: string | null;
   inventoryId?: string | null;
   limitExpr?: string | null;
+  ansibleUser?: string | null;
+  ansiblePort?: number | null;
 }
 
 export interface InventoryResult {
@@ -58,6 +60,12 @@ export async function createInventoryForRunWithSnapshot(
   options: InventoryOptions
 ): Promise<InventoryResult> {
   const { orgId, runId } = options;
+  const ansibleUser = typeof options.ansibleUser === "string" && options.ansibleUser.trim()
+    ? options.ansibleUser.trim()
+    : null;
+  const ansiblePort = Number.isInteger(options.ansiblePort) && options.ansiblePort! > 0 && options.ansiblePort! <= 65535
+    ? options.ansiblePort
+    : null;
 
   // Resolve to an absolute path — no ambiguity about CWD.
   const dir = path.resolve(
@@ -169,6 +177,12 @@ export async function createInventoryForRunWithSnapshot(
       lines.push(`    ${host.safeName}:`);
       if (host.ip) {
         lines.push(`      ansible_host: "${host.ip}"`);
+      }
+      if (ansibleUser) {
+        lines.push(`      ansible_user: "${ansibleUser}"`);
+      }
+      if (ansiblePort) {
+        lines.push(`      ansible_port: ${ansiblePort}`);
       }
       if (host.netboxId != null) {
         lines.push(`      rovelink_netbox_id: ${host.netboxId}`);

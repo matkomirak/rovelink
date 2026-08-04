@@ -4,7 +4,7 @@
  * Requirements on the host:
  *   - ansible-playbook must be in PATH
  *   - The inventory file referenced in the job template must exist
- *   - SSH keys / credentials must be pre-configured on the host
+ *   - Remote SSH keys are passed as per-run temporary files by the dispatcher
  *
  * Security note: args are passed as an array to spawn(), never interpolated into a shell string.
  */
@@ -24,6 +24,7 @@ export interface LocalRunOptions {
   checkMode?: boolean;
   diffMode?: boolean;
   credentialPath?: string;
+  strictHostKeyChecking?: boolean;
 }
 
 export interface LocalRunResult {
@@ -77,9 +78,15 @@ export class LocalRunner {
       let outputTruncated = false;
       let settled = false;
 
+      const env: NodeJS.ProcessEnv = { ...process.env, ANSIBLE_FORCE_COLOR: "0", ANSIBLE_NOCOLOR: "1" };
+      if (options.strictHostKeyChecking === false) {
+        env.ANSIBLE_HOST_KEY_CHECKING = "False";
+        env.ANSIBLE_SSH_ARGS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null";
+      }
+
       const proc = spawn(this.command, args, {
         cwd: options.workingDirectory,
-        env: { ...process.env, ANSIBLE_FORCE_COLOR: "0", ANSIBLE_NOCOLOR: "1" },
+        env,
       });
 
       const finish = (result: LocalRunResult) => {

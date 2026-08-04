@@ -3,8 +3,15 @@ import { log } from "./vite";
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { cleanupStaleRuntimeCredentials } from "./services/ssh-credential-materializer";
 
 (async () => {
+  try {
+    await cleanupStaleRuntimeCredentials();
+  } catch (error) {
+    console.warn("[runtime.credentials.cleanup]", error instanceof Error ? error.message : String(error));
+  }
+
   const { app, httpServer } = await createApp();
 
   // Setup Vite in development or serve static files in production

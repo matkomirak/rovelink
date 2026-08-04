@@ -13,6 +13,11 @@ import { isLocalRunnerEnabled, LocalRunner } from "./local-runner";
 import { decryptSecret } from "./secrets";
 import { resolveSafePlaybookPath } from "./safe-playbook-path";
 import { createInventoryForRunWithSnapshot } from "./inventory-generator";
+import {
+  cleanupRuntimeCredentialDir,
+  loadAndMaterializeSshCredential,
+  type MaterializedSshCredential,
+} from "./ssh-credential-materializer";
 import type { JobRun } from "../../shared/schema";
 
 export interface RunResult {
@@ -121,6 +126,16 @@ async function runLocally(
     template.playbook
   );
   const localhostOnly = await isLocalhostOnlyPlaybook(resolvedPlaybookPath);
+  let sshCredential: MaterializedSshCredential | undefined;
+
+  try {
+    if (!localhostOnly) {
+      sshCredential = await loadAndMaterializeSshCredential({
+        credentialId: template.credentialId,
+        orgId: run.orgId!,
+        runId: run.id,
+      });
+    }
 
   // Generate and write a per-org/run inventory file — never accept a path from the client.
   // Gate policy is enforced fresh from DB; blocked hosts are excluded.
@@ -131,6 +146,8 @@ async function runLocally(
     templateId: template.id,
     inventoryId: template.inventoryId ?? null,
     limitExpr: run.limitExpr ?? null,
+    ansibleUser: sshCredential?.username ?? null,
+    ansiblePort: sshCredential?.sshPort ?? null,
   });
 
   // Persist gate snapshot on the run record for durable audit trail
@@ -154,6 +171,8 @@ async function runLocally(
       extraVars: (template.extraVars as Record<string, any>) ?? {},
       checkMode: template.checkMode ?? false,
       diffMode: template.diffMode ?? false,
+      credentialPath: sshCredential?.privateKeyPath,
+      strictHostKeyChecking: sshCredential?.strictHostKeyChecking,
     },
     onLog
   );
@@ -163,6 +182,15 @@ async function runLocally(
     summary: result.summary,
     logs: result.logs,
   };
+  } finally {
+    if (sshCredential) {
+      try {
+        await cleanupRuntimeCredentialDir(run.orgId!, run.id);
+      } catch {
+        onLog("[rovelink] Failed to clean up temporary SSH credential files.\n");
+      }
+    }
+  }
 }
 
 export async function isLocalhostOnlyPlaybook(playbookPath: string): Promise<boolean> {

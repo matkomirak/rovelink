@@ -14,7 +14,7 @@ import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
 import { sanitizeGitSyncError, syncGitProject } from "./services/git-project-sync";
-import { insertUserSchema, insertProjectSchema, insertCredentialSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema } from "@shared/schema";
+import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema } from "@shared/schema";
 import { db } from "./db";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -29,6 +29,11 @@ import {
   decryptNetboxToken,
 } from "./services/secrets";
 import { sendClientError, sendInternalError } from "./services/api-errors";
+import {
+  buildCredentialCreate,
+  buildCredentialUpdate,
+  sanitizeCredentialForResponse,
+} from "./services/credential-secrets";
 
 // Import modular RDP routes
 import pipelineRoutes from "./routes/pipelines";
@@ -503,7 +508,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/credentials", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const credentials = await storage.getCredentials(req.orgId!);
-      res.json(credentials);
+      res.json(credentials.map(sanitizeCredentialForResponse));
     } catch (error: any) {
       sendInternalError(res, error, "credentials.list", "Failed to fetch credentials");
     }
@@ -512,22 +517,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/credentials", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const { orgId: _o, id: _i, ...safeBody } = req.body;
-      const data = insertCredentialSchema.parse({ ...safeBody, orgId: req.orgId! });
-      const credential = await storage.createCredential(data);
-      res.json(credential);
+      const data = buildCredentialCreate(req.orgId!, safeBody);
+      const credential = await storage.createCredential(data as any);
+      res.json(sanitizeCredentialForResponse(credential));
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Failed to create credential" });
     }
   });
 
+  app.get("/api/credentials/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const credential = await storage.getCredential(req.params.id, req.orgId!);
+      if (!credential) {
+        return res.status(404).json({ message: "Credential not found" });
+      }
+      res.json(sanitizeCredentialForResponse(credential));
+    } catch (error: any) {
+      sendInternalError(res, error, "credentials.get", "Failed to fetch credential");
+    }
+  });
+
   app.patch("/api/credentials/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
-      const data = insertCredentialSchema.partial().parse(req.body);
+      const existing = await storage.getCredential(req.params.id, req.orgId!);
+      if (!existing) {
+        return res.status(404).json({ message: "Credential not found" });
+      }
+      const data = buildCredentialUpdate(existing, req.body);
       const credential = await storage.updateCredential(req.params.id, data, req.orgId!);
       if (!credential) {
         return res.status(404).json({ message: "Credential not found" });
       }
-      res.json(credential);
+      res.json(sanitizeCredentialForResponse(credential));
     } catch (error: any) {
       res.status(400).json({ message: error.message || "Failed to update credential" });
     }

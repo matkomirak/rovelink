@@ -47,15 +47,17 @@ export const projectsRelations = relations(projects, ({ many }) => ({
   jobTemplates: many(jobTemplates),
 }));
 
-// Credentials store non-secret metadata and an external secret reference.
+// Credentials store non-secret metadata, optional encrypted secret material, and an external secret reference.
 export const credentials = pgTable("credentials", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   kind: text("kind").notNull(), // ssh_key, winrm, sudo, vault
   metadata: jsonb("metadata").default({}), // Non-secret metadata (username, etc.)
+  secretConfig: jsonb("secret_config").default({}), // Encrypted secret material only; never returned to clients
   secretRef: text("secret_ref"), // Placeholder for external secret reference
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const credentialsRelations = relations(credentials, ({ many }) => ({
@@ -435,7 +437,9 @@ export const insertProjectSchema = createInsertSchema(projects).omit({
 
 export const insertCredentialSchema = createInsertSchema(credentials).omit({
   id: true,
+  secretConfig: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 export const insertJobTemplateSchema = createInsertSchema(jobTemplates).omit({

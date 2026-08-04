@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -13,7 +14,27 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Key, Plus, Loader2, Pencil, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { insertCredentialSchema, type Credential, type InsertCredential } from "@shared/schema";
+import { z } from "zod";
+import type { Credential } from "@shared/schema";
+
+type SanitizedCredential = Omit<Credential, "secretConfig"> & {
+  hasSecret: boolean;
+  hasPrivateKey: boolean;
+};
+
+const credentialFormSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  kind: z.string().min(1, "Type is required"),
+  secretRef: z.string().optional(),
+  username: z.string().optional(),
+  sshPort: z.string().optional(),
+  becomeMethod: z.string().optional(),
+  becomeUser: z.string().optional(),
+  strictHostKeyChecking: z.enum(["true", "false"]).default("true"),
+  privateKey: z.string().optional(),
+});
+
+type CredentialForm = z.infer<typeof credentialFormSchema>;
 
 const credentialKinds = [
   { value: "ssh_key", label: "SSH Key" },
@@ -22,34 +43,67 @@ const credentialKinds = [
   { value: "vault", label: "Vault" },
 ];
 
+function toCredentialPayload(data: CredentialForm, isUpdate: boolean) {
+  const payload: Record<string, unknown> = {
+    name: data.name,
+    kind: data.kind,
+    secretRef: data.secretRef || undefined,
+    metadata: {
+      username: data.username || undefined,
+      sshPort: data.sshPort ? Number(data.sshPort) : undefined,
+      becomeMethod: data.becomeMethod || undefined,
+      becomeUser: data.becomeUser || undefined,
+      strictHostKeyChecking: data.strictHostKeyChecking !== "false",
+    },
+  };
+
+  if (data.privateKey?.trim()) {
+    payload.privateKey = data.privateKey;
+  } else if (!isUpdate) {
+    payload.privateKey = "";
+  }
+
+  return payload;
+}
+
 export default function Credentials() {
   const [open, setOpen] = useState(false);
-  const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
+  const [editingCredential, setEditingCredential] = useState<SanitizedCredential | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [credentialToDelete, setCredentialToDelete] = useState<Credential | null>(null);
+  const [credentialToDelete, setCredentialToDelete] = useState<SanitizedCredential | null>(null);
   const { toast } = useToast();
 
-  const { data: credentials, isLoading } = useQuery<Credential[]>({
+  const { data: credentials, isLoading } = useQuery<SanitizedCredential[]>({
     queryKey: ["/api/credentials"],
   });
 
-  const form = useForm<InsertCredential>({
-    resolver: zodResolver(insertCredentialSchema),
+  const form = useForm<CredentialForm>({
+    resolver: zodResolver(credentialFormSchema),
     defaultValues: editingCredential ? {
       name: editingCredential.name,
       kind: editingCredential.kind,
-      metadata: editingCredential.metadata || {},
+      username: String((editingCredential.metadata as any)?.username || ""),
+      sshPort: String((editingCredential.metadata as any)?.sshPort || ""),
+      becomeMethod: String((editingCredential.metadata as any)?.becomeMethod || ""),
+      becomeUser: String((editingCredential.metadata as any)?.becomeUser || ""),
+      strictHostKeyChecking: (editingCredential.metadata as any)?.strictHostKeyChecking === false ? "false" : "true",
       secretRef: editingCredential.secretRef || "",
+      privateKey: "",
     } : {
       name: "",
       kind: "ssh_key",
-      metadata: {},
+      username: "",
+      sshPort: "22",
+      becomeMethod: "",
+      becomeUser: "",
+      strictHostKeyChecking: "true",
       secretRef: "",
+      privateKey: "",
     },
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: InsertCredential) => apiRequest("POST", "/api/credentials", data),
+    mutationFn: (data: CredentialForm) => apiRequest("POST", "/api/credentials", toCredentialPayload(data, false)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/credentials"] });
       toast({ title: "Credential created successfully" });
@@ -61,8 +115,8 @@ export default function Credentials() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<InsertCredential> }) => 
-      apiRequest("PATCH", `/api/credentials/${id}`, data),
+    mutationFn: ({ id, data }: { id: string; data: CredentialForm }) =>
+      apiRequest("PATCH", `/api/credentials/${id}`, toCredentialPayload(data, true)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/credentials"] });
       toast({ title: "Credential updated successfully" });
@@ -92,29 +146,36 @@ export default function Credentials() {
     form.reset();
   };
 
-  const handleEdit = (credential: Credential) => {
+  const handleEdit = (credential: SanitizedCredential) => {
     setEditingCredential(credential);
     form.reset({
       name: credential.name,
       kind: credential.kind,
-      metadata: credential.metadata || {},
+      username: String((credential.metadata as any)?.username || ""),
+      sshPort: String((credential.metadata as any)?.sshPort || ""),
+      becomeMethod: String((credential.metadata as any)?.becomeMethod || ""),
+      becomeUser: String((credential.metadata as any)?.becomeUser || ""),
+      strictHostKeyChecking: (credential.metadata as any)?.strictHostKeyChecking === false ? "false" : "true",
       secretRef: credential.secretRef || "",
+      privateKey: "",
     });
     setOpen(true);
   };
 
-  const handleDelete = (credential: Credential) => {
+  const handleDelete = (credential: SanitizedCredential) => {
     setCredentialToDelete(credential);
     setDeleteDialogOpen(true);
   };
 
-  const handleSubmit = (data: InsertCredential) => {
+  const handleSubmit = (data: CredentialForm) => {
     if (editingCredential) {
       updateMutation.mutate({ id: editingCredential.id, data });
     } else {
       createMutation.mutate(data);
     }
   };
+
+  const selectedKind = form.watch("kind");
 
   return (
     <div className="space-y-6">
@@ -193,6 +254,110 @@ export default function Credentials() {
                     </FormItem>
                   )}
                 />
+                {selectedKind === "ssh_key" && (
+                  <div className="space-y-4 rounded-md border p-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="username"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>SSH Username</FormLabel>
+                            <FormControl>
+                              <Input {...field} placeholder="ansible" data-testid="input-ssh-username" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="sshPort"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>SSH Port</FormLabel>
+                            <FormControl>
+                              <Input {...field} placeholder="22" data-testid="input-ssh-port" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="becomeMethod"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Become Method</FormLabel>
+                            <FormControl>
+                              <Input {...field} placeholder="sudo" data-testid="input-become-method" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="becomeUser"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Become User</FormLabel>
+                            <FormControl>
+                              <Input {...field} placeholder="root" data-testid="input-become-user" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <FormField
+                      control={form.control}
+                      name="strictHostKeyChecking"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Strict Host Key Checking</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value || "true"}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-strict-host-key-checking">
+                                <SelectValue placeholder="Select policy" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="true">Enabled</SelectItem>
+                              <SelectItem value="false">Disabled</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="privateKey"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{editingCredential?.hasPrivateKey ? "Replace Private Key" : "Private Key"}</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              {...field}
+                              value={field.value || ""}
+                              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                              className="min-h-40 font-mono text-xs"
+                              data-testid="input-private-key"
+                            />
+                          </FormControl>
+                          <p className="text-xs text-muted-foreground">
+                            Private keys are write-only. Stored keys are encrypted and never displayed.
+                            {editingCredential?.hasPrivateKey ? " Leave blank to keep the existing key." : ""}
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
                 <Button 
                   type="submit" 
                   className="w-full" 
@@ -243,6 +408,20 @@ export default function Credentials() {
                     {cred.secretRef || <span className="text-muted-foreground">Not configured</span>}
                   </p>
                 </div>
+                {cred.kind === "ssh_key" && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">SSH Private Key</p>
+                    <Badge variant={cred.hasPrivateKey ? "default" : "outline"}>
+                      {cred.hasPrivateKey ? "Private key stored" : "No private key"}
+                    </Badge>
+                  </div>
+                )}
+                {cred.metadata && (cred.metadata as any).username && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Username</p>
+                    <p className="text-sm">{String((cred.metadata as any).username)}</p>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <Button
                     variant="outline"

@@ -216,7 +216,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateCredential(id: string, data: Partial<Credential>, orgId: string): Promise<Credential | undefined> {
-    const [updated] = await db.update(credentials).set(data).where(and(eq(credentials.id, id), eq(credentials.orgId, orgId))).returning();
+    const [updated] = await db.update(credentials).set({ ...data, updatedAt: new Date() }).where(and(eq(credentials.id, id), eq(credentials.orgId, orgId))).returning();
     return updated || undefined;
   }
 

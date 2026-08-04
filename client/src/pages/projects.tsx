@@ -138,7 +138,7 @@ export default function Projects() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Projects</h1>
-          <p className="text-sm text-muted-foreground">Manage Git repositories with Ansible playbooks</p>
+          <p className="text-sm text-muted-foreground">Sync public HTTPS Git repositories and discover Ansible playbooks</p>
         </div>
         <Dialog open={open} onOpenChange={handleCloseDialog}>
           <DialogTrigger asChild>
@@ -171,7 +171,7 @@ export default function Projects() {
                   name="gitUrl"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Git URL</FormLabel>
+                      <FormLabel>HTTPS Git URL</FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -193,6 +193,7 @@ export default function Projects() {
                       <FormControl>
                         <Input {...field} placeholder="main" data-testid="input-git-ref" />
                       </FormControl>
+                      <p className="text-xs text-muted-foreground">Public HTTPS repositories only. SSH and embedded credentials are intentionally blocked.</p>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -295,11 +296,11 @@ export default function Projects() {
         <Card>
           <CardContent className="text-center py-12">
             <FolderGit2 className="h-16 w-16 mx-auto mb-4 opacity-50 text-muted-foreground" />
-            <p className="text-muted-foreground mb-2">No projects yet</p>
-            <p className="text-sm text-muted-foreground mb-4">Create your first project to get started</p>
+            <p className="font-medium mb-2">No Git projects synced yet</p>
+            <p className="text-sm text-muted-foreground mb-4">Add a public HTTPS repository, click Sync, then use its discovered playbooks in templates.</p>
             <Button onClick={() => setOpen(true)} data-testid="button-create-first">
               <Plus className="h-4 w-4 mr-2" />
-              Create Project
+              Add Git Project
             </Button>
           </CardContent>
         </Card>

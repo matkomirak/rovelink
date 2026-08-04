@@ -166,8 +166,8 @@ export default function Runs() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold" data-testid="text-page-title">All Runs</h1>
-          <p className="text-sm text-muted-foreground">View and monitor all automation runs (pipelines, providers, playbooks)</p>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Runs</h1>
+          <p className="text-sm text-muted-foreground">Monitor playbooks, provider syncs, and pipeline syncs in one place</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -363,8 +363,8 @@ export default function Runs() {
         <Card>
           <CardContent className="text-center py-12">
             <PlayCircle className="h-16 w-16 mx-auto mb-4 opacity-50 text-muted-foreground" />
-            <p className="text-muted-foreground mb-2">No runs yet</p>
-            <p className="text-sm text-muted-foreground">Run a pipeline sync, provider sync, or playbook to see results here</p>
+            <p className="font-medium mb-2">No runs yet</p>
+            <p className="text-sm text-muted-foreground">Launch a job template or run a sync to see status, duration, and logs here.</p>
           </CardContent>
         </Card>
       )}

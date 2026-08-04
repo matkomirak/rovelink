@@ -220,8 +220,8 @@ export default function CmdbsPage() {
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">CMDBs</h1>
-          <p className="text-muted-foreground">Manage CMDB target connections</p>
+          <h1 className="text-2xl font-semibold">CMDBs</h1>
+          <p className="text-sm text-muted-foreground">Manage NetBox and future CMDB target connections</p>
         </div>
         <Button onClick={handleAdd} data-testid="button-add-cmdb">
           <Plus className="w-4 h-4 mr-2" />
@@ -232,14 +232,15 @@ export default function CmdbsPage() {
       <Alert>
         <InfoIcon className="w-4 h-4" />
         <AlertDescription>
-          Inventory reads and job limits use the active NetBox account. Configure in Settings if multiple CMDBs are present.
+          NetBox connections can be tested here before they are used for inventory sync and automation targeting.
         </AlertDescription>
       </Alert>
 
       {cmdbs.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">No CMDB accounts configured</p>
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <p className="font-medium mb-2">No CMDB accounts configured</p>
+            <p className="text-sm text-muted-foreground mb-4">Add NetBox to test the API connection and use it as an inventory source.</p>
             <Button onClick={handleAdd} data-testid="button-add-first-cmdb">
               <Plus className="w-4 h-4 mr-2" />
               Add your first CMDB
@@ -371,8 +372,6 @@ export default function CmdbsPage() {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="netbox">NetBox</SelectItem>
-                        <SelectItem value="idoit">i-doit (coming soon)</SelectItem>
-                        <SelectItem value="servicenow">ServiceNow (coming soon)</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

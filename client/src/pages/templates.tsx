@@ -249,7 +249,7 @@ export default function Templates() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Job Templates</h1>
-          <p className="text-sm text-muted-foreground">Configure and launch automation jobs</p>
+          <p className="text-sm text-muted-foreground">Bind synced playbooks to inventories, limits, and runner settings</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -772,8 +772,8 @@ export default function Templates() {
         <Card>
           <CardContent className="text-center py-12">
             <FileText className="h-16 w-16 mx-auto mb-4 opacity-50 text-muted-foreground" />
-            <p className="text-muted-foreground mb-2">No templates yet</p>
-            <p className="text-sm text-muted-foreground mb-4">Create your first template to get started</p>
+            <p className="font-medium mb-2">No job templates yet</p>
+            <p className="text-sm text-muted-foreground mb-4">Create a template from a synced project playbook, then launch it through the gate-controlled runner.</p>
             <Button onClick={() => setOpen(true)} data-testid="button-create-first">
               <Plus className="h-4 w-4 mr-2" />
               Create Template

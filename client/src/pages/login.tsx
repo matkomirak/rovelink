@@ -1,4 +1,3 @@
-import rovelinkLogo from "@assets/rovelink-logo-clean.webp";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -12,6 +11,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Loader2 } from "lucide-react";
+import { BrandLogo } from "@/components/brand-logo";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -65,16 +65,13 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <div className="rounded-t-lg overflow-hidden bg-white px-6 py-4 flex items-center justify-center">
-          <img
-            src={rovelinkLogo}
-            alt="Rovelink"
-            style={{ width: "100%", maxWidth: "320px", height: "auto", display: "block" }}
-          />
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 bg-[radial-gradient(circle_at_top,#0b5bbd55,transparent_36%),linear-gradient(180deg,#06101f,#020617)] p-4">
+      <Card className="w-full max-w-md overflow-hidden border-slate-800/70 shadow-2xl">
+        <div className="bg-slate-950 px-7 py-8 flex flex-col items-center justify-center gap-3">
+          <BrandLogo surface="dark" className="h-auto w-full max-w-[300px]" />
+          <p className="text-sm text-slate-300">Automation control for trusted infrastructure changes</p>
         </div>
-        <CardContent className="pt-6">
+        <CardContent className="bg-background pt-6">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField

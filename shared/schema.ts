@@ -38,7 +38,7 @@ export const projects = pgTable("projects", {
   playbooks: jsonb("playbooks").default([]), // Array of discovered playbook paths
   syncStatus: text("sync_status").default("pending"), // pending, syncing, success, error
   syncError: text("sync_error"),
-  // Set by real Git sync; null means demo/simulation mode only
+  // Server-managed path populated by real Git sync.
   checkoutPath: text("checkout_path"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -47,7 +47,7 @@ export const projectsRelations = relations(projects, ({ many }) => ({
   jobTemplates: many(jobTemplates),
 }));
 
-// Credentials (mocked, no real secrets stored)
+// Credentials store non-secret metadata and an external secret reference.
 export const credentials = pgTable("credentials", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orgId: varchar("org_id").references(() => organizations.id, { onDelete: "cascade" }),

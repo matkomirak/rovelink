@@ -41,13 +41,21 @@ import notificationRoutes from "./routes/notifications";
 import settingsRoutes from "./routes/settings";
 import netboxRoutes from "./routes/netbox-sources";
 import orgRoutes from "./routes/organizations";
+import { isLocalDevRuntime, validateProductionRuntimeConfig } from "./services/runtime-config";
 
 // ─── JWT setup ────────────────────────────────────────────────────────────────
 const isProduction = process.env.NODE_ENV === "production";
+const runtimeConfigErrors = validateProductionRuntimeConfig();
 
-if (isProduction && !process.env.JWT_SECRET) {
-  console.error("FATAL: JWT_SECRET environment variable is required in production. Refusing to start.");
+if (runtimeConfigErrors.length > 0) {
+  for (const error of runtimeConfigErrors) {
+    console.error(`FATAL: ${error}`);
+  }
   process.exit(1);
+}
+
+if (isProduction && isLocalDevRuntime()) {
+  console.warn("ROVELINK_LOCAL_DEV=true is enabled while NODE_ENV=production. This is intended only for local Docker development.");
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";

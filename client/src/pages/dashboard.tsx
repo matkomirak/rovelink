@@ -71,7 +71,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold" data-testid="text-page-title">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Overview of your infrastructure automation</p>
+        <p className="text-sm text-muted-foreground">Operational snapshot for projects, gate readiness, and recent automation activity</p>
       </div>
 
       {/* Automation GATE readiness — primary hero section */}
@@ -207,8 +207,8 @@ export default function Dashboard() {
           {recentRuns.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <PlayCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>No job runs yet</p>
-              <p className="text-sm mt-1">Create a template and launch your first run</p>
+              <p className="font-medium text-foreground">No job runs yet</p>
+              <p className="text-sm mt-1">Sync a project, create a template, and launch a localhost playbook to see activity here.</p>
             </div>
           ) : (
             <div className="space-y-3">

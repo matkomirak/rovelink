@@ -1,4 +1,3 @@
-import rovelinkLogo from "@assets/rovelink-logo-clean.webp";
 import {
   Calendar,
   Settings,
@@ -32,6 +31,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useQuery } from "@tanstack/react-query";
 import type { User } from "@shared/schema";
+import { BrandLogo } from "@/components/brand-logo";
 
 const menuItems = [
   {
@@ -104,13 +104,9 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border p-0 overflow-hidden bg-white">
-        <div className="px-4 py-3 flex items-center justify-center">
-          <img
-            src={rovelinkLogo}
-            alt="Rovelink"
-            style={{ width: "100%", maxWidth: "200px", height: "auto", display: "block" }}
-          />
+      <SidebarHeader className="border-b border-sidebar-border p-0 overflow-hidden bg-slate-950">
+        <div className="px-4 py-4 flex items-center justify-center">
+          <BrandLogo surface="dark" className="h-auto w-full max-w-[190px]" />
         </div>
       </SidebarHeader>
       <SidebarContent>

@@ -10,6 +10,10 @@
  */
 
 import { spawn } from "child_process";
+import { isLocalDevRuntime } from "./runtime-config";
+
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 
 export interface LocalRunOptions {
   playbookPath: string;
@@ -38,15 +42,21 @@ export interface LocalRunResult {
 export interface LocalRunnerOptions {
   command?: string;
   commandArgsPrefix?: string[];
+  timeoutMs?: number;
+  maxOutputBytes?: number;
 }
 
 export class LocalRunner {
   private readonly command: string;
   private readonly commandArgsPrefix: string[];
+  private readonly timeoutMs: number;
+  private readonly maxOutputBytes: number;
 
   constructor(options: LocalRunnerOptions = {}) {
     this.command = options.command ?? "ansible-playbook";
     this.commandArgsPrefix = options.commandArgsPrefix ?? [];
+    this.timeoutMs = options.timeoutMs ?? readPositiveIntEnv("ROVELINK_LOCAL_RUNNER_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
+    this.maxOutputBytes = options.maxOutputBytes ?? readPositiveIntEnv("ROVELINK_LOCAL_RUNNER_MAX_OUTPUT_BYTES", DEFAULT_MAX_OUTPUT_BYTES);
   }
 
   async execute(options: LocalRunOptions, onLog: (line: string) => void): Promise<LocalRunResult> {
@@ -63,13 +73,35 @@ export class LocalRunner {
     return new Promise((resolve) => {
       const logs: string[] = [];
       const summary = { hosts: 0, ok: 0, changed: 0, failed: 0, unreachable: 0 };
+      let outputBytes = 0;
+      let outputTruncated = false;
+      let settled = false;
 
       const proc = spawn(this.command, args, {
         cwd: options.workingDirectory,
         env: { ...process.env, ANSIBLE_FORCE_COLOR: "0", ANSIBLE_NOCOLOR: "1" },
       });
 
+      const finish = (result: LocalRunResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(result);
+      };
+
       const handleLine = (line: string) => {
+        if (outputBytes >= this.maxOutputBytes) {
+          if (!outputTruncated) {
+            outputTruncated = true;
+            const notice = "[rovelink] Output truncated after reaching the local runner log limit.";
+            logs.push(notice);
+            onLog(notice + "\n");
+          }
+          return;
+        }
+
+        const lineBytes = Buffer.byteLength(line, "utf8");
+        outputBytes += lineBytes;
         logs.push(line);
         onLog(line + "\n");
         const recapMatch = line.match(
@@ -84,6 +116,13 @@ export class LocalRunner {
         }
       };
 
+      const timeout = setTimeout(() => {
+        proc.kill("SIGTERM");
+        const message = `Local runner timed out after ${this.timeoutMs}ms`;
+        logs.push(`[rovelink] ${message}`);
+        finish({ status: "error", exitCode: -1, logs: logs.join("\n"), summary });
+      }, this.timeoutMs);
+
       proc.stdout.on("data", (chunk: Buffer) => {
         chunk.toString().split("\n").filter(Boolean).forEach(handleLine);
       });
@@ -96,7 +135,7 @@ export class LocalRunner {
       });
 
       proc.on("close", (code) => {
-        resolve({
+        finish({
           status: code === 0 ? "ok" : "failed",
           exitCode: code ?? 1,
           logs: logs.join("\n"),
@@ -106,8 +145,23 @@ export class LocalRunner {
 
       proc.on("error", (err) => {
         onLog(`[rovelink] Failed to start ${this.command}: ${err.message}\n`);
-        resolve({ status: "error", exitCode: -1, logs: err.message, summary });
+        finish({ status: "error", exitCode: -1, logs: err.message, summary });
       });
     });
   }
+}
+
+export function isLocalRunnerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.ROVELINK_LOCAL_RUNNER_ENABLED === "true") {
+    return true;
+  }
+
+  return env.NODE_ENV !== "production" || isLocalDevRuntime(env);
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

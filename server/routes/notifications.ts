@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Request } from "express";
 import { storage } from "../storage";
 import { requireRole } from "../auth/roles";
+import { sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -16,7 +17,7 @@ router.get("/", async (req: AuthRequest, res) => {
     const notifications = await storage.getNotifications(req.orgId!);
     res.json(notifications);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch notifications" });
+    sendInternalError(res, error, "notifications.list", "Failed to fetch notifications");
   }
 });
 
@@ -26,7 +27,7 @@ router.get("/:id", async (req: AuthRequest, res) => {
     if (!notification) return res.status(404).json({ message: "Notification not found" });
     res.json(notification);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch notification" });
+    sendInternalError(res, error, "notifications.get", "Failed to fetch notification");
   }
 });
 
@@ -45,7 +46,7 @@ router.patch("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
     if (!notification) return res.status(404).json({ message: "Notification not found" });
     res.json(notification);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to update notification" });
+    sendInternalError(res, error, "notifications.update", "Failed to update notification");
   }
 });
 
@@ -56,7 +57,7 @@ router.delete("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
     await storage.deleteNotification(req.params.id, req.orgId!);
     res.status(204).end();
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to delete notification" });
+    sendInternalError(res, error, "notifications.delete", "Failed to delete notification");
   }
 });
 

@@ -11,6 +11,7 @@ import {
 } from "../services/secrets";
 import { netboxService } from "../services/netbox";
 import { requireRole } from "../auth/roles";
+import { sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -28,7 +29,7 @@ router.get("/vms", async (req: AuthRequest, res) => {
     const vms = await storage.getNetboxVms(orgId);
     res.json(vms);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.vms", "Failed to fetch NetBox VMs");
   }
 });
 
@@ -52,7 +53,7 @@ router.post("/import", requireRole("admin"), async (req, res) => {
     }
     res.json({ imported, message: `Imported ${imported} VMs` });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.import", "Failed to import NetBox VMs");
   }
 });
 
@@ -63,7 +64,7 @@ router.get("/sources", async (req: AuthRequest, res) => {
     const sources = await storage.getNetboxInventorySources(req.orgId!);
     res.json(sources.map(sanitizeNetboxSourceForResponse));
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.sources.list", "Failed to fetch NetBox sources");
   }
 });
 
@@ -73,7 +74,7 @@ router.get("/sources/:id", async (req: AuthRequest, res) => {
     if (!source) return res.status(404).json({ message: "Source not found" });
     res.json(sanitizeNetboxSourceForResponse(source));
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.sources.get", "Failed to fetch NetBox source");
   }
 });
 
@@ -109,7 +110,7 @@ router.patch("/sources/:id", requireRole("admin"), async (req: AuthRequest, res)
     if (!source) return res.status(404).json({ message: "Source not found" });
     res.json(sanitizeNetboxSourceForResponse(source));
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.sources.update", "Failed to update NetBox source");
   }
 });
 
@@ -118,7 +119,7 @@ router.delete("/sources/:id", requireRole("admin"), async (req: AuthRequest, res
     await storage.deleteNetboxInventorySource(req.params.id, req.orgId!);
     res.status(204).end();
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.sources.delete", "Failed to delete NetBox source");
   }
 });
 
@@ -131,7 +132,7 @@ router.post("/sources/:id/test", requireRole("operator"), async (req: AuthReques
     const result = await netboxService.testConnection(source.url, token);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.sources.test", "Failed to test NetBox source");
   }
 });
 
@@ -145,7 +146,7 @@ router.get("/sources/:id/vms", async (req: AuthRequest, res) => {
     const vms = await db.select().from(netboxVms).where(eq(netboxVms.sourceId, req.params.id));
     res.json(vms);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "netbox.sources.vms", "Failed to fetch source VMs");
   }
 });
 

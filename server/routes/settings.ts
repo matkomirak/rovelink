@@ -7,6 +7,7 @@ import {
 } from "../services/secrets";
 import { netboxService } from "../services/netbox";
 import { requireRole } from "../auth/roles";
+import { sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -28,7 +29,7 @@ router.get("/", async (_req, res) => {
       netboxToken: netboxTokenSetting?.value ? "********" : "",
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch settings" });
+    sendInternalError(res, error, "settings.get", "Failed to fetch settings");
   }
 });
 
@@ -44,7 +45,7 @@ router.post("/", requireRole("platform_admin"), async (req, res) => {
     }
     res.json({ message: "Settings updated" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to update settings" });
+    sendInternalError(res, error, "settings.update", "Failed to update settings");
   }
 });
 
@@ -62,7 +63,7 @@ router.get("/awx", async (_req, res) => {
       verify_ssl: verifySslSetting?.value === "false" ? false : true,
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "settings.awx.get", "Failed to fetch AWX settings");
   }
 });
 
@@ -82,7 +83,7 @@ router.post("/awx", requireRole("platform_admin"), async (req, res) => {
     }
     res.json({ message: "AWX settings updated" });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "settings.awx.update", "Failed to update AWX settings");
   }
 });
 
@@ -99,7 +100,7 @@ router.post("/awx/test", requireRole("platform_admin"), async (req, res) => {
     const result = await runner.testConnection();
     res.json({ ok: result.ok, message: result.ok ? "Connection successful" : result.error });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "settings.awx.test", "Failed to test AWX connection");
   }
 });
 
@@ -112,7 +113,7 @@ router.post("/netbox/test", async (req, res) => {
     const result = await netboxService.testConnection(url, token);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ ok: false, message: err.message });
+    sendInternalError(res, err, "settings.netbox.test", "Failed to test NetBox connection");
   }
 });
 

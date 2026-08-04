@@ -16,7 +16,7 @@ describe("runtime config hardening", () => {
       ENCRYPTION_KEY: "0".repeat(64),
     });
 
-    assert.equal(errors.length, 3);
+    assert.equal(errors.length, 4);
   });
 
   it("allows local Docker development to use explicit local defaults", () => {
@@ -38,6 +38,7 @@ describe("runtime config hardening", () => {
       JWT_SECRET: "jwt_" + "a".repeat(48),
       SESSION_SECRET: "session_" + "b".repeat(48),
       ENCRYPTION_KEY: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      ROVELINK_GIT_ALLOWED_HOSTS: "github.com",
     });
 
     assert.deepEqual(errors, []);

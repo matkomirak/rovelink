@@ -9,7 +9,7 @@ import { storage } from "../storage";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { AwxRunner } from "./awx-runner";
-import { LocalRunner } from "./local-runner";
+import { isLocalRunnerEnabled, LocalRunner } from "./local-runner";
 import { decryptSecret } from "./secrets";
 import { resolveSafePlaybookPath } from "./safe-playbook-path";
 import { createInventoryForRunWithSnapshot } from "./inventory-generator";
@@ -96,6 +96,10 @@ async function runLocally(
   template: any,
   onLog: (line: string) => void
 ): Promise<RunResult> {
+  if (!isLocalRunnerEnabled()) {
+    throw new Error("Local runner is disabled. Set ROVELINK_LOCAL_RUNNER_ENABLED=true to enable local Ansible execution.");
+  }
+
   // Fail closed: local execution requires a real project checkout on disk.
   // Without checkoutPath, we cannot safely resolve playbook paths (no traversal
   // protection, no symlink guard, no existence check). Demo/simulation runs must

@@ -6,6 +6,7 @@ import { dispatchRun } from "../services/runner-dispatcher";
 import { notificationService } from "../services/notificationService";
 import { insertJobTemplateSchema } from "@shared/schema";
 import { requireRole } from "../auth/roles";
+import { sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -20,7 +21,7 @@ router.get("/", async (req: AuthRequest, res) => {
     const templates = await storage.getJobTemplates(req.orgId!);
     res.json(templates);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch templates" });
+    sendInternalError(res, error, "templates.list", "Failed to fetch templates");
   }
 });
 
@@ -30,7 +31,7 @@ router.get("/:id", async (req: AuthRequest, res) => {
     if (!template) return res.status(404).json({ message: "Template not found" });
     res.json(template);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch template" });
+    sendInternalError(res, error, "templates.get", "Failed to fetch template");
   }
 });
 
@@ -50,7 +51,7 @@ router.patch("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
     if (!template) return res.status(404).json({ message: "Template not found" });
     res.json(template);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to update template" });
+    sendInternalError(res, error, "templates.update", "Failed to update template");
   }
 });
 
@@ -59,7 +60,7 @@ router.delete("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
     await storage.deleteJobTemplate(req.params.id, req.orgId!);
     res.status(204).end();
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to delete template" });
+    sendInternalError(res, error, "templates.delete", "Failed to delete template");
   }
 });
 
@@ -118,7 +119,7 @@ router.post("/:id/launch", requireRole("operator"), async (req: AuthRequest, res
 
     res.json(run);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to launch job" });
+    sendInternalError(res, error, "templates.launch", "Failed to launch job");
   }
 });
 

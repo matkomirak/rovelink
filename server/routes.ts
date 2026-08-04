@@ -28,6 +28,7 @@ import {
   encryptNetboxToken,
   decryptNetboxToken,
 } from "./services/secrets";
+import { sendClientError, sendInternalError } from "./services/api-errors";
 
 // Import modular RDP routes
 import pipelineRoutes from "./routes/pipelines";
@@ -357,7 +358,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       // All explicit validation paths return 400 above; reaching here means an unexpected
       // server-side error (DB connection, bcrypt failure, etc.) which is 500.
-      res.status(500).json({ message: error.message || "Failed to create user" });
+      sendInternalError(res, error, "users.create", "Failed to create user");
     }
   });
 
@@ -373,7 +374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         groups,
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch groups" });
+      sendInternalError(res, error, "inventory.groups", "Failed to fetch groups");
     }
   });
 
@@ -389,7 +390,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hosts,
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch hosts" });
+      sendInternalError(res, error, "inventory.hosts", "Failed to fetch hosts");
     }
   });
 
@@ -404,7 +405,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         _note: "Demo data only — limit expression evaluated against mock hosts, not real org inventory.",
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Preflight check failed" });
+      sendInternalError(res, error, "inventory.preflight", "Preflight check failed");
     }
   });
 
@@ -414,7 +415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const suggestions = await netboxService.getSuggestions(query, storage, req.orgId!);
       res.json(suggestions);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to get suggestions" });
+      sendInternalError(res, error, "inventory.suggest", "Failed to get suggestions");
     }
   });
 
@@ -424,7 +425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const projects = await storage.getProjects(req.orgId!);
       res.json(projects);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch projects" });
+      sendInternalError(res, error, "projects.list", "Failed to fetch projects");
     }
   });
 
@@ -468,10 +469,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           syncStatus: "error",
           syncError: message,
         }, req.orgId!);
-        res.status(400).json({ message });
+        sendClientError(res, 400, message);
       }
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Sync failed" });
+      sendInternalError(res, error, "projects.sync", "Sync failed");
     }
   });
 
@@ -494,7 +495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteProject(req.params.id, req.orgId!);
       res.json({ message: "Project deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete project" });
+      sendInternalError(res, error, "projects.delete", "Failed to delete project");
     }
   });
 
@@ -504,7 +505,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const credentials = await storage.getCredentials(req.orgId!);
       res.json(credentials);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch credentials" });
+      sendInternalError(res, error, "credentials.list", "Failed to fetch credentials");
     }
   });
 
@@ -537,7 +538,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteCredential(req.params.id, req.orgId!);
       res.json({ message: "Credential deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete credential" });
+      sendInternalError(res, error, "credentials.delete", "Failed to delete credential");
     }
   });
 
@@ -553,7 +554,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ total, withIP, withUser, coverage });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch inventory health" });
+      sendInternalError(res, error, "reports.inventory-health", "Failed to fetch inventory health");
     }
   });
 
@@ -562,7 +563,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const providers = await storage.getProviders((req as AuthRequest).orgId!);
       res.json(providers.map(sanitizeProviderForResponse));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to get providers" });
+      sendInternalError(res, error, "providers.list", "Failed to get providers");
     }
   });
 
@@ -574,7 +575,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(sanitizeProviderForResponse(provider));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to get provider" });
+      sendInternalError(res, error, "providers.get", "Failed to get provider");
     }
   });
 
@@ -596,7 +597,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vms 
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to get provider VMs" });
+      sendInternalError(res, error, "providers.vms", "Failed to get provider VMs");
     }
   });
 
@@ -610,7 +611,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = await storage.createProvider(body);
       res.json(sanitizeProviderForResponse(provider));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to create provider" });
+      sendInternalError(res, error, "providers.create", "Failed to create provider");
     }
   });
 
@@ -640,7 +641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(sanitizeProviderForResponse(provider));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to update provider" });
+      sendInternalError(res, error, "providers.update", "Failed to update provider");
     }
   });
 
@@ -658,7 +659,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to test connection" });
+      sendInternalError(res, error, "providers.test", "Failed to test connection");
     }
   });
 
@@ -674,7 +675,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ runId });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to start sync" });
+      sendInternalError(res, error, "providers.sync", "Failed to start sync");
     }
   });
 
@@ -687,7 +688,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteProvider(req.params.id, req.orgId!);
       res.json({ message: "Provider deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete provider" });
+      sendInternalError(res, error, "providers.delete", "Failed to delete provider");
     }
   });
 
@@ -702,7 +703,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runs = await storage.getProviderRuns(req.params.id, limit, req.orgId!);
       res.json(runs);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to get provider runs" });
+      sendInternalError(res, error, "providers.runs", "Failed to get provider runs");
     }
   });
 
@@ -712,7 +713,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cmdbs = await storage.getCmdbAccounts(req.orgId!);
       res.json(cmdbs.map(sanitizeCmdbForResponse));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to get CMDBs" });
+      sendInternalError(res, error, "cmdbs.list", "Failed to get CMDBs");
     }
   });
 
@@ -727,7 +728,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cmdb = await storage.createCmdbAccount(body);
       res.json(sanitizeCmdbForResponse(cmdb));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to create CMDB account" });
+      sendInternalError(res, error, "cmdbs.create", "Failed to create CMDB account");
     }
   });
 
@@ -739,7 +740,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(sanitizeCmdbForResponse(cmdb));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch CMDB account" });
+      sendInternalError(res, error, "cmdbs.get", "Failed to fetch CMDB account");
     }
   });
 
@@ -769,7 +770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(sanitizeCmdbForResponse(cmdb));
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to update CMDB account" });
+      sendInternalError(res, error, "cmdbs.update", "Failed to update CMDB account");
     }
   });
 
@@ -782,7 +783,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteCmdbAccount(req.params.id, req.orgId!);
       res.json({ message: "CMDB account deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete CMDB account" });
+      sendInternalError(res, error, "cmdbs.delete", "Failed to delete CMDB account");
     }
   });
 
@@ -807,7 +808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ error: "Unsupported CMDB kind" });
       }
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to test connection" });
+      sendInternalError(res, error, "cmdbs.test", "Failed to test connection");
     }
   });
 
@@ -825,7 +826,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vms = await adapter.listAllVms();
       res.json({ vms, total: vms.length });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch VMs" });
+      sendInternalError(res, error, "cmdbs.vms", "Failed to fetch VMs");
     }
   });
 
@@ -844,7 +845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ message: `Rebuilt cache with ${groups.length} groups` });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to rebuild cache" });
+      sendInternalError(res, error, "cmdbs.rebuild-cache", "Failed to rebuild cache");
     }
   });
 
@@ -867,7 +868,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Ensured NetBox custom fields (ext_id, ext_provider, patch_wave, patch_subwave, ansible_user)",
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to ensure schema" });
+      sendInternalError(res, error, "cmdbs.ensure-schema", "Failed to ensure schema");
     }
   });
 
@@ -879,7 +880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ message: `Pruned ${count} stale objects (not seen in ${days} days)` });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to prune stale objects" });
+      sendInternalError(res, error, "cmdbs.prune-stale", "Failed to prune stale objects");
     }
   });
 
@@ -905,7 +906,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ message: `Retried ${retried.length} failed syncs`, runs: retried });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to retry syncs" });
+      sendInternalError(res, error, "sync.retry", "Failed to retry syncs");
     }
   });
 
@@ -923,7 +924,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stats = await storage.getProviderStats(req.orgId!);
       res.json(stats);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to get provider stats" });
+      sendInternalError(res, error, "stats.providers", "Failed to get provider stats");
     }
   });
 

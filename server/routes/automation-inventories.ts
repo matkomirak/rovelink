@@ -8,6 +8,7 @@ import { decryptCmdbConfig } from "../services/secrets";
 import { runGatePhase, readAllowedAssets, readBlockedAssets, getGateSummary } from "../services/gate-phase";
 import { deriveAssetId } from "../services/asset-identity";
 import { gateStore } from "../services/gate-store";
+import { sendInternalError } from "../services/api-errors";
 import { hasRoleAtLeast } from "../auth/roles";
 
 // Auth request type — orgId is stamped by auth middleware
@@ -53,7 +54,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
       .orderBy(desc(automationInventories.createdAt));
     res.json(inventories);
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -77,7 +78,7 @@ router.get("/:id", async (req: AuthRequest, res: Response) => {
 
     res.json(inventory);
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -456,7 +457,7 @@ router.get("/:id/preview", async (req: AuthRequest, res: Response) => {
       preview: inventory.previewData,
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -511,7 +512,7 @@ router.get("/:id/structure", async (req: AuthRequest, res: Response) => {
 
     res.json({ groups: [], hosts: [] });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -728,7 +729,7 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
 
     res.json(updated);
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -895,7 +896,7 @@ router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
       policy: updated.eligibilityPolicy,
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -939,7 +940,7 @@ router.get("/:id/policy", async (req: AuthRequest, res: Response) => {
       ],
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -976,7 +977,7 @@ router.delete("/:id", async (req: AuthRequest, res: Response) => {
 
     res.json({ message: "Inventory deleted" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -1216,7 +1217,7 @@ router.get("/:id/automation.yml", async (req: AuthRequest, res: Response) => {
     res.send(inventoryYaml);
   } catch (error: any) {
     console.error("Error generating automation.yml:", error);
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -1284,7 +1285,7 @@ router.get("/:id/blocked.json", async (req: AuthRequest, res: Response) => {
     res.json(blockedAssets);
   } catch (error: any) {
     console.error("Error generating blocked.json:", error);
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -1359,7 +1360,7 @@ router.get("/:id/blocked", async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error("Error fetching blocked assets:", error);
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 
@@ -1423,7 +1424,7 @@ router.get("/:id/gate-stats", async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error("Error fetching gate stats:", error);
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
 

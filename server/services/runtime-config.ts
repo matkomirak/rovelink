@@ -34,5 +34,8 @@ export function validateProductionRuntimeConfig(env: NodeJS.ProcessEnv = process
   if (isWeakRuntimeSecret(env.ENCRYPTION_KEY)) {
     errors.push("ENCRYPTION_KEY must be a strong non-default 64-character hex value in production.");
   }
+  if (!env.ROVELINK_GIT_ALLOWED_HOSTS?.trim()) {
+    errors.push("ROVELINK_GIT_ALLOWED_HOSTS must list approved Git hosts in production.");
+  }
   return errors;
 }

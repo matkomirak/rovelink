@@ -10,6 +10,7 @@ import { gateStore } from "../services/gate-store";
 import { providerHintsStore } from "../services/provider-hints-store";
 import { GATE_DESIGN_PRINCIPLE } from "../services/gate-design-principle";
 import { requireRole } from "../auth/roles";
+import { sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -39,7 +40,7 @@ router.get("/allowed", async (req: AuthRequest, res: Response) => {
       })),
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "gate.allowed", "Failed to fetch allowed VMs");
   }
 });
 
@@ -65,7 +66,7 @@ router.get("/blocked", async (req: AuthRequest, res: Response) => {
       _note: "Use /api/gate/sync-blocks to write block reasons to NetBox for visibility",
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "gate.blocked", "Failed to fetch blocked VMs");
   }
 });
 
@@ -99,7 +100,7 @@ router.get("/status/:vmName", async (req: AuthRequest, res: Response) => {
       provider_hints: hints?.hints || null,
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "gate.status", "Failed to fetch gate status");
   }
 });
 
@@ -124,7 +125,7 @@ router.get("/hints/:vmName", async (req: AuthRequest, res: Response) => {
       _warning: "Provider hints are NON-AUTHORITATIVE and do not affect gate decisions",
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "gate.hints", "Failed to fetch provider hints");
   }
 });
 
@@ -146,7 +147,7 @@ router.get("/summary", async (req: AuthRequest, res: Response) => {
       evaluation_complete: gateStore.isEvaluationComplete(orgId),
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "gate.summary", "Failed to fetch gate summary");
   }
 });
 
@@ -177,7 +178,7 @@ router.post("/sync-blocks", requireRole("admin"), async (req: AuthRequest, res: 
       _note: "Block reason sync-back is informational only. NetBox remains the source of governance.",
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    sendInternalError(res, error, "gate.sync-blocks", "Failed to sync block reasons");
   }
 });
 

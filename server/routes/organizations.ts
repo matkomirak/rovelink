@@ -15,6 +15,7 @@ import { db } from "../db";
 import { organizations, insertOrganizationSchema } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { requireRole } from "../auth/roles";
+import { sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -31,7 +32,7 @@ router.get("/", requireRole("platform_admin"), async (_req, res) => {
     const orgs = await db.select().from(organizations);
     res.json(orgs);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "organizations.list", "Failed to fetch organizations");
   }
 });
 
@@ -55,7 +56,7 @@ router.patch("/:id", requireRole("platform_admin"), async (req, res) => {
     if (!org) return res.status(404).json({ message: "Organization not found" });
     res.json(org);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "organizations.update", "Failed to update organization");
   }
 });
 
@@ -64,7 +65,7 @@ router.delete("/:id", requireRole("platform_admin"), async (req, res) => {
     await db.delete(organizations).where(eq(organizations.id, req.params.id));
     res.status(204).end();
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "organizations.delete", "Failed to delete organization");
   }
 });
 
@@ -80,7 +81,7 @@ router.get("/current", async (req: AuthRequest, res) => {
     if (!org) return res.status(404).json({ message: "Organisation not found" });
     res.json(org);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "organizations.current.get", "Failed to fetch organization");
   }
 });
 
@@ -95,7 +96,7 @@ router.put("/current", requireRole("admin"), async (req: AuthRequest, res) => {
       .returning();
     res.json(org);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    sendInternalError(res, err, "organizations.current.update", "Failed to update organization");
   }
 });
 

@@ -35,6 +35,7 @@ import {
   PROVIDER_SECRET_FIELDS,
   CMDB_SECRET_FIELDS,
 } from "../server/services/secrets";
+import { sanitizeErrorForLog } from "../server/services/api-errors";
 
 // Provide a test encryption key (64-char hex = 32 bytes)
 const TEST_KEY = "a".repeat(64);
@@ -270,5 +271,18 @@ describe("Encrypted values do not appear in API response shape", () => {
     const json = JSON.stringify(safe);
     assert.ok(!json.includes("enc:v1:"), "encrypted ciphertext must not appear in response");
     assert.ok(!json.includes("netbox-token-xyz"), "plaintext token must not appear in response");
+  });
+});
+
+describe("sanitizeErrorForLog", () => {
+  it("redacts token-like and credential-like text from error logs", () => {
+    const safe = sanitizeErrorForLog(
+      new Error("request failed with Bearer jwt.secret.value at https://user:password@example.com/repo.git")
+    );
+    const json = JSON.stringify(safe);
+
+    assert.ok(!json.includes("jwt.secret.value"));
+    assert.ok(!json.includes("password@example.com"));
+    assert.ok(json.includes("[REDACTED]"));
   });
 });

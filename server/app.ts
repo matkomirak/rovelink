@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { log } from "./vite";
 import { redactForLog } from "./services/secrets";
+import { sanitizeErrorForLog } from "./services/api-errors";
 import type { Server } from "http";
 
 export async function createApp(): Promise<{ app: ReturnType<typeof express>; httpServer: Server }> {
@@ -54,9 +55,9 @@ export async function createApp(): Promise<{ app: ReturnType<typeof express>; ht
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const message = status >= 500 ? "Internal Server Error" : err.message || "Request failed";
     res.status(status).json({ message });
-    log(`Error ${status}: ${message}`);
+    log(`Error ${status}: ${JSON.stringify(sanitizeErrorForLog(err))}`);
   });
 
   return { app, httpServer };

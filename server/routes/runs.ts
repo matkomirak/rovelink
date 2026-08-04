@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Request } from "express";
 import { storage } from "../storage";
+import { sendInternalError } from "../services/api-errors";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -123,7 +124,7 @@ router.get("/", async (req: AuthRequest, res) => {
 
     res.json(filteredRuns);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch runs" });
+    sendInternalError(res, error, "runs.list", "Failed to fetch runs");
   }
 });
 
@@ -169,7 +170,7 @@ router.get("/:id", async (req: AuthRequest, res) => {
 
     return res.status(404).json({ message: "Run not found" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch run" });
+    sendInternalError(res, error, "runs.get", "Failed to fetch run");
   }
 });
 
@@ -180,7 +181,7 @@ router.post("/:id/archive", async (req: AuthRequest, res) => {
     await storage.updateJobRun(req.params.id, { archived: true }, req.orgId!);
     res.json({ message: "Run archived successfully" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to archive run" });
+    sendInternalError(res, error, "runs.archive", "Failed to archive run");
   }
 });
 
@@ -191,7 +192,7 @@ router.post("/:id/unarchive", async (req: AuthRequest, res) => {
     await storage.updateJobRun(req.params.id, { archived: false }, req.orgId!);
     res.json({ message: "Run unarchived successfully" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to unarchive run" });
+    sendInternalError(res, error, "runs.unarchive", "Failed to unarchive run");
   }
 });
 
@@ -210,7 +211,7 @@ router.get("/:id/csv", async (req: AuthRequest, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="run-${run.id}.csv"`);
     res.send(csv);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to generate CSV" });
+    sendInternalError(res, error, "runs.csv", "Failed to generate CSV");
   }
 });
 

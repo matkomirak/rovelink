@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { LocalRunner } from "../server/services/local-runner";
+import { isLocalRunnerEnabled, LocalRunner } from "../server/services/local-runner";
 import {
   isLocalhostOnlyPlaybook,
   resolveProjectPlaybook,
@@ -58,6 +58,12 @@ describe("isLocalhostOnlyPlaybook", () => {
 });
 
 describe("LocalRunner", () => {
+  it("is disabled in production unless explicitly enabled", () => {
+    assert.equal(isLocalRunnerEnabled({ NODE_ENV: "production", ROVELINK_LOCAL_DEV: "false" }), false);
+    assert.equal(isLocalRunnerEnabled({ NODE_ENV: "production", ROVELINK_LOCAL_RUNNER_ENABLED: "true" }), true);
+    assert.equal(isLocalRunnerEnabled({ NODE_ENV: "production", ROVELINK_LOCAL_DEV: "true" }), true);
+  });
+
   it("uses the localhost execution argument path", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rovelink-runner-"));
     const fakeRunnerPath = path.join(tempDir, "fake-runner.mjs");
@@ -98,5 +104,55 @@ describe("LocalRunner", () => {
     assert.equal(observed.cwd, tempDir);
     assert.deepEqual(observed.args, ["-i", inventoryPath, playbookPath]);
     assert.match(logs.join(""), /localhost : ok=1/);
+  });
+
+  it("times out long-running commands", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rovelink-timeout-"));
+    const slowRunnerPath = path.join(tempDir, "slow-runner.mjs");
+    await fs.writeFile(slowRunnerPath, "setTimeout(() => {}, 1000);\n");
+
+    const runner = new LocalRunner({
+      command: process.execPath,
+      commandArgsPrefix: [slowRunnerPath],
+      timeoutMs: 50,
+    });
+
+    const result = await runner.execute(
+      {
+        playbookPath: "site.yml",
+        inventoryPath: "inventory.yml",
+      },
+      () => undefined
+    );
+
+    assert.equal(result.status, "error");
+    assert.match(result.logs, /timed out/i);
+  });
+
+  it("caps retained output", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rovelink-output-"));
+    const noisyRunnerPath = path.join(tempDir, "noisy-runner.mjs");
+    await fs.writeFile(
+      noisyRunnerPath,
+      "for (let i = 0; i < 20; i++) console.log('line-' + i + '-xxxxxxxxxx');\n"
+    );
+
+    const runner = new LocalRunner({
+      command: process.execPath,
+      commandArgsPrefix: [noisyRunnerPath],
+      maxOutputBytes: 40,
+    });
+
+    const logs: string[] = [];
+    const result = await runner.execute(
+      {
+        playbookPath: "site.yml",
+        inventoryPath: "inventory.yml",
+      },
+      (line) => logs.push(line)
+    );
+
+    assert.equal(result.status, "ok");
+    assert.match(logs.join(""), /Output truncated/i);
   });
 });

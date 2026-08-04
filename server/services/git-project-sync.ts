@@ -1,7 +1,9 @@
 import { spawn } from "child_process";
 import fs from "fs/promises";
+import dns from "dns/promises";
 import path from "path";
 import type { Project } from "@shared/schema";
+import { isLocalDevRuntime } from "./runtime-config";
 
 const DEFAULT_PROJECTS_ROOT = path.resolve(process.cwd(), ".local", "git-projects");
 const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/;
@@ -10,6 +12,7 @@ const GIT_TIMEOUT_MS = 120000;
 const MAX_DISCOVERY_DEPTH = 12;
 const MAX_DISCOVERY_FILES = 1000;
 const MAX_PLAYBOOK_BYTES = 1024 * 1024;
+const LOCAL_DEV_DEFAULT_ALLOWED_HOSTS = ["github.com"];
 
 const SKIPPED_DIRS = new Set([
   ".git",
@@ -49,7 +52,39 @@ export function validateGitRepoUrl(repoUrl: string): string {
     throw new Error("Git URL host is invalid");
   }
 
+  validateGitHostAllowed(url.hostname);
+
   return url.toString();
+}
+
+export function getAllowedGitHosts(env: NodeJS.ProcessEnv = process.env): string[] {
+  const configured = env.ROVELINK_GIT_ALLOWED_HOSTS?.trim();
+  if (configured) {
+    return configured
+      .split(",")
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  return isLocalDevRuntime(env) ? LOCAL_DEV_DEFAULT_ALLOWED_HOSTS : [];
+}
+
+export function validateGitHostAllowed(hostname: string, env: NodeJS.ProcessEnv = process.env): string {
+  const host = hostname.toLowerCase();
+  if (isLocalOrPrivateHost(host)) {
+    throw new Error("Git URL host must not be localhost or a private network address");
+  }
+
+  const allowedHosts = getAllowedGitHosts(env);
+  if (allowedHosts.length === 0) {
+    throw new Error("ROVELINK_GIT_ALLOWED_HOSTS must be set before Git sync is allowed");
+  }
+
+  if (!allowedHosts.includes(host)) {
+    throw new Error("Git URL host is not allowed");
+  }
+
+  return host;
 }
 
 export function validateGitRef(gitRef: string): string {
@@ -159,6 +194,7 @@ export async function syncGitProject(project: Project): Promise<GitProjectSyncRe
   const repoUrl = validateGitRepoUrl(project.gitUrl);
   const gitRef = validateGitRef(project.gitRef);
   const checkoutPath = getProjectCheckoutPath(project);
+  await validateGitHostResolution(new URL(repoUrl).hostname);
 
   await fs.mkdir(checkoutPath, { recursive: true });
 
@@ -175,6 +211,24 @@ export async function syncGitProject(project: Project): Promise<GitProjectSyncRe
 
   const playbooks = await discoverAnsiblePlaybooks(checkoutPath);
   return { checkoutPath, playbooks };
+}
+
+export async function validateGitHostResolution(hostname: string): Promise<void> {
+  if (isLocalOrPrivateHost(hostname)) {
+    throw new Error("Git URL host must not resolve to localhost or a private network address");
+  }
+
+  let records: string[] = [];
+  try {
+    const resolved = await dns.lookup(hostname, { all: true, verbatim: true });
+    records = resolved.map((record) => record.address);
+  } catch {
+    throw new Error("Git URL host could not be resolved");
+  }
+
+  if (records.length === 0 || records.some(isLocalOrPrivateHost)) {
+    throw new Error("Git URL host must not resolve to localhost or a private network address");
+  }
 }
 
 function shouldSkipDirectory(segments: string[]): boolean {
@@ -246,4 +300,61 @@ async function runGit(args: string[]): Promise<void> {
       }
     });
   });
+}
+
+function isLocalOrPrivateHost(hostnameOrIp: string): boolean {
+  const host = hostnameOrIp.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost")) {
+    return true;
+  }
+
+  if (isPrivateIpv4(host)) {
+    return true;
+  }
+
+  if (isPrivateIpv6(host)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isPrivateIpv4(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 4) {
+    return false;
+  }
+
+  const octets = parts.map((part) => Number(part));
+  if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+
+  const [a, b] = octets;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function isPrivateIpv6(value: string): boolean {
+  if (!value.includes(":")) {
+    return false;
+  }
+
+  return (
+    value === "::1" ||
+    value === "::" ||
+    value.startsWith("fc") ||
+    value.startsWith("fd") ||
+    value.startsWith("fe80:") ||
+    value.startsWith("ff")
+  );
 }

@@ -26,10 +26,16 @@ Docker Compose also sets:
 
 ```text
 ROVELINK_LOCAL_DEV=true
+ROVELINK_GIT_ALLOWED_HOSTS=github.com
+ROVELINK_LOCAL_RUNNER_ENABLED=true
 ```
 
 That marker is what allows the intentionally weak `changeme` password for local
 first-run development. Do not use `ROVELINK_LOCAL_DEV=true` in production.
+`ROVELINK_GIT_ALLOWED_HOSTS` controls where server-side Git sync may connect,
+and production must set a non-empty allowlist. Local Ansible execution is also
+guarded by `ROVELINK_LOCAL_RUNNER_ENABLED`; keep it disabled in production
+unless the app host is intentionally allowed to run `ansible-playbook`.
 
 Bootstrap seeding is idempotent. If the admin user already exists, the seed step
 does not reset or overwrite the existing password.
@@ -105,7 +111,9 @@ Then click `Sync`. The checkout path should be under:
 ```
 
 Private Git URLs, SSH Git URLs, and embedded URL credentials are intentionally
-not supported in local slice 1.
+not supported in local slice 1. Git hosts must be listed in
+`ROVELINK_GIT_ALLOWED_HOSTS`, and localhost/private/link-local addresses are
+rejected.
 
 ## Run A Localhost Playbook
 
@@ -130,6 +138,13 @@ localhost-only playbooks, it uses a generated local inventory with
 
 Remote SSH execution and SSH/private key credential storage are not implemented
 in this local workflow yet.
+
+Local runner execution is bounded by:
+
+```text
+ROVELINK_LOCAL_RUNNER_TIMEOUT_MS=600000
+ROVELINK_LOCAL_RUNNER_MAX_OUTPUT_BYTES=1048576
+```
 
 ## Stop Commands
 

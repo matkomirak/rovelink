@@ -5,9 +5,11 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   discoverAnsiblePlaybooks,
+  getAllowedGitHosts,
   getProjectCheckoutPath,
   sanitizeGitSyncError,
   validateGitRef,
+  validateGitHostAllowed,
   validateGitRepoUrl,
 } from "../server/services/git-project-sync";
 
@@ -30,6 +32,42 @@ describe("validateGitRepoUrl", () => {
       () => validateGitRepoUrl("https://user:secret@example.com/repo.git"),
       /credentials/i
     );
+  });
+
+  it("allows github.com by default in local/dev runtime", () => {
+    assert.deepEqual(getAllowedGitHosts({ NODE_ENV: "test" }), ["github.com"]);
+    assert.equal(
+      validateGitRepoUrl("https://github.com/example/repo.git"),
+      "https://github.com/example/repo.git"
+    );
+  });
+
+  it("requires an explicit allowlist in production", () => {
+    assert.throws(
+      () => validateGitHostAllowed("github.com", { NODE_ENV: "production" }),
+      /ROVELINK_GIT_ALLOWED_HOSTS/i
+    );
+
+    assert.equal(
+      validateGitHostAllowed("git.example.com", {
+        NODE_ENV: "production",
+        ROVELINK_GIT_ALLOWED_HOSTS: "git.example.com",
+      }),
+      "git.example.com"
+    );
+  });
+
+  it("rejects localhost, private, link-local, and disallowed hosts", () => {
+    const env = {
+      NODE_ENV: "production",
+      ROVELINK_GIT_ALLOWED_HOSTS: "github.com,git.example.com",
+    };
+
+    for (const host of ["localhost", "127.0.0.1", "10.0.0.5", "172.16.0.10", "192.168.1.10", "169.254.1.1", "::1", "fe80::1"]) {
+      assert.throws(() => validateGitHostAllowed(host, env), /private|localhost/i);
+    }
+
+    assert.throws(() => validateGitHostAllowed("gitlab.com", env), /not allowed/i);
   });
 });
 

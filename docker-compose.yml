@@ -9,6 +9,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgres://rovelink:${DB_PASSWORD:-changeme}@db:5432/rovelink}
       DATABASE_CLIENT: pg
+      ROVELINK_LOCAL_DEV: "true"
       SESSION_SECRET: ${SESSION_SECRET:-local-session-secret-change-me}
       JWT_SECRET: ${JWT_SECRET:-local-jwt-secret-change-me}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}

@@ -22,6 +22,18 @@ username: admin
 password: changeme
 ```
 
+Docker Compose also sets:
+
+```text
+ROVELINK_LOCAL_DEV=true
+```
+
+That marker is what allows the intentionally weak `changeme` password for local
+first-run development. Do not use `ROVELINK_LOCAL_DEV=true` in production.
+
+Bootstrap seeding is idempotent. If the admin user already exists, the seed step
+does not reset or overwrite the existing password.
+
 Docker Compose stores synced Git project checkouts in a named volume mounted at:
 
 ```text

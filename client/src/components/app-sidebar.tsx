@@ -12,6 +12,9 @@ import {
   Boxes,
   GitBranch,
   ClipboardCheck,
+  ChevronsUpDown,
+  LogOut,
+  UserCog,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -29,9 +32,19 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { useQuery } from "@tanstack/react-query";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { User } from "@shared/schema";
 import { BrandLogo } from "@/components/brand-logo";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 const navigationSections = [
   {
@@ -80,9 +93,25 @@ function isActiveRoute(location: string, url: string) {
 }
 
 export function AppSidebar() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
+  const { toast } = useToast();
   const { data: user } = useQuery<User>({
     queryKey: ["/api/auth/me"],
+  });
+  const logoutMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/auth/logout"),
+    onSuccess: () => {
+      queryClient.setQueryData(["/api/auth/me"], null);
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      setLocation("/login");
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Logout failed",
+        description: error.message || "Could not log out. Please try again.",
+      });
+    },
   });
 
   return (
@@ -122,17 +151,60 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-4">
         {user && (
-          <div className="flex items-center gap-3">
-            <Avatar className="h-8 w-8">
-              <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                {user.username.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 overflow-hidden">
-              <p className="text-sm font-medium truncate">{user.username}</p>
-              <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
-            </div>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 rounded-md p-2 text-left outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-60 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0"
+                disabled={logoutMutation.isPending}
+                data-testid="button-account-menu"
+                aria-label="Open account menu"
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                    {user.username.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 overflow-hidden group-data-[collapsible=icon]:hidden">
+                  <p className="text-sm font-medium truncate">{user.username}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                </div>
+                <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="top"
+              align="start"
+              sideOffset={8}
+              className="w-56"
+              data-testid="menu-account"
+            >
+              <DropdownMenuLabel>
+                <div className="flex flex-col">
+                  <span className="truncate">{user.username}</span>
+                  <span className="text-xs font-normal text-muted-foreground capitalize">{user.role}</span>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild data-testid="menu-item-account-settings">
+                <Link href="/settings">
+                  <UserCog className="h-4 w-4" />
+                  <span>Account settings</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  logoutMutation.mutate();
+                }}
+                disabled={logoutMutation.isPending}
+                data-testid="menu-item-logout"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>{logoutMutation.isPending ? "Logging out..." : "Log out"}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </SidebarFooter>
     </Sidebar>

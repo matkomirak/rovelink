@@ -186,31 +186,31 @@ export default function Pipelines() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Pipelines</h1>
+          <h1 className="text-3xl font-bold">Sync Flows</h1>
           <p className="text-muted-foreground mt-1">
-            Data sync pipelines from providers to CMDBs
+            Data sync flows from providers to CMDBs
           </p>
         </div>
         <Link href="/pipelines/new">
           <Button data-testid="button-new-pipeline">
             <Plus className="h-4 w-4 mr-2" />
-            New Pipeline
+            New Sync Flow
           </Button>
         </Link>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>All Pipelines</CardTitle>
+          <CardTitle>All Sync Flows</CardTitle>
         </CardHeader>
         <CardContent>
           {!pipelines || pipelines.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-muted-foreground mb-4">No pipelines configured yet</p>
+              <p className="text-muted-foreground mb-4">No sync flows configured yet</p>
               <Link href="/pipelines/new">
                 <Button variant="outline" data-testid="button-create-first">
                   <Plus className="h-4 w-4 mr-2" />
-                  Create your first pipeline
+                  Create your first sync flow
                 </Button>
               </Link>
             </div>

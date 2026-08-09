@@ -191,7 +191,7 @@ export default function AutomationInventoryDetail() {
     window.location.href = `/api/inventories/${id}/blocked.json`;
   };
 
-  const handleToggleRule = (rule: keyof EligibilityPolicy) => {
+  const handleToggleRule = (rule: "requireRole" | "requireContacts") => {
     if (!policyData) return;
     const currentValue = policyData.policy[rule];
     updatePolicyMutation.mutate({ [rule]: !currentValue });

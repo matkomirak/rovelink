@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import { db } from "../db";
-import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory, type EligibilityPolicy, type NetboxVm } from "../../shared/schema";
+import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory, type EligibilityPolicy, type NetboxVm, normalizeEligibilityPolicy } from "../../shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
@@ -12,6 +12,7 @@ import { sendInternalError } from "../services/api-errors";
 import { hasRoleAtLeast } from "../auth/roles";
 import { storage as appStorage } from "../storage";
 import { enrichGateDecisionsWithGovernance, enrichInventoryHostsWithGovernance } from "../services/gate-governance-context";
+import { ZodError } from "zod";
 
 // Auth request type — orgId is stamped by auth middleware
 interface AuthRequest extends Request {
@@ -28,19 +29,20 @@ function resolveOrgId(req: AuthRequest): string {
 const DEFAULT_POLICY: EligibilityPolicy = {
   requireRole: false,
   requireContacts: false,
+  governance: {
+    mode: "observe_only",
+    requireGovernanceEvaluation: false,
+    minimumGovernanceScore: null,
+    blockOnRecommendedAction: true,
+    allowedReadinessStates: ["ready"],
+  },
 };
 
 /**
  * Extract eligibility policy from inventory, with defaults if not set.
  */
 function extractPolicy(inventory: any): EligibilityPolicy {
-  if (!inventory.eligibilityPolicy) {
-    return DEFAULT_POLICY;
-  }
-  return {
-    requireRole: inventory.eligibilityPolicy.requireRole === true,
-    requireContacts: inventory.eligibilityPolicy.requireContacts === true,
-  };
+  return normalizeEligibilityPolicy(inventory.eligibilityPolicy ?? DEFAULT_POLICY);
 }
 
 const router = express.Router();
@@ -873,12 +875,7 @@ router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "Inventory not found" });
     }
 
-    // Validate policy structure
-    const { requireRole, requireContacts } = req.body;
-    const policy = {
-      requireRole: requireRole === true,
-      requireContacts: requireContacts === true,
-    };
+    const policy = normalizeEligibilityPolicy(req.body);
 
     await db
       .update(automationInventories)
@@ -908,6 +905,12 @@ router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
       policy: updated.eligibilityPolicy,
     });
   } catch (error: any) {
+    if (error instanceof ZodError) {
+      return res.status(400).json({
+        message: "Invalid eligibility policy",
+        issues: error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
+      });
+    }
     sendInternalError(res, error, "automation-inventories", "Failed to process automation inventory request");
   }
 });
@@ -931,12 +934,7 @@ router.get("/:id/policy", async (req: AuthRequest, res: Response) => {
     }
 
     // Default policy if not set
-    const defaultPolicy = {
-      requireRole: false,
-      requireContacts: false,
-    };
-
-    const policy = inventory.eligibilityPolicy || defaultPolicy;
+    const policy = normalizeEligibilityPolicy(inventory.eligibilityPolicy ?? DEFAULT_POLICY);
 
     res.json({
       inventoryId: inventory.id,

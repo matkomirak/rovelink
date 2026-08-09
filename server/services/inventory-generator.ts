@@ -26,7 +26,10 @@ import path from "path";
 import { gateEvaluator } from "./gate-evaluator";
 import { gateStore, type GateDecisionSnapshot } from "./gate-store";
 import { storage } from "../storage";
-import { deriveAssetId } from "./asset-identity";
+import { db } from "../db";
+import { automationInventories, normalizeEligibilityPolicy, type EligibilityPolicy } from "../../shared/schema";
+import { and, eq } from "drizzle-orm";
+import { applyGovernanceGateEnforcement } from "./governance-gate-enforcement";
 
 export interface InventoryOptions {
   orgId: string;
@@ -84,6 +87,7 @@ export async function createInventoryForRunWithSnapshot(
   // ── Gate phase: load org's cached VMs from DB, evaluate inline ──────────────
   // This is ALWAYS fresh from DB — no dependency on ephemeral gate store.
   const dbVms = await storage.getNetboxVms(orgId);
+  const eligibilityPolicy = await loadInventoryEligibilityPolicy(orgId, options.inventoryId ?? null);
 
   const gateSnapshot: GateDecisionSnapshot[] = [];
   const allowedHosts: Array<{
@@ -108,17 +112,34 @@ export async function createInventoryForRunWithSnapshot(
     // Evaluate gate (pure function, no side effects on store yet)
     const result = gateEvaluator.evaluateGate(vmForGate, false);
 
-    const snapshot: GateDecisionSnapshot = {
+    const baseDecision = {
       assetId: result.assetId,
       vmName: vm.name,
       netboxVmId: vm.netboxId,
-      governanceObjectType: "netbox_vm",
+      governanceObjectType: "netbox_vm" as const,
       governanceObjectId: vm.id,
       sourceNetboxId: vm.netboxId,
       allowed: result.allowed,
       missing: result.missing,
       reason: result.reason,
       failureType: result.failureType,
+    };
+    const enforcedDecision = await applyGovernanceGateEnforcement(
+      baseDecision,
+      { governanceObjectType: "netbox_vm", governanceObjectId: vm.id },
+      eligibilityPolicy.governance,
+      async (identity) => {
+        const latest = await storage.getLatestGovernanceEvaluationForObject(
+          orgId,
+          identity.governanceObjectType,
+          identity.governanceObjectId,
+        );
+        return latest?.evaluation ?? null;
+      },
+    );
+
+    const snapshot: GateDecisionSnapshot = {
+      ...enforcedDecision,
       evaluatedAt: new Date().toISOString(),
     };
     gateSnapshot.push(snapshot);
@@ -132,14 +153,15 @@ export async function createInventoryForRunWithSnapshot(
       governanceObjectType: "netbox_vm",
       governanceObjectId: vm.id,
       sourceNetboxId: vm.netboxId,
-      allowed: result.allowed,
-      missing: result.missing,
+      allowed: enforcedDecision.allowed,
+      missing: enforcedDecision.missing,
       evaluatedAt: new Date(),
-      reason: result.reason,
-      failureType: result.failureType,
+      reason: enforcedDecision.reason,
+      failureType: enforcedDecision.failureType,
+      governanceEnforcement: enforcedDecision.governanceEnforcement,
     });
 
-    if (result.allowed) {
+    if (enforcedDecision.allowed) {
       // Strip CIDR notation if present (e.g., "10.0.0.1/24" → "10.0.0.1")
       const ip = vm.ip ? vm.ip.split("/")[0] : null;
       allowedHosts.push({
@@ -208,4 +230,21 @@ export async function createInventoryForRunWithSnapshot(
   await writeFile(inventoryPath, lines.join("\n") + "\n", { mode: 0o600 });
 
   return { inventoryPath, gateSnapshot, allowedCount, blockedCount };
+}
+
+async function loadInventoryEligibilityPolicy(orgId: string, inventoryId: string | null): Promise<EligibilityPolicy> {
+  if (!inventoryId) {
+    return normalizeEligibilityPolicy(null);
+  }
+
+  const [inventory] = await db
+    .select({ eligibilityPolicy: automationInventories.eligibilityPolicy })
+    .from(automationInventories)
+    .where(and(
+      eq(automationInventories.id, inventoryId),
+      eq(automationInventories.orgId, orgId),
+    ))
+    .limit(1);
+
+  return normalizeEligibilityPolicy(inventory?.eligibilityPolicy ?? null);
 }

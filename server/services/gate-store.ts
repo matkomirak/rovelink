@@ -27,6 +27,7 @@ export interface GateDecision {
   cmdbAccountId?: string;
   reason?: string;
   failureType?: "governance" | "invariant"; // Classification of failure
+  governanceEnforcement?: Record<string, any>;
 }
 
 export interface GateEvaluationInput {
@@ -51,6 +52,7 @@ export interface GateDecisionSnapshot {
   missing: string[];
   reason?: string;
   failureType?: "governance" | "invariant";
+  governanceEnforcement?: Record<string, any>;
   evaluatedAt: string; // ISO string for JSON serialization
 }
 

@@ -375,6 +375,13 @@ export const automationInventories = pgTable("automation_inventories", {
   eligibilityPolicy: jsonb("eligibility_policy").default({
     requireRole: false,       // Require NetBox Role assignment
     requireContacts: false,   // Require at least one contact assigned
+    governance: {
+      mode: "observe_only",
+      requireGovernanceEvaluation: false,
+      minimumGovernanceScore: null,
+      blockOnRecommendedAction: true,
+      allowedReadinessStates: ["ready"],
+    },
   }),
   // Metadata
   isDefault: boolean("is_default").default(false),
@@ -769,10 +776,38 @@ export type GovernanceEvaluationRun = typeof governanceEvaluationRuns.$inferSele
 export type InsertGovernanceObjectEvaluation = typeof governanceObjectEvaluations.$inferInsert;
 export type GovernanceObjectEvaluation = typeof governanceObjectEvaluations.$inferSelect;
 
-// Eligibility Policy type for automation gate rules
-export interface EligibilityPolicy {
-  requireRole: boolean;       // Require NetBox Role assignment (optional)
-  requireContacts: boolean;   // Require at least one contact assigned (optional)
+export const governanceEnforcementModeSchema = z.enum(["observe_only", "warn_only", "enforce"]);
+export const governanceReadinessStateSchema = z.enum(["ready", "not_ready"]);
+
+export const governanceEnforcementPolicySchema = z.object({
+  mode: governanceEnforcementModeSchema.default("observe_only"),
+  requireGovernanceEvaluation: z.boolean().default(false),
+  minimumGovernanceScore: z.number().min(0).max(100).nullable().default(null),
+  blockOnRecommendedAction: z.boolean().default(true),
+  allowedReadinessStates: z.array(governanceReadinessStateSchema).nonempty().default(["ready"]),
+}).strict();
+
+export const DEFAULT_GOVERNANCE_ENFORCEMENT_POLICY: GovernanceEnforcementPolicy = {
+  mode: "observe_only",
+  requireGovernanceEvaluation: false,
+  minimumGovernanceScore: null,
+  blockOnRecommendedAction: true,
+  allowedReadinessStates: ["ready"],
+};
+
+export const eligibilityPolicySchema = z.object({
+  requireRole: z.boolean().default(false),
+  requireContacts: z.boolean().default(false),
+  governance: governanceEnforcementPolicySchema.default(DEFAULT_GOVERNANCE_ENFORCEMENT_POLICY),
+}).strict();
+
+export type GovernanceEnforcementMode = z.infer<typeof governanceEnforcementModeSchema>;
+export type GovernanceReadinessState = z.infer<typeof governanceReadinessStateSchema>;
+export type GovernanceEnforcementPolicy = z.infer<typeof governanceEnforcementPolicySchema>;
+export type EligibilityPolicy = z.infer<typeof eligibilityPolicySchema>;
+
+export function normalizeEligibilityPolicy(policy: unknown): EligibilityPolicy {
+  return eligibilityPolicySchema.parse(policy ?? {});
 }
 
 // Provider Hints - non-authoritative metadata from providers

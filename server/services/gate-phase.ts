@@ -15,7 +15,7 @@
 // ================================================================
 
 import { db } from "../db";
-import { cmdbAccounts, type EligibilityPolicy } from "../../shared/schema";
+import { cmdbAccounts, normalizeEligibilityPolicy, type EligibilityPolicy } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { NetBoxAdapter } from "./netbox-adapter";
 import { gateStore, GateDecision } from "./gate-store";
@@ -24,8 +24,7 @@ import { decryptCmdbConfig } from "./secrets";
 
 // Default policy - all optional rules disabled
 const DEFAULT_POLICY: EligibilityPolicy = {
-  requireRole: false,
-  requireContacts: false,
+  ...normalizeEligibilityPolicy(null),
 };
 
 export interface GatePhaseResult {
@@ -73,6 +72,10 @@ export async function runGatePhase(
   policy: EligibilityPolicy = DEFAULT_POLICY,
   orgId: string = ""
 ): Promise<GatePhaseResult> {
+  // Governance enforcement is intentionally not applied in this live NetBox
+  // path yet. Enforcement requires local governanceObjectId from cached
+  // netbox_vms rows; source NetBox IDs and VM names are display-only fallbacks
+  // and must never be used for enforcement.
   // Fetch CMDB account
   const [cmdb] = await db
     .select()

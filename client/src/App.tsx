@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -95,9 +95,14 @@ function AppContent() {
     queryKey: ["/api/auth/me"],
   });
 
-  if (!user && location !== "/login" && !isLoading) {
-    setTimeout(() => setLocation("/login"), 0);
-  }
+  useEffect(() => {
+    if (isLoading) return;
+    if (!user && location !== "/login") {
+      setLocation("/login");
+    } else if (user && location === "/login") {
+      setLocation("/");
+    }
+  }, [isLoading, location, setLocation, user]);
 
   if (isLoading) {
     return (
@@ -109,6 +114,14 @@ function AppContent() {
 
   if (!user) {
     return <Login />;
+  }
+
+  if (location === "/login") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
   }
 
   const style = {

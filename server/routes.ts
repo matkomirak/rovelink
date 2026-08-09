@@ -97,6 +97,88 @@ interface AuthRequest extends Request {
   user?: any;
 }
 
+const CMDB_OBJECT_TYPES = {
+  netbox_vm: {
+    objectType: "netbox_vm",
+    name: "Virtual Machines",
+    description: "Virtual machine records from NetBox virtualization inventory.",
+    status: "live",
+    mode: "live",
+  },
+} as const;
+
+type CmdbObjectType = keyof typeof CMDB_OBJECT_TYPES;
+
+const SENSITIVE_OBJECT_KEYS = new Set([
+  "authorization",
+  "api_key",
+  "apiKey",
+  "password",
+  "secret",
+  "token",
+]);
+
+function isSupportedCmdbObjectType(value: string): value is CmdbObjectType {
+  return Object.prototype.hasOwnProperty.call(CMDB_OBJECT_TYPES, value);
+}
+
+function sanitizeCmdbObjectPayload(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeCmdbObjectPayload(item, depth + 1));
+  if (typeof value !== "object") return value;
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_OBJECT_KEYS.has(key) || SENSITIVE_OBJECT_KEYS.has(key.toLowerCase())) {
+      sanitized[key] = "[REDACTED]";
+    } else {
+      sanitized[key] = sanitizeCmdbObjectPayload(child, depth + 1);
+    }
+  }
+  return sanitized;
+}
+
+function getNetboxVmDisplayFields(vm: any) {
+  return {
+    id: vm.id,
+    name: vm.name,
+    status: vm.status,
+    platform: vm.platform ?? null,
+    primary_ip: vm.primary_ip ?? null,
+    primary_ip4: vm.primary_ip4 ?? null,
+    tenant: vm.tenant ?? null,
+    role: vm.role ?? vm.device_role ?? null,
+    cluster: vm.cluster ?? null,
+    site: vm.site ?? null,
+    vcpus: vm.vcpus ?? null,
+    memory: vm.memory ?? null,
+    disk: vm.disk ?? null,
+    tags: vm.tags ?? [],
+    custom_fields: vm.custom_fields ?? {},
+    last_synced: vm.last_updated ?? vm.updated ?? null,
+  };
+}
+
+function buildCmdbObjectResponse(cmdb: any, objectType: CmdbObjectType, objects: any[]) {
+  const safeObjects = objects.map((object) => ({
+    ...getNetboxVmDisplayFields(object),
+    raw: sanitizeCmdbObjectPayload(object),
+  }));
+
+  return {
+    source: {
+      id: cmdb.id,
+      name: cmdb.name,
+      kind: cmdb.kind,
+    },
+    objectType,
+    objectTypeName: CMDB_OBJECT_TYPES[objectType].name,
+    mode: "live",
+    objects: safeObjects,
+    total: safeObjects.length,
+  };
+}
+
 async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   // Extract token from Authorization header or HttpOnly cookie
   let token: string | undefined;
@@ -241,7 +323,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Inline route handlers below also call authMiddleware (idempotent).
   for (const prefix of [
     "/api/inventory", "/api/reports", "/api/projects",
-    "/api/credentials", "/api/providers", "/api/cmdbs", "/api/stats",
+    "/api/credentials", "/api/providers", "/api/cmdbs", "/api/cmdb", "/api/stats",
   ] as const) {
     app.use(prefix, authMiddleware, requireOrgContext);
   }
@@ -850,6 +932,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get(["/api/cmdbs/:id/object-types", "/api/cmdb/:id/object-types"], authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      if (cmdb.kind !== "netbox") {
+        return res.json({ objectTypes: [] });
+      }
+
+      const cachedVms = await storage.getNetboxVms(req.orgId!).catch(() => []);
+      const cachedVmCount = cachedVms.filter((vm: any) => vm.sourceId === cmdb.id).length;
+      res.json({
+        source: sanitizeCmdbForResponse(cmdb),
+        objectTypes: [
+          {
+            ...CMDB_OBJECT_TYPES.netbox_vm,
+            count: cachedVmCount > 0 ? cachedVmCount : null,
+            status: cachedVmCount > 0 ? "cached" : "live",
+            mode: cachedVmCount > 0 ? "cached" : "live",
+          },
+        ],
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.object-types", "Failed to fetch CMDB object types");
+    }
+  });
+
+  app.get(["/api/cmdbs/:id/objects/:objectType", "/api/cmdb/:id/objects/:objectType"], authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const objectType = req.params.objectType;
+      if (!isSupportedCmdbObjectType(objectType)) {
+        return sendClientError(res, 400, `Unsupported CMDB object type: ${objectType}`);
+      }
+
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      if (cmdb.kind !== "netbox") {
+        return sendClientError(res, 400, "Object browsing is only supported for NetBox CMDBs");
+      }
+
+      const decryptedConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
+      const adapter = new NetBoxAdapter(decryptedConfig as any);
+      const vms = await adapter.listAllVms();
+      res.json(buildCmdbObjectResponse(cmdb, objectType, vms));
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.objects.list", "Failed to fetch CMDB objects");
+    }
+  });
+
+  app.get(["/api/cmdbs/:id/objects/:objectType/:objectId", "/api/cmdb/:id/objects/:objectType/:objectId"], authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const objectType = req.params.objectType;
+      if (!isSupportedCmdbObjectType(objectType)) {
+        return sendClientError(res, 400, `Unsupported CMDB object type: ${objectType}`);
+      }
+
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      if (cmdb.kind !== "netbox") {
+        return sendClientError(res, 400, "Object browsing is only supported for NetBox CMDBs");
+      }
+
+      const decryptedConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
+      const adapter = new NetBoxAdapter(decryptedConfig as any);
+      const vms = await adapter.listAllVms();
+      const vm = vms.find((candidate: any) => String(candidate.id) === String(req.params.objectId));
+      if (!vm) {
+        return res.status(404).json({ message: "CMDB object not found" });
+      }
+
+      res.json({
+        source: {
+          id: cmdb.id,
+          name: cmdb.name,
+          kind: cmdb.kind,
+        },
+        objectType,
+        objectTypeName: CMDB_OBJECT_TYPES[objectType].name,
+        mode: "live",
+        object: {
+          ...getNetboxVmDisplayFields(vm),
+          raw: sanitizeCmdbObjectPayload(vm),
+        },
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.objects.get", "Failed to fetch CMDB object");
+    }
+  });
+
   app.get("/api/cmdbs/:id/vms", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
@@ -862,7 +1038,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const decryptedConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
       const adapter = new NetBoxAdapter(decryptedConfig as any);
       const vms = await adapter.listAllVms();
-      res.json({ vms, total: vms.length });
+      res.json({ vms: buildCmdbObjectResponse(cmdb, "netbox_vm", vms).objects, total: vms.length, mode: "live" });
     } catch (error: any) {
       sendInternalError(res, error, "cmdbs.vms", "Failed to fetch VMs");
     }

@@ -10,6 +10,7 @@ import type {
   GovernanceBlueprintVersion,
   GovernanceEvaluationRun,
   GovernanceObjectEvaluation,
+  NetboxInventorySource,
   NetboxVm,
 } from "../shared/schema";
 
@@ -39,6 +40,38 @@ function createFakeGovernanceStorage() {
   const versions: GovernanceBlueprintVersion[] = [];
   const runs: GovernanceEvaluationRun[] = [];
   const objectEvaluations: GovernanceObjectEvaluation[] = [];
+  const sources: NetboxInventorySource[] = [
+    {
+      id: `${ORG_A}-source`,
+      orgId: ORG_A,
+      name: "Alpha NetBox",
+      url: "http://alpha-netbox.local",
+      token: "encrypted-token",
+      enabled: true,
+      lastImportAt: null,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+    {
+      id: `${ORG_A}-secondary-source`,
+      orgId: ORG_A,
+      name: "Alpha Secondary NetBox",
+      url: "http://alpha-secondary-netbox.local",
+      token: "encrypted-token",
+      enabled: true,
+      lastImportAt: null,
+      createdAt: new Date("2026-01-02T00:00:00.000Z"),
+    },
+    {
+      id: `${ORG_B}-source`,
+      orgId: ORG_B,
+      name: "Beta NetBox",
+      url: "http://beta-netbox.local",
+      token: "encrypted-token",
+      enabled: true,
+      lastImportAt: null,
+      createdAt: new Date("2026-01-03T00:00:00.000Z"),
+    },
+  ];
   const vms: NetboxVm[] = [];
   let netboxVmReadCount = 0;
   let sequence = 0;
@@ -51,6 +84,7 @@ function createFakeGovernanceStorage() {
     versions,
     runs,
     objectEvaluations,
+    sources,
     vms,
     get netboxVmReadCount() {
       return netboxVmReadCount;
@@ -145,7 +179,7 @@ function createFakeGovernanceStorage() {
       if (!blueprint || !version || version.blueprintId !== blueprint.id) {
         throw new Error("Governance blueprint version not found");
       }
-      if (input.netboxSourceId && input.netboxSourceId !== `${input.orgId}-source`) {
+      if (input.netboxSourceId && !sources.some((source) => source.id === input.netboxSourceId && source.orgId === input.orgId)) {
         throw new Error("NetBox inventory source not found");
       }
       if (input.cmdbAccountId && input.cmdbAccountId !== `${input.orgId}-cmdb`) {
@@ -212,9 +246,18 @@ function createFakeGovernanceStorage() {
       };
     },
 
+    async getNetboxInventorySources(orgId: string) {
+      return sources.filter((source) => source.orgId === orgId);
+    },
+
+    async getNetboxInventorySource(id: string, orgId: string) {
+      return sources.find((source) => source.id === id && source.orgId === orgId);
+    },
+
     async getNetboxVms(orgId: string) {
       netboxVmReadCount += 1;
-      return vms.filter((vm) => vm.sourceId === `${orgId}-source`);
+      const orgSourceIds = new Set(sources.filter((source) => source.orgId === orgId).map((source) => source.id));
+      return vms.filter((vm) => vm.sourceId && orgSourceIds.has(vm.sourceId));
     },
   };
 }
@@ -390,6 +433,166 @@ describe("governance routes", () => {
     assert.equal(storage.objectEvaluations.length, 1);
     assert.equal(storage.objectEvaluations[0].objectId, "vm-alpha-1");
     assert.equal(storage.objectEvaluations[0].externalId, "101");
+  });
+
+  it("viewer can list governance NetBox sources without tokens", async () => {
+    storage.vms.push({
+      id: "vm-alpha-source-summary",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 111,
+      name: "alpha-source-summary",
+      ip: "192.0.2.11",
+      operatingSystem: "linux",
+      customFields: {},
+      tags: [],
+      lastImportedAt: new Date("2026-01-04T00:00:00.000Z"),
+    });
+
+    const response = await req
+      .get("/api/governance/netbox-sources")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.length, 2);
+    assert.equal(response.body[0].token, undefined);
+    assert.equal(response.body.find((source: any) => source.id === `${ORG_A}-source`).cachedVmCount, 1);
+  });
+
+  it("evaluation with netboxSourceId only evaluates VMs from that source", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push(
+      {
+        id: "vm-alpha-primary",
+        sourceId: `${ORG_A}-source`,
+        netboxId: 121,
+        name: "alpha-primary",
+        ip: "192.0.2.12",
+        operatingSystem: "linux",
+        customFields: {
+          tenant: "alpha",
+          role: "app",
+          automatable: true,
+          provider_state: "present",
+          technical_owner: "platform",
+          service_owner: "payments",
+          data_owner: "cmdb",
+          operations_team: "ops",
+          business_owner: "finance",
+        },
+        tags: [],
+        lastImportedAt: new Date(),
+      },
+      {
+        id: "vm-alpha-secondary",
+        sourceId: `${ORG_A}-secondary-source`,
+        netboxId: 122,
+        name: "alpha-secondary",
+        ip: "192.0.2.13",
+        operatingSystem: "linux",
+        customFields: {
+          tenant: "alpha",
+          role: "app",
+          automatable: true,
+          provider_state: "present",
+          technical_owner: "platform",
+          service_owner: "payments",
+          data_owner: "cmdb",
+          operations_team: "ops",
+          business_owner: "finance",
+        },
+        tags: [],
+        lastImportedAt: new Date(),
+      },
+    );
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .send({ netboxSourceId: `${ORG_A}-secondary-source` })
+      .expect(200);
+
+    assert.equal(response.body.evaluatedCount, 1);
+    assert.equal(storage.runs[0].netboxSourceId, `${ORG_A}-secondary-source`);
+    assert.equal(storage.objectEvaluations.length, 1);
+    assert.equal(storage.objectEvaluations[0].objectId, "vm-alpha-secondary");
+    assert.equal(storage.netboxVmReadCount, 1);
+  });
+
+  it("evaluation rejects cross-org netboxSourceId", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .send({ netboxSourceId: `${ORG_B}-source` })
+      .expect(404);
+
+    assert.equal(storage.runs.length, 0);
+    assert.equal(storage.objectEvaluations.length, 0);
+  });
+
+  it("omitted netboxSourceId preserves all cached NetBox VM evaluation behavior", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push(
+      {
+        id: "vm-alpha-all-primary",
+        sourceId: `${ORG_A}-source`,
+        netboxId: 131,
+        name: "alpha-all-primary",
+        ip: "192.0.2.14",
+        operatingSystem: "linux",
+        customFields: {
+          tenant: "alpha",
+          role: "app",
+          automatable: true,
+          provider_state: "present",
+          technical_owner: "platform",
+          service_owner: "payments",
+          data_owner: "cmdb",
+          operations_team: "ops",
+          business_owner: "finance",
+        },
+        tags: [],
+        lastImportedAt: new Date(),
+      },
+      {
+        id: "vm-alpha-all-secondary",
+        sourceId: `${ORG_A}-secondary-source`,
+        netboxId: 132,
+        name: "alpha-all-secondary",
+        ip: "192.0.2.15",
+        operatingSystem: "linux",
+        customFields: {
+          tenant: "alpha",
+          role: "app",
+          automatable: true,
+          provider_state: "present",
+          technical_owner: "platform",
+          service_owner: "payments",
+          data_owner: "cmdb",
+          operations_team: "ops",
+          business_owner: "finance",
+        },
+        tags: [],
+        lastImportedAt: new Date(),
+      },
+    );
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.evaluatedCount, 2);
+    assert.equal(storage.runs[0].netboxSourceId, null);
+    assert.deepEqual(
+      storage.objectEvaluations.map((evaluation) => evaluation.objectId).sort(),
+      ["vm-alpha-all-primary", "vm-alpha-all-secondary"],
+    );
   });
 
   it("viewer cannot run evaluation", async () => {

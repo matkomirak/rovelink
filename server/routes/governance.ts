@@ -43,6 +43,10 @@ const activateSchema = z.object({
   versionId: z.string().min(1),
 }).strict();
 
+const evaluateCachedNetboxVmsSchema = z.object({
+  netboxSourceId: z.string().min(1).optional(),
+}).strict();
+
 function resolveOrgId(req: AuthRequest): string {
   return req.orgId || req.user?.orgId || "";
 }
@@ -61,6 +65,41 @@ function rejectDirectActivation(res: Response, status?: string): boolean {
 
 export function createGovernanceRouter(storage: IStorage = defaultStorage) {
   const router = express.Router();
+
+  router.get("/netbox-sources", async (req: AuthRequest, res: Response) => {
+    if (!requireMinimumRole(req, res, "viewer")) return;
+
+    try {
+      const orgId = resolveOrgId(req);
+      const [sources, vms] = await Promise.all([
+        storage.getNetboxInventorySources(orgId),
+        storage.getNetboxVms(orgId),
+      ]);
+      const vmCounts = new Map<string, number>();
+      const lastImported = new Map<string, Date>();
+
+      for (const vm of vms) {
+        if (!vm.sourceId) continue;
+        vmCounts.set(vm.sourceId, (vmCounts.get(vm.sourceId) ?? 0) + 1);
+        const current = lastImported.get(vm.sourceId);
+        if (!current || vm.lastImportedAt > current) {
+          lastImported.set(vm.sourceId, vm.lastImportedAt);
+        }
+      }
+
+      res.json(sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        url: source.url,
+        enabled: source.enabled,
+        cachedVmCount: vmCounts.get(source.id) ?? 0,
+        lastImportAt: source.lastImportAt ?? lastImported.get(source.id) ?? null,
+        createdAt: source.createdAt,
+      })));
+    } catch (error) {
+      sendInternalError(res, error, "governance.netbox-sources.list", "Failed to list governance NetBox sources");
+    }
+  });
 
   router.get("/blueprints", async (req: AuthRequest, res: Response) => {
     if (!requireMinimumRole(req, res, "viewer")) return;
@@ -236,6 +275,7 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
 
     try {
       const orgId = resolveOrgId(req);
+      const payload = evaluateCachedNetboxVmsSchema.parse(req.body ?? {});
       const blueprint = await storage.getGovernanceBlueprint(req.params.id, orgId);
       if (!blueprint) return sendClientError(res, 404, "Governance blueprint not found");
       if (!blueprint.activeVersionId) return sendClientError(res, 400, "Governance blueprint has no active version");
@@ -245,7 +285,16 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
         return sendClientError(res, 400, "Governance blueprint active version is invalid");
       }
 
-      const vms = await storage.getNetboxVms(orgId);
+      const selectedSourceId = payload.netboxSourceId;
+      if (selectedSourceId) {
+        const source = await storage.getNetboxInventorySource(selectedSourceId, orgId);
+        if (!source) return sendClientError(res, 404, "NetBox inventory source not found");
+      }
+
+      const allVms = await storage.getNetboxVms(orgId);
+      const vms = selectedSourceId
+        ? allVms.filter((vm) => vm.sourceId === selectedSourceId)
+        : allVms;
       const evaluated = vms.map((vm) => ({
         vm,
         result: evaluateGovernanceObject(normalizeCachedNetboxVm(vm), version.rules),
@@ -257,7 +306,7 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
         orgId,
         blueprintId: blueprint.id,
         blueprintVersionId: version.id,
-        netboxSourceId: firstSourceId(vms),
+        netboxSourceId: selectedSourceId ?? firstSourceId(vms),
         status: "ok",
         counts: {
           evaluated: evaluated.length,
@@ -301,6 +350,9 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
         topFindings: summary.topFindings,
       });
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return sendClientError(res, 400, "Invalid governance evaluation payload", { issues: error.issues });
+      }
       sendInternalError(res, error, "governance.evaluate.cached-netbox-vms", "Failed to evaluate cached NetBox VMs");
     }
   });

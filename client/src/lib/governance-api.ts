@@ -21,6 +21,16 @@ export interface CachedNetBoxEvaluationResponse {
   topFindings: Array<{ code: string; count: number; message: string }>;
 }
 
+export interface GovernanceNetBoxSourceSummary {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  cachedVmCount: number;
+  lastImportAt: string | null;
+  createdAt: string;
+}
+
 export interface LatestGovernanceObjectEvaluationResponse {
   evaluation: GovernanceObjectEvaluation;
   run: GovernanceEvaluationRun | null;
@@ -79,6 +89,7 @@ async function postJson<T>(url: string, data: unknown = {}): Promise<T> {
 
 export const governanceKeys = {
   blueprints: ["/api/governance/blueprints"] as const,
+  netboxSources: ["/api/governance/netbox-sources"] as const,
   blueprint: (id: string) => ["/api/governance/blueprints", id] as const,
   versions: (id: string) => ["/api/governance/blueprints", id, "versions"] as const,
   evaluationRuns: ["/api/governance/evaluation-runs"] as const,
@@ -94,6 +105,10 @@ export const governanceKeys = {
 
 export function listGovernanceBlueprints() {
   return fetchJson<GovernanceBlueprint[]>("/api/governance/blueprints");
+}
+
+export function listGovernanceNetBoxSources() {
+  return fetchJson<GovernanceNetBoxSourceSummary[]>("/api/governance/netbox-sources");
 }
 
 export function getGovernanceBlueprint(id: string) {
@@ -112,8 +127,11 @@ export function activateGovernanceBlueprintVersion(blueprintId: string, versionI
   return postJson<GovernanceBlueprint>(`/api/governance/blueprints/${blueprintId}/activate`, { versionId });
 }
 
-export function runCachedNetboxVmEvaluation(blueprintId: string) {
-  return postJson<CachedNetBoxEvaluationResponse>(`/api/governance/blueprints/${blueprintId}/evaluate-cached-netbox-vms`);
+export function runCachedNetboxVmEvaluation(blueprintId: string, options: { netboxSourceId?: string } = {}) {
+  return postJson<CachedNetBoxEvaluationResponse>(
+    `/api/governance/blueprints/${blueprintId}/evaluate-cached-netbox-vms`,
+    options.netboxSourceId ? { netboxSourceId: options.netboxSourceId } : {},
+  );
 }
 
 export function listGovernanceEvaluationRuns() {

@@ -84,7 +84,7 @@ export default function GovernanceEvaluationRuns() {
             <div className="rounded-md border border-dashed p-8 text-center">
               <p className="font-medium">No evaluation runs yet</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Run a cached NetBox VM evaluation from a blueprint detail page.
+                Run an evaluation from Governance and choose the cached NetBox source to inspect.
               </p>
             </div>
           ) : (
@@ -124,4 +124,3 @@ export default function GovernanceEvaluationRuns() {
     </div>
   );
 }
-

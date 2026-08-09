@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { ArrowLeft, ClipboardCheck, PlayCircle, RefreshCw } from "lucide-react";
@@ -9,12 +9,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
+import { GovernanceEvaluationLauncher } from "@/components/governance-evaluation-launcher";
 import {
   activateGovernanceBlueprintVersion,
   getGovernanceBlueprint,
   governanceKeys,
   listGovernanceBlueprintVersions,
-  runCachedNetboxVmEvaluation,
 } from "@/lib/governance-api";
 import type { GovernanceBlueprint, GovernanceBlueprintVersion } from "@shared/schema";
 import type { GovernanceBlueprintRules } from "@shared/governance";
@@ -97,6 +97,7 @@ function RulesPreview({ rules }: { rules: GovernanceBlueprintRules }) {
 export default function GovernanceBlueprintDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const { toast } = useToast();
+  const [launcherOpen, setLauncherOpen] = useState(false);
 
   const {
     data: blueprint,
@@ -139,20 +140,6 @@ export default function GovernanceBlueprintDetail() {
     },
   });
 
-  const evaluateMutation = useMutation({
-    mutationFn: () => runCachedNetboxVmEvaluation(id),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: governanceKeys.evaluationRuns });
-      toast({
-        title: "Evaluation complete",
-        description: `${result.evaluatedCount} cached NetBox VM${result.evaluatedCount === 1 ? "" : "s"} evaluated.`,
-      });
-    },
-    onError: (mutationError: Error) => {
-      toast({ variant: "destructive", title: "Evaluation failed", description: mutationError.message });
-    },
-  });
-
   if (blueprintError) {
     return (
       <div className="space-y-4">
@@ -175,20 +162,18 @@ export default function GovernanceBlueprintDetail() {
           </Button>
           <div>
             <h1 className="text-2xl font-semibold">{blueprintLoading ? "Governance Blueprint" : blueprint?.name}</h1>
-            <p className="text-sm text-muted-foreground">Review versions and run cached NetBox VM evaluations.</p>
+            <p className="text-sm text-muted-foreground">
+              Review versions and apply this blueprint to cached NetBox VMs from a selected source.
+            </p>
           </div>
         </div>
         <Button
-          onClick={() => evaluateMutation.mutate()}
-          disabled={!blueprint?.activeVersionId || evaluateMutation.isPending}
+          onClick={() => setLauncherOpen(true)}
+          disabled={!blueprint?.activeVersionId}
           data-testid="button-run-governance-evaluation"
         >
-          {evaluateMutation.isPending ? (
-            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <PlayCircle className="h-4 w-4 mr-2" />
-          )}
-          Run Cached NetBox VM Evaluation
+          <PlayCircle className="h-4 w-4 mr-2" />
+          Run Evaluation
         </Button>
       </div>
 
@@ -294,6 +279,7 @@ export default function GovernanceBlueprintDetail() {
       </Card>
 
       {activeVersion && <RulesPreview rules={activeVersion.rules as GovernanceBlueprintRules} />}
+      <GovernanceEvaluationLauncher open={launcherOpen} onOpenChange={setLauncherOpen} fixedBlueprintId={id} />
     </div>
   );
 }

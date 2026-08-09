@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ClipboardCheck, FilePlus2, History, RefreshCw } from "lucide-react";
+import { ClipboardCheck, FilePlus2, History, PlayCircle, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { GovernanceEvaluationLauncher } from "@/components/governance-evaluation-launcher";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import {
@@ -29,6 +31,7 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 
 export default function Governance() {
   const { toast } = useToast();
+  const [launcherOpen, setLauncherOpen] = useState(false);
   const { data: blueprints = [], isLoading, isError, error, refetch, isFetching } = useQuery<GovernanceBlueprint[]>({
     queryKey: governanceKeys.blueprints,
     queryFn: listGovernanceBlueprints,
@@ -72,10 +75,14 @@ export default function Governance() {
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Governance</h1>
           <p className="text-sm text-muted-foreground">
-            Define CMDB governance blueprints, evaluate cached NetBox VMs, and review findings before automation decisions.
+            Blueprint defines governance rules. Evaluation applies those rules to cached CMDB objects from a selected source.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => setLauncherOpen(true)} data-testid="button-open-governance-evaluation-launcher">
+            <PlayCircle className="h-4 w-4 mr-2" />
+            Run Evaluation
+          </Button>
           <Button variant="outline" asChild data-testid="link-governance-runs">
             <Link href="/governance/evaluation-runs">
               <History className="h-4 w-4 mr-2" />
@@ -166,6 +173,7 @@ export default function Governance() {
           )}
         </CardContent>
       </Card>
+      <GovernanceEvaluationLauncher open={launcherOpen} onOpenChange={setLauncherOpen} />
     </div>
   );
 }

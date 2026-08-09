@@ -20,7 +20,7 @@ const ORG_B = "org-beta";
 
 type FakeStorage = ReturnType<typeof createFakeGovernanceStorage>;
 
-function makeRequest(storage: FakeStorage) {
+function makeRequest(storage: FakeStorage, deps?: Parameters<typeof createGovernanceRouter>[1]) {
   const app = express();
   app.use(express.json());
   app.use((req: any, _res, next) => {
@@ -32,7 +32,7 @@ function makeRequest(storage: FakeStorage) {
     };
     next();
   });
-  app.use("/api/governance", createGovernanceRouter(storage as unknown as IStorage));
+  app.use("/api/governance", createGovernanceRouter(storage as unknown as IStorage, deps));
   return supertest(app);
 }
 
@@ -270,8 +270,35 @@ function createFakeGovernanceStorage() {
       return source;
     },
 
+    async updateNetboxInventorySource(id: string, data: Partial<NetboxInventorySource>, orgId: string) {
+      const source = await this.getNetboxInventorySource(id, orgId);
+      if (!source) return undefined;
+      Object.assign(source, data);
+      return source;
+    },
+
     async getCmdbAccounts(orgId: string) {
       return cmdbAccounts.filter((account) => account.orgId === orgId);
+    },
+
+    async upsertNetboxVm(input: any) {
+      const existing = vms.find((vm) => vm.sourceId === input.sourceId && vm.netboxId === input.netboxId);
+      if (existing) {
+        Object.assign(existing, input, { id: existing.id, lastImportedAt: now() });
+        return existing;
+      }
+
+      const vm: NetboxVm = {
+        id: input.id ?? nextId("vm"),
+        ip: null,
+        operatingSystem: null,
+        customFields: {},
+        tags: [],
+        lastImportedAt: now(),
+        ...input,
+      };
+      vms.push(vm);
+      return vm;
     },
 
     async getNetboxVms(orgId: string) {
@@ -549,6 +576,118 @@ describe("governance routes", () => {
     assert.equal(response.body[0].cachedVmCount, 0);
     assert.equal(response.body[0].token, undefined);
     assert.equal(storage.sources.length, 1);
+  });
+
+  it("syncs cached VMs for a governance source with stable source linkage", async () => {
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => [
+        {
+          id: 501,
+          name: "alpha-live-1",
+          primary_ip4: { address: "192.0.2.51/24" },
+          platform: { name: "Ubuntu Linux" },
+          custom_fields: {
+            tenant: "alpha",
+            role: "app",
+            automatable: true,
+            provider_state: "present",
+          },
+          tags: [{ name: "production" }],
+        },
+        {
+          id: 502,
+          name: "alpha-live-2",
+          primary_ip: { address: "192.0.2.52/24" },
+          platform: { name: "Windows Server" },
+          custom_fields: {},
+          tags: [{ slug: "finance" }],
+        },
+      ],
+    });
+
+    const response = await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.importedCount, 2);
+    assert.equal(storage.vms.length, 2);
+    assert.equal(storage.vms[0].sourceId, `${ORG_A}-source`);
+    assert.equal(storage.vms[0].netboxId, 501);
+    assert.equal(storage.vms[0].ip, "192.0.2.51");
+    assert.equal(storage.vms[0].operatingSystem, "Linux");
+    assert.deepEqual(storage.vms[1].tags, ["finance"]);
+
+    const sourcesResponse = await syncReq
+      .get("/api/governance/netbox-sources")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(sourcesResponse.body.find((source: any) => source.id === `${ORG_A}-source`).cachedVmCount, 2);
+  });
+
+  it("sync cached VMs rejects cross-org sources", async () => {
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => {
+        throw new Error("should not fetch live NetBox for a cross-org source");
+      },
+    });
+
+    await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_B}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(404);
+
+    assert.equal(storage.vms.length, 0);
+  });
+
+  it("evaluation after source sync evaluates cached VMs without another live NetBox call", async () => {
+    let liveFetchCount = 0;
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => {
+        liveFetchCount += 1;
+        return [
+          {
+            id: 601,
+            name: "alpha-synced-eval",
+            primary_ip4: { address: "192.0.2.61/24" },
+            platform: { name: "Linux" },
+            custom_fields: {
+              tenant: "alpha",
+              role: "app",
+              automatable: true,
+              provider_state: "present",
+              technical_owner: "platform",
+              service_owner: "payments",
+              data_owner: "cmdb",
+              operations_team: "ops",
+              business_owner: "finance",
+            },
+            tags: [],
+          },
+        ];
+      },
+    });
+    const { blueprint } = await createDefaultBlueprint(syncReq, ORG_A);
+
+    await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    const response = await syncReq
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.evaluatedCount, 1);
+    assert.equal(storage.objectEvaluations[0].objectId, storage.vms[0].id);
+    assert.equal(liveFetchCount, 1);
   });
 
   it("evaluation with netboxSourceId only evaluates VMs from that source", async () => {

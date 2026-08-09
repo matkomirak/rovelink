@@ -21,6 +21,13 @@ export interface CachedNetBoxEvaluationResponse {
   topFindings: Array<{ code: string; count: number; message: string }>;
 }
 
+export interface SyncGovernanceCachedNetBoxVmsResponse {
+  sourceId: string;
+  importedCount: number;
+  cachedVmCount: number;
+  lastImportAt: string | null;
+}
+
 export interface GovernanceNetBoxSourceSummary {
   id: string;
   name: string;
@@ -124,6 +131,12 @@ export function listGovernanceBlueprintVersions(id: string) {
 
 export function createDefaultNetboxVmBlueprint(netboxSourceId: string) {
   return postJson<CreateDefaultBlueprintResponse>("/api/governance/defaults/netbox-vm", { netboxSourceId });
+}
+
+export function syncGovernanceCachedNetBoxVms(sourceId: string) {
+  return postJson<SyncGovernanceCachedNetBoxVmsResponse>(
+    `/api/governance/netbox-sources/${encodeURIComponent(sourceId)}/sync-cached-vms`,
+  );
 }
 
 export function activateGovernanceBlueprintVersion(blueprintId: string, versionId: string) {

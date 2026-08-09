@@ -9,22 +9,28 @@ import {
   evaluateGovernanceObject,
   type NormalizedGovernanceObject,
 } from "../services/governance-blueprint-evaluator";
+import { NetBoxAdapter } from "../services/netbox-adapter";
 import { governanceBlueprintRulesSchema } from "@shared/governance";
 import type {
   CmdbAccount,
   GovernanceBlueprint,
   GovernanceBlueprintVersion,
   GovernanceEvaluationResult,
+  InsertNetboxVm,
   InsertNetboxInventorySource,
   NetboxInventorySource,
   NetboxVm,
 } from "@shared/schema";
-import { encryptNetboxToken } from "../services/secrets";
+import { decryptNetboxToken, encryptNetboxToken } from "../services/secrets";
 
 interface AuthRequest extends Request {
   user?: { id?: string; role?: string; orgId?: string | null };
   orgId?: string;
 }
+
+type GovernanceRouterDeps = {
+  listNetboxVmsForSource?: (source: NetboxInventorySource) => Promise<unknown[]>;
+};
 
 const createBlueprintSchema = z.object({
   name: z.string().min(1),
@@ -129,11 +135,64 @@ function isNetboxCmdbAccountWithCredentials(
   );
 }
 
+async function listLiveNetboxVmsForSource(source: NetboxInventorySource): Promise<unknown[]> {
+  const token = decryptNetboxToken(source.token);
+  const adapter = new NetBoxAdapter({ url: source.url, token });
+  return adapter.listAllVms();
+}
+
+function toCachedNetboxVm(sourceId: string, vm: unknown): InsertNetboxVm {
+  const record = isRecord(vm) ? vm : {};
+  const customFields = isRecord(record.custom_fields)
+    ? record.custom_fields
+    : isRecord(record.customFields)
+      ? record.customFields
+      : {};
+  const platform = isRecord(record.platform) ? record.platform : {};
+
+  return {
+    sourceId,
+    netboxId: Number(record.id),
+    name: typeof record.name === "string" && record.name.trim() ? record.name : String(record.id),
+    ip: extractVmIp(record),
+    operatingSystem: normalizeOperatingSystem(
+      stringValue(customFields.operating_system) ?? stringValue(platform.name),
+    ),
+    customFields,
+    tags: Array.isArray(record.tags)
+      ? record.tags.map((tag) => (
+        isRecord(tag) ? stringValue(tag.name) ?? stringValue(tag.slug) : stringValue(tag)
+      )).filter((tag): tag is string => Boolean(tag))
+      : [],
+  };
+}
+
+function extractVmIp(record: Record<string, unknown>): string | null {
+  const primaryIp4 = isRecord(record.primary_ip4) ? record.primary_ip4 : {};
+  const primaryIp = isRecord(record.primary_ip) ? record.primary_ip : {};
+  const address = stringValue(primaryIp4.address) ?? stringValue(primaryIp.address);
+  return address ? address.split("/")[0] : null;
+}
+
+function normalizeOperatingSystem(value?: string): string | null {
+  if (!value) return null;
+  const lower = value.toLowerCase();
+  if (lower.includes("linux") || lower.includes("ubuntu") || lower.includes("debian") || lower.includes("centos") || lower.includes("rhel") || lower.includes("fedora")) {
+    return "Linux";
+  }
+  if (lower.includes("windows")) return "Windows";
+  return value === "Unknown" ? null : "Other";
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 function defaultNetboxVmBlueprintName(sourceName: string): string {
   return `${STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name} — ${sourceName}`;
 }
 
-export function createGovernanceRouter(storage: IStorage = defaultStorage) {
+export function createGovernanceRouter(storage: IStorage = defaultStorage, deps: GovernanceRouterDeps = {}) {
   const router = express.Router();
 
   router.get("/netbox-sources", async (req: AuthRequest, res: Response) => {
@@ -173,6 +232,41 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
       })));
     } catch (error) {
       sendInternalError(res, error, "governance.netbox-sources.list", "Failed to list governance NetBox sources");
+    }
+  });
+
+  router.post("/netbox-sources/:id/sync-cached-vms", async (req: AuthRequest, res: Response) => {
+    if (!requireMinimumRole(req, res, "operator")) return;
+
+    try {
+      const orgId = resolveOrgId(req);
+      await materializeNetboxSourcesFromCmdbAccounts(storage, orgId);
+      const source = await storage.getNetboxInventorySource(req.params.id, orgId);
+      if (!source) return sendClientError(res, 404, "NetBox inventory source not found");
+
+      const liveVms = await (deps.listNetboxVmsForSource ?? listLiveNetboxVmsForSource)(source);
+      let importedCount = 0;
+      for (const liveVm of liveVms) {
+        const cachedVm = toCachedNetboxVm(source.id, liveVm);
+        if (!Number.isFinite(cachedVm.netboxId)) continue;
+        await storage.upsertNetboxVm(cachedVm);
+        importedCount += 1;
+      }
+
+      const updatedSource = await storage.updateNetboxInventorySource(
+        source.id,
+        { lastImportAt: new Date() },
+        orgId,
+      );
+
+      res.json({
+        sourceId: source.id,
+        importedCount,
+        cachedVmCount: importedCount,
+        lastImportAt: updatedSource?.lastImportAt ?? null,
+      });
+    } catch (error) {
+      sendInternalError(res, error, "governance.netbox-sources.sync-cached-vms", "Failed to sync cached NetBox VMs");
     }
   });
 

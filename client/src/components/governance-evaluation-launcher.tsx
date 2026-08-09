@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ClipboardCheck, Loader2, PlayCircle } from "lucide-react";
+import { ClipboardCheck, Loader2, PlayCircle, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +22,7 @@ import {
   listGovernanceBlueprints,
   listGovernanceNetBoxSources,
   runCachedNetboxVmEvaluation,
+  syncGovernanceCachedNetBoxVms,
   type CachedNetBoxEvaluationResponse,
   type GovernanceNetBoxSourceSummary,
 } from "@/lib/governance-api";
@@ -138,6 +139,20 @@ export function GovernanceEvaluationLauncher({
     },
   });
 
+  const syncMutation = useMutation({
+    mutationFn: () => syncGovernanceCachedNetBoxVms(selectedSourceId),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: governanceKeys.netboxSources });
+      toast({
+        title: "Cached VMs synced",
+        description: `${result.importedCount} NetBox VM${result.importedCount === 1 ? "" : "s"} imported for ${selectedSource?.name ?? "the selected source"}.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Sync failed", description: error.message });
+    },
+  });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
@@ -228,12 +243,54 @@ export function GovernanceEvaluationLauncher({
               </div>
               <div className="mt-2 text-muted-foreground">{selectedSource.url}</div>
               <div className="text-muted-foreground">Last import: {formatDate(selectedSource.lastImportAt)}</div>
+              <div className="mt-2 text-muted-foreground">
+                Governance evaluation never calls live NetBox directly; it evaluates the cached VM set.
+              </div>
+              {selectedSource.cachedVmCount > 0 && (
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => syncMutation.mutate()}
+                    disabled={!selectedSourceId || syncMutation.isPending}
+                    data-testid="button-refresh-governance-cached-vms"
+                  >
+                    {syncMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Refresh cached VMs
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
           {selectedSource && selectedSource.cachedVmCount === 0 && (
-            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
-              No cached VMs yet - sync/import this CMDB source before running a governance evaluation.
+            <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-4 text-sm">
+              <p className="font-semibold text-foreground">No cached VMs yet</p>
+              <p className="mt-1 text-muted-foreground">
+                Governance evaluation uses cached CMDB objects. Sync this CMDB source before running an evaluation.
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                Governance evaluation never calls live NetBox directly; it evaluates the cached VM set.
+              </p>
+              <Button
+                type="button"
+                className="mt-3"
+                onClick={() => syncMutation.mutate()}
+                disabled={!selectedSourceId || syncMutation.isPending}
+                data-testid="button-sync-governance-cached-vms"
+              >
+                {syncMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Sync cached VMs
+              </Button>
             </div>
           )}
 

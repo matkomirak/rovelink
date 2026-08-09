@@ -6,9 +6,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Edit, RefreshCw, Server, Users, ChevronRight, Download, ShieldCheck, ShieldOff, AlertTriangle, Settings, Lock, ToggleRight } from "lucide-react";
-import { type AutomationInventory, type EligibilityPolicy } from "@shared/schema";
-import { useState } from "react";
+import { type AutomationInventory } from "@shared/schema";
+import { useEffect, useState } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -63,11 +66,30 @@ interface CoreRule {
 
 interface PolicyResponse {
   coreRules: CoreRule[];
-  policy: {
-    requireRole: boolean;
-    requireContacts: boolean;
-  };
+  policy: InventoryEligibilityPolicy;
 }
+
+type GovernanceEnforcementMode = "observe_only" | "warn_only" | "enforce";
+
+interface GovernanceEnforcementPolicy {
+  mode: GovernanceEnforcementMode;
+  requireGovernanceEvaluation: boolean;
+  minimumGovernanceScore: number | null;
+  blockOnRecommendedAction: boolean;
+  allowedReadinessStates: string[];
+}
+
+interface InventoryEligibilityPolicy {
+  requireRole: boolean;
+  requireContacts: boolean;
+  governance: GovernanceEnforcementPolicy;
+}
+
+type InventoryEligibilityPolicyPatch = {
+  requireRole?: boolean;
+  requireContacts?: boolean;
+  governance?: Partial<GovernanceEnforcementPolicy>;
+};
 
 interface GateGovernanceSummary {
   governanceScore: number;
@@ -131,11 +153,49 @@ function GateGovernanceContext({
   );
 }
 
+const DEFAULT_GOVERNANCE_POLICY: GovernanceEnforcementPolicy = {
+  mode: "observe_only",
+  requireGovernanceEvaluation: false,
+  minimumGovernanceScore: null,
+  blockOnRecommendedAction: true,
+  allowedReadinessStates: ["ready"],
+};
+
+const GOVERNANCE_MODE_HELP: Record<GovernanceEnforcementMode, string> = {
+  observe_only: "Observe only: governance is displayed but does not affect execution.",
+  warn_only: "Warn only: governance warnings are shown but execution is not blocked.",
+  enforce: "Enforce: governance may block inventory export/run eligibility.",
+};
+
+function formatMutationError(error: unknown): string {
+  if (!(error instanceof Error)) return "Failed to update policy";
+
+  const jsonMatch = error.message.match(/\{.*\}$/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (typeof parsed.message === "string" && parsed.message.trim()) {
+        if (parsed.message === "Forbidden") {
+          return "You do not have permission to perform this action.";
+        }
+        return parsed.message;
+      }
+    } catch {}
+  }
+
+  if (error.message.startsWith("403:")) {
+    return "You do not have permission to perform this action.";
+  }
+
+  return error.message || "Failed to update policy";
+}
+
 export default function AutomationInventoryDetail() {
   const { id } = useParams();
   const [, setLocation] = useLocation();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [selectedHost, setSelectedHost] = useState<string | null>(null);
+  const [minimumScoreDraft, setMinimumScoreDraft] = useState("");
   const { toast } = useToast();
 
   const { data: inventory, isLoading: inventoryLoading } = useQuery<AutomationInventory>({
@@ -156,13 +216,13 @@ export default function AutomationInventoryDetail() {
     enabled: inventory?.type === "linked",
   });
 
-  const { data: policyData } = useQuery<PolicyResponse>({
+  const { data: policyData, isLoading: policyLoading } = useQuery<PolicyResponse>({
     queryKey: ["/api/inventories", id, "policy"],
     enabled: inventory?.type === "linked",
   });
 
   const updatePolicyMutation = useMutation({
-    mutationFn: async (updates: Partial<EligibilityPolicy>) => {
+    mutationFn: async (updates: InventoryEligibilityPolicyPatch) => {
       return apiRequest("PATCH", `/api/inventories/${id}/policy`, updates);
     },
     onSuccess: () => {
@@ -177,11 +237,18 @@ export default function AutomationInventoryDetail() {
     onError: (error: any) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to update policy",
+        description: formatMutationError(error),
         variant: "destructive",
       });
     },
   });
+
+  const governancePolicy = policyData?.policy.governance ?? DEFAULT_GOVERNANCE_POLICY;
+
+  useEffect(() => {
+    const score = policyData?.policy.governance?.minimumGovernanceScore;
+    setMinimumScoreDraft(score == null ? "" : String(score));
+  }, [policyData?.policy.governance?.minimumGovernanceScore]);
 
   const handleDownloadAutomation = () => {
     window.location.href = `/api/inventories/${id}/automation.yml`;
@@ -195,6 +262,37 @@ export default function AutomationInventoryDetail() {
     if (!policyData) return;
     const currentValue = policyData.policy[rule];
     updatePolicyMutation.mutate({ [rule]: !currentValue });
+  };
+
+  const patchGovernancePolicy = (patch: Partial<GovernanceEnforcementPolicy>) => {
+    updatePolicyMutation.mutate({ governance: patch });
+  };
+
+  const handleMinimumScoreBlur = () => {
+    const trimmed = minimumScoreDraft.trim();
+    const current = governancePolicy.minimumGovernanceScore;
+
+    if (!trimmed) {
+      if (current !== null) {
+        patchGovernancePolicy({ minimumGovernanceScore: null });
+      }
+      return;
+    }
+
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
+      setMinimumScoreDraft(current == null ? "" : String(current));
+      toast({
+        title: "Invalid score",
+        description: "Minimum governance score must be a whole number from 0 to 100, or blank.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (parsed !== current) {
+      patchGovernancePolicy({ minimumGovernanceScore: parsed });
+    }
   };
 
   if (inventoryLoading || structureLoading) {
@@ -393,6 +491,23 @@ export default function AutomationInventoryDetail() {
         </div>
       )}
 
+      {inventory.type === "linked" && policyLoading && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Settings className="h-5 w-5 text-muted-foreground" />
+              <CardTitle>Eligibility Rules</CardTitle>
+            </div>
+            <CardDescription>Loading gate policy...</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </CardContent>
+        </Card>
+      )}
+
       {inventory.type === "linked" && policyData && (
         <Card>
           <CardHeader className="pb-3">
@@ -465,6 +580,116 @@ export default function AutomationInventoryDetail() {
               <p className="text-xs text-muted-foreground mt-3">
                 Enable optional rules to add stricter governance requirements for this inventory.
               </p>
+            </div>
+
+            <div className="border-t pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Governance Enforcement</span>
+              </div>
+
+              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                <p>{GOVERNANCE_MODE_HELP[governancePolicy.mode]}</p>
+                <p className="mt-1">Enforcement affects this inventory only.</p>
+                <p>Legacy VM-name matching is never used for enforcement.</p>
+              </div>
+
+              {governancePolicy.mode === "enforce" && (
+                <div className="mt-3 rounded-md border border-orange-500/30 bg-orange-500/10 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5" />
+                    <div className="text-sm">
+                      <div className="font-medium text-orange-600 dark:text-orange-400">Enforcement can block automation</div>
+                      <p className="text-xs text-muted-foreground">
+                        VMs that fail governance policy may be excluded from inventory export and run eligibility.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="governance-mode">Mode</Label>
+                  <Select
+                    value={governancePolicy.mode}
+                    onValueChange={(value) => patchGovernancePolicy({ mode: value as GovernanceEnforcementMode })}
+                    disabled={updatePolicyMutation.isPending}
+                  >
+                    <SelectTrigger id="governance-mode" data-testid="select-governance-mode">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="observe_only">Observe only</SelectItem>
+                      <SelectItem value="warn_only">Warn only</SelectItem>
+                      <SelectItem value="enforce">Enforce</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="governance-minimum-score">Minimum governance score</Label>
+                  <Input
+                    id="governance-minimum-score"
+                    inputMode="numeric"
+                    placeholder="No minimum"
+                    value={minimumScoreDraft}
+                    onChange={(event) => setMinimumScoreDraft(event.target.value)}
+                    onBlur={handleMinimumScoreBlur}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    disabled={updatePolicyMutation.isPending}
+                    data-testid="input-governance-minimum-score"
+                  />
+                  <p className="text-xs text-muted-foreground">Use 0-100, or leave blank for no score threshold.</p>
+                </div>
+
+                <div className="flex items-center justify-between rounded-md border p-3">
+                  <div className="space-y-1 pr-4">
+                    <div className="text-sm font-medium">Require governance evaluation</div>
+                    <div className="text-xs text-muted-foreground">
+                      When enforced, VMs without a stored governance evaluation can be blocked.
+                    </div>
+                  </div>
+                  <Switch
+                    checked={governancePolicy.requireGovernanceEvaluation}
+                    onCheckedChange={(checked) => patchGovernancePolicy({ requireGovernanceEvaluation: checked })}
+                    disabled={updatePolicyMutation.isPending}
+                    data-testid="switch-require-governance-evaluation"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-md border p-3">
+                  <div className="space-y-1 pr-4">
+                    <div className="text-sm font-medium">Block on block_automation recommendation</div>
+                    <div className="text-xs text-muted-foreground">
+                      Treat governance block recommendations as blocking only when mode is Enforce.
+                    </div>
+                  </div>
+                  <Switch
+                    checked={governancePolicy.blockOnRecommendedAction}
+                    onCheckedChange={(checked) => patchGovernancePolicy({ blockOnRecommendedAction: checked })}
+                    disabled={updatePolicyMutation.isPending}
+                    data-testid="switch-block-on-governance-recommendation"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-md border p-3 md:col-span-2">
+                  <div className="space-y-1 pr-4">
+                    <div className="text-sm font-medium">Allowed readiness states</div>
+                    <div className="text-xs text-muted-foreground">
+                      MVP enforcement allows only governance-ready objects.
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch checked disabled data-testid="switch-governance-ready-readonly" />
+                    <Badge variant="secondary">Ready</Badge>
+                  </div>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

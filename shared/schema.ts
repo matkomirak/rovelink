@@ -450,6 +450,8 @@ export const governanceBlueprints = pgTable("governance_blueprints", {
   name: text("name").notNull(),
   description: text("description"),
   objectType: text("object_type").notNull(),
+  sourceType: text("source_type"),
+  sourceId: varchar("source_id"),
   status: text("status").notNull().default("draft"), // draft, active, archived
   activeVersionId: varchar("active_version_id"),
   createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -457,6 +459,7 @@ export const governanceBlueprints = pgTable("governance_blueprints", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
   idxGovernanceBlueprintsOrgObjectType: index("idx_governance_blueprints_org_object_type").on(table.orgId, table.objectType),
+  idxGovernanceBlueprintsOrgObjectSource: index("idx_governance_blueprints_org_object_source").on(table.orgId, table.objectType, table.sourceType, table.sourceId),
 }));
 
 export const governanceBlueprintVersions = pgTable("governance_blueprint_versions", {

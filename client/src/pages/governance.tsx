@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ClipboardCheck, FilePlus2, History, PlayCircle, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -7,14 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { GovernanceBlueprintCreateDialog } from "@/components/governance-blueprint-create-dialog";
 import { GovernanceEvaluationLauncher } from "@/components/governance-evaluation-launcher";
-import { useToast } from "@/hooks/use-toast";
-import { queryClient } from "@/lib/queryClient";
 import {
-  createDefaultNetboxVmBlueprint,
   governanceKeys,
   listGovernanceBlueprints,
   listGovernanceBlueprintVersions,
+  listGovernanceNetBoxSources,
+  type GovernanceNetBoxSourceSummary,
 } from "@/lib/governance-api";
 import type { GovernanceBlueprint, GovernanceBlueprintVersion } from "@shared/schema";
 
@@ -30,12 +30,17 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 }
 
 export default function Governance() {
-  const { toast } = useToast();
   const [launcherOpen, setLauncherOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const { data: blueprints = [], isLoading, isError, error, refetch, isFetching } = useQuery<GovernanceBlueprint[]>({
     queryKey: governanceKeys.blueprints,
     queryFn: listGovernanceBlueprints,
   });
+  const { data: sources = [] } = useQuery<GovernanceNetBoxSourceSummary[]>({
+    queryKey: governanceKeys.netboxSources,
+    queryFn: listGovernanceNetBoxSources,
+  });
+  const sourceNames = new Map(sources.map((source) => [source.id, source.name]));
   const versionQueries = useQueries({
     queries: blueprints.map((blueprint) => ({
       queryKey: governanceKeys.versions(blueprint.id),
@@ -53,20 +58,6 @@ export default function Governance() {
     const versions = versionQueries[index]?.data as GovernanceBlueprintVersion[] | undefined;
     const activeVersion = versions?.find((version) => version.id === blueprint.activeVersionId);
     activeVersionLabels.set(blueprint.id, activeVersion ? `v${activeVersion.version}` : "active version set");
-  });
-
-  const createDefault = useMutation({
-    mutationFn: createDefaultNetboxVmBlueprint,
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: governanceKeys.blueprints });
-      toast({
-        title: "Default blueprint ready",
-        description: `${result.blueprint.name} is available for NetBox VM evaluations.`,
-      });
-    },
-    onError: (mutationError: Error) => {
-      toast({ variant: "destructive", title: "Could not create default blueprint", description: mutationError.message });
-    },
   });
 
   return (
@@ -90,16 +81,11 @@ export default function Governance() {
             </Link>
           </Button>
           <Button
-            onClick={() => createDefault.mutate()}
-            disabled={createDefault.isPending}
-            data-testid="button-create-default-governance-blueprint"
+            onClick={() => setCreateOpen(true)}
+            data-testid="button-create-governance-blueprint"
           >
-            {createDefault.isPending ? (
-              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <FilePlus2 className="h-4 w-4 mr-2" />
-            )}
-            Create Default NetBox VM Blueprint
+            <FilePlus2 className="h-4 w-4 mr-2" />
+            Create Governance Blueprint
           </Button>
         </div>
       </div>
@@ -134,7 +120,7 @@ export default function Governance() {
             <div className="rounded-md border border-dashed p-8 text-center">
               <p className="font-medium">No governance blueprints yet</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Create the default NetBox VM blueprint to start evaluating cached CMDB data.
+                Create a source-bound NetBox VM blueprint to start evaluating cached CMDB data.
               </p>
             </div>
           ) : (
@@ -143,6 +129,7 @@ export default function Governance() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
+                    <TableHead>Source</TableHead>
                     <TableHead>Object Type</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Active Version</TableHead>
@@ -155,6 +142,13 @@ export default function Governance() {
                   {blueprints.map((blueprint) => (
                     <TableRow key={blueprint.id}>
                       <TableCell className="font-medium">{blueprint.name}</TableCell>
+                      <TableCell>
+                        {blueprint.sourceType === "netbox_inventory_source" && blueprint.sourceId ? (
+                          sourceNames.get(blueprint.sourceId) ?? "Bound source"
+                        ) : (
+                          <span className="text-muted-foreground">No bound source</span>
+                        )}
+                      </TableCell>
                       <TableCell><Badge variant="outline">{blueprint.objectType}</Badge></TableCell>
                       <TableCell><Badge variant={statusVariant(blueprint.status)}>{blueprint.status}</Badge></TableCell>
                       <TableCell>{activeVersionLabels.get(blueprint.id) ?? "active version set"}</TableCell>
@@ -173,6 +167,7 @@ export default function Governance() {
           )}
         </CardContent>
       </Card>
+      <GovernanceBlueprintCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <GovernanceEvaluationLauncher open={launcherOpen} onOpenChange={setLauncherOpen} />
     </div>
   );

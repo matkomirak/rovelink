@@ -11,11 +11,15 @@ import {
 } from "../services/governance-blueprint-evaluator";
 import { governanceBlueprintRulesSchema } from "@shared/governance";
 import type {
+  CmdbAccount,
   GovernanceBlueprint,
   GovernanceBlueprintVersion,
   GovernanceEvaluationResult,
+  InsertNetboxInventorySource,
+  NetboxInventorySource,
   NetboxVm,
 } from "@shared/schema";
+import { encryptNetboxToken } from "../services/secrets";
 
 interface AuthRequest extends Request {
   user?: { id?: string; role?: string; orgId?: string | null };
@@ -26,12 +30,16 @@ const createBlueprintSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().nullable(),
   objectType: z.literal("netbox_vm"),
+  sourceType: z.literal("netbox_inventory_source").optional().nullable(),
+  sourceId: z.string().min(1).optional().nullable(),
   status: z.enum(["draft", "active", "archived"]).optional(),
 }).strict();
 
 const updateBlueprintSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional().nullable(),
+  sourceType: z.literal("netbox_inventory_source").optional().nullable(),
+  sourceId: z.string().min(1).optional().nullable(),
   status: z.enum(["draft", "active", "archived"]).optional(),
 }).strict();
 
@@ -45,6 +53,10 @@ const activateSchema = z.object({
 
 const evaluateCachedNetboxVmsSchema = z.object({
   netboxSourceId: z.string().min(1).optional(),
+}).strict();
+
+const createDefaultNetboxVmBlueprintSchema = z.object({
+  netboxSourceId: z.string().min(1),
 }).strict();
 
 function resolveOrgId(req: AuthRequest): string {
@@ -63,6 +75,64 @@ function rejectDirectActivation(res: Response, status?: string): boolean {
   return true;
 }
 
+async function validateBlueprintSourceBinding(
+  storage: IStorage,
+  orgId: string,
+  sourceType?: string | null,
+  sourceId?: string | null,
+): Promise<string | null> {
+  if (!sourceType && !sourceId) return null;
+  if (sourceType !== "netbox_inventory_source" || !sourceId) {
+    return "Governance blueprint source binding requires sourceType netbox_inventory_source and sourceId.";
+  }
+  const source = await storage.getNetboxInventorySource(sourceId, orgId);
+  return source ? null : "NetBox inventory source not found";
+}
+
+async function listGovernanceNetboxSources(storage: IStorage, orgId: string): Promise<NetboxInventorySource[]> {
+  await materializeNetboxSourcesFromCmdbAccounts(storage, orgId);
+  return storage.getNetboxInventorySources(orgId);
+}
+
+async function materializeNetboxSourcesFromCmdbAccounts(storage: IStorage, orgId: string): Promise<void> {
+  const [existingSources, cmdbAccounts] = await Promise.all([
+    storage.getNetboxInventorySources(orgId),
+    storage.getCmdbAccounts(orgId),
+  ]);
+  const existingSourceIds = new Set(existingSources.map((source) => source.id));
+
+  for (const account of cmdbAccounts) {
+    if (!isNetboxCmdbAccountWithCredentials(account) || existingSourceIds.has(account.id)) continue;
+
+    await storage.createNetboxInventorySource({
+      id: account.id,
+      orgId,
+      name: account.name,
+      url: account.config.url,
+      token: encryptNetboxToken(account.config.token),
+      enabled: account.enabled,
+    } as InsertNetboxInventorySource & { id: string });
+    existingSourceIds.add(account.id);
+  }
+}
+
+function isNetboxCmdbAccountWithCredentials(
+  account: CmdbAccount,
+): account is CmdbAccount & { config: { url: string; token: string } } {
+  const config = isRecord(account.config) ? account.config : {};
+  return (
+    account.kind === "netbox" &&
+    typeof config.url === "string" &&
+    config.url.trim().length > 0 &&
+    typeof config.token === "string" &&
+    config.token.trim().length > 0
+  );
+}
+
+function defaultNetboxVmBlueprintName(sourceName: string): string {
+  return `${STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name} — ${sourceName}`;
+}
+
 export function createGovernanceRouter(storage: IStorage = defaultStorage) {
   const router = express.Router();
 
@@ -71,12 +141,14 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
 
     try {
       const orgId = resolveOrgId(req);
-      const [sources, vms] = await Promise.all([
-        storage.getNetboxInventorySources(orgId),
+      const [sources, vms, cmdbAccounts] = await Promise.all([
+        listGovernanceNetboxSources(storage, orgId),
         storage.getNetboxVms(orgId),
+        storage.getCmdbAccounts(orgId),
       ]);
       const vmCounts = new Map<string, number>();
       const lastImported = new Map<string, Date>();
+      const cmdbAccountsById = new Map(cmdbAccounts.map((account) => [account.id, account]));
 
       for (const vm of vms) {
         if (!vm.sourceId) continue;
@@ -95,6 +167,9 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
         cachedVmCount: vmCounts.get(source.id) ?? 0,
         lastImportAt: source.lastImportAt ?? lastImported.get(source.id) ?? null,
         createdAt: source.createdAt,
+        sourceType: "netbox_inventory_source",
+        cmdbAccountId: cmdbAccountsById.has(source.id) ? source.id : null,
+        cmdbAccountName: cmdbAccountsById.get(source.id)?.name ?? null,
       })));
     } catch (error) {
       sendInternalError(res, error, "governance.netbox-sources.list", "Failed to list governance NetBox sources");
@@ -119,6 +194,8 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
       const orgId = resolveOrgId(req);
       const body = createBlueprintSchema.parse(req.body);
       if (rejectDirectActivation(res, body.status)) return;
+      const sourceError = await validateBlueprintSourceBinding(storage, orgId, body.sourceType, body.sourceId);
+      if (sourceError) return sendClientError(res, sourceError.includes("not found") ? 404 : 400, sourceError);
       const blueprint = await storage.createGovernanceBlueprint({
         ...body,
         orgId,
@@ -153,6 +230,8 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
       const orgId = resolveOrgId(req);
       const body = updateBlueprintSchema.parse(req.body);
       if (rejectDirectActivation(res, body.status)) return;
+      const sourceError = await validateBlueprintSourceBinding(storage, orgId, body.sourceType, body.sourceId);
+      if (sourceError) return sendClientError(res, sourceError.includes("not found") ? 404 : 400, sourceError);
       const blueprint = await storage.updateGovernanceBlueprint(req.params.id, body, orgId);
       if (!blueprint) return sendClientError(res, 404, "Governance blueprint not found");
       res.json(blueprint);
@@ -227,19 +306,27 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
 
     try {
       const orgId = resolveOrgId(req);
+      const body = createDefaultNetboxVmBlueprintSchema.parse(req.body ?? {});
+      await materializeNetboxSourcesFromCmdbAccounts(storage, orgId);
+      const source = await storage.getNetboxInventorySource(body.netboxSourceId, orgId);
+      if (!source) return sendClientError(res, 404, "NetBox inventory source not found");
+      const blueprintName = defaultNetboxVmBlueprintName(source.name);
       const existing = (await storage.listGovernanceBlueprints(orgId)).find(
         (blueprint) =>
           blueprint.objectType === "netbox_vm" &&
-          blueprint.name === STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name
+          blueprint.sourceType === "netbox_inventory_source" &&
+          blueprint.sourceId === source.id
       );
 
       let blueprint = existing;
       if (!blueprint) {
         blueprint = await storage.createGovernanceBlueprint({
           orgId,
-          name: STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name,
-          description: "Default governance blueprint for cached NetBox virtual machines.",
+          name: blueprintName,
+          description: `Default governance blueprint for cached NetBox virtual machines from ${source.name}.`,
           objectType: "netbox_vm",
+          sourceType: "netbox_inventory_source",
+          sourceId: source.id,
           status: "draft",
           createdBy: req.user?.id,
         });
@@ -266,6 +353,9 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
 
       res.status(existing ? 200 : 201).json({ blueprint, activeVersion });
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return sendClientError(res, 400, "Invalid default governance blueprint payload", { issues: error.issues });
+      }
       sendInternalError(res, error, "governance.defaults.netbox-vm", "Failed to create default governance blueprint");
     }
   });
@@ -285,7 +375,10 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
         return sendClientError(res, 400, "Governance blueprint active version is invalid");
       }
 
-      const selectedSourceId = payload.netboxSourceId;
+      const boundSourceId = blueprint.sourceType === "netbox_inventory_source" && blueprint.sourceId
+        ? blueprint.sourceId
+        : undefined;
+      const selectedSourceId = payload.netboxSourceId ?? boundSourceId;
       if (selectedSourceId) {
         const source = await storage.getNetboxInventorySource(selectedSourceId, orgId);
         if (!source) return sendClientError(res, 404, "NetBox inventory source not found");
@@ -295,6 +388,13 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage) {
       const vms = selectedSourceId
         ? allVms.filter((vm) => vm.sourceId === selectedSourceId)
         : allVms;
+      if (selectedSourceId && vms.length === 0) {
+        return sendClientError(
+          res,
+          400,
+          "No cached NetBox VMs found for this source. Sync/import this CMDB source before running governance evaluation.",
+        );
+      }
       const evaluated = vms.map((vm) => ({
         vm,
         result: evaluateGovernanceObject(normalizeCachedNetboxVm(vm), version.rules),

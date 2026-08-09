@@ -31,6 +31,7 @@ interface GovernanceEvaluationLauncherProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   fixedBlueprintId?: string;
+  fixedBlueprint?: GovernanceBlueprint;
 }
 
 function formatDate(value: string | null | undefined) {
@@ -46,6 +47,7 @@ export function GovernanceEvaluationLauncher({
   open,
   onOpenChange,
   fixedBlueprintId,
+  fixedBlueprint,
 }: GovernanceEvaluationLauncherProps) {
   const { toast } = useToast();
   const [selectedBlueprintId, setSelectedBlueprintId] = useState(fixedBlueprintId ?? "");
@@ -78,10 +80,14 @@ export function GovernanceEvaluationLauncher({
     () => blueprints.filter((blueprint) => blueprint.objectType === "netbox_vm"),
     [blueprints],
   );
-  const selectedBlueprint = blueprintOptions.find((blueprint) => blueprint.id === selectedBlueprintId);
+  const selectedBlueprint = fixedBlueprint ?? blueprintOptions.find((blueprint) => blueprint.id === selectedBlueprintId);
   const selectedSource = sources.find((source) => source.id === selectedSourceId);
   const blueprintReady = fixedBlueprintId ? true : Boolean(selectedBlueprint?.activeVersionId);
-  const canRun = Boolean(selectedBlueprintId && selectedSourceId && blueprintReady);
+  const hasCachedVms = Boolean(selectedSource && selectedSource.cachedVmCount > 0);
+  const canRun = Boolean(selectedBlueprintId && selectedSourceId && blueprintReady && hasCachedVms);
+  const boundSourceId = selectedBlueprint?.sourceType === "netbox_inventory_source" && selectedBlueprint.sourceId
+    ? selectedBlueprint.sourceId
+    : "";
 
   useEffect(() => {
     if (!open) return;
@@ -91,11 +97,31 @@ export function GovernanceEvaluationLauncher({
     } else if (!selectedBlueprintId && blueprintOptions.length > 0) {
       const firstActive = blueprintOptions.find((blueprint) => blueprint.activeVersionId) ?? blueprintOptions[0];
       setSelectedBlueprintId(firstActive.id);
+      const firstBoundSourceId = firstActive.sourceType === "netbox_inventory_source" && firstActive.sourceId
+        ? firstActive.sourceId
+        : "";
+      if (firstBoundSourceId && sources.some((source) => source.id === firstBoundSourceId)) {
+        setSelectedSourceId(firstBoundSourceId);
+        return;
+      }
     }
-    if (!selectedSourceId && sources.length > 0) {
+    if (!selectedSourceId && boundSourceId && sources.some((source) => source.id === boundSourceId)) {
+      setSelectedSourceId(boundSourceId);
+    } else if (!selectedSourceId && sources.length > 0) {
       setSelectedSourceId(sources[0].id);
     }
-  }, [blueprintOptions, fixedBlueprintId, open, selectedBlueprintId, selectedSourceId, sources]);
+  }, [blueprintOptions, boundSourceId, fixedBlueprintId, open, selectedBlueprintId, selectedSourceId, sources]);
+
+  const handleBlueprintChange = (blueprintId: string) => {
+    setSelectedBlueprintId(blueprintId);
+    const nextBlueprint = blueprintOptions.find((blueprint) => blueprint.id === blueprintId);
+    const nextBoundSourceId = nextBlueprint?.sourceType === "netbox_inventory_source" && nextBlueprint.sourceId
+      ? nextBlueprint.sourceId
+      : "";
+    if (nextBoundSourceId && sources.some((source) => source.id === nextBoundSourceId)) {
+      setSelectedSourceId(nextBoundSourceId);
+    }
+  };
 
   const evaluationMutation = useMutation({
     mutationFn: () => runCachedNetboxVmEvaluation(selectedBlueprintId, { netboxSourceId: selectedSourceId }),
@@ -140,7 +166,7 @@ export function GovernanceEvaluationLauncher({
                   No NetBox VM blueprints are available yet.
                 </div>
               ) : (
-                <Select value={selectedBlueprintId} onValueChange={setSelectedBlueprintId}>
+                <Select value={selectedBlueprintId} onValueChange={handleBlueprintChange}>
                   <SelectTrigger id="governance-blueprint-select" data-testid="select-governance-evaluation-blueprint">
                     <SelectValue placeholder="Select blueprint" />
                   </SelectTrigger>
@@ -184,10 +210,17 @@ export function GovernanceEvaluationLauncher({
             )}
           </div>
 
+          {boundSourceId && selectedSourceId !== boundSourceId && (
+            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
+              This blueprint is bound to a different source. The selected source will override that binding for this evaluation only.
+            </div>
+          )}
+
           {selectedSource && (
             <div className="rounded-md border bg-muted/30 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{selectedSource.name}</span>
+                {selectedSource.cmdbAccountId && <Badge variant="outline">CMDB source</Badge>}
                 <Badge variant={selectedSource.enabled ? "default" : "secondary"}>
                   {selectedSource.enabled ? "enabled" : "disabled"}
                 </Badge>
@@ -195,6 +228,12 @@ export function GovernanceEvaluationLauncher({
               </div>
               <div className="mt-2 text-muted-foreground">{selectedSource.url}</div>
               <div className="text-muted-foreground">Last import: {formatDate(selectedSource.lastImportAt)}</div>
+            </div>
+          )}
+
+          {selectedSource && selectedSource.cachedVmCount === 0 && (
+            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
+              No cached VMs yet - sync/import this CMDB source before running a governance evaluation.
             </div>
           )}
 

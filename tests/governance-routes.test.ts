@@ -6,6 +6,7 @@ import { createGovernanceRouter } from "../server/routes/governance";
 import { STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT } from "../server/services/governance-blueprint-evaluator";
 import type { IStorage } from "../server/storage";
 import type {
+  CmdbAccount,
   GovernanceBlueprint,
   GovernanceBlueprintVersion,
   GovernanceEvaluationRun,
@@ -40,6 +41,7 @@ function createFakeGovernanceStorage() {
   const versions: GovernanceBlueprintVersion[] = [];
   const runs: GovernanceEvaluationRun[] = [];
   const objectEvaluations: GovernanceObjectEvaluation[] = [];
+  const cmdbAccounts: CmdbAccount[] = [];
   const sources: NetboxInventorySource[] = [
     {
       id: `${ORG_A}-source`,
@@ -84,6 +86,7 @@ function createFakeGovernanceStorage() {
     versions,
     runs,
     objectEvaluations,
+    cmdbAccounts,
     sources,
     vms,
     get netboxVmReadCount() {
@@ -98,6 +101,8 @@ function createFakeGovernanceStorage() {
         updatedAt: now(),
         description: null,
         createdBy: null,
+        sourceType: null,
+        sourceId: null,
         ...input,
       };
       blueprints.push(blueprint);
@@ -254,6 +259,21 @@ function createFakeGovernanceStorage() {
       return sources.find((source) => source.id === id && source.orgId === orgId);
     },
 
+    async createNetboxInventorySource(input: any) {
+      const source: NetboxInventorySource = {
+        id: input.id ?? nextId("source"),
+        lastImportAt: null,
+        createdAt: now(),
+        ...input,
+      };
+      sources.push(source);
+      return source;
+    },
+
+    async getCmdbAccounts(orgId: string) {
+      return cmdbAccounts.filter((account) => account.orgId === orgId);
+    },
+
     async getNetboxVms(orgId: string) {
       netboxVmReadCount += 1;
       const orgSourceIds = new Set(sources.filter((source) => source.orgId === orgId).map((source) => source.id));
@@ -267,6 +287,7 @@ async function createDefaultBlueprint(req: ReturnType<typeof supertest>, orgId =
     .post("/api/governance/defaults/netbox-vm")
     .set("x-role", "admin")
     .set("x-org-id", orgId)
+    .send({ netboxSourceId: `${orgId}-source` })
     .expect((res) => {
       assert.ok([200, 201].includes(res.status));
     });
@@ -282,17 +303,55 @@ describe("governance routes", () => {
     req = makeRequest(storage);
   });
 
-  it("admin can create the default NetBox VM blueprint", async () => {
+  it("admin can create the default NetBox VM blueprint for a source", async () => {
     const response = await req
       .post("/api/governance/defaults/netbox-vm")
       .set("x-role", "admin")
       .set("x-org-id", ORG_A)
+      .send({ netboxSourceId: `${ORG_A}-source` })
       .expect(201);
 
     assert.equal(response.body.blueprint.orgId, ORG_A);
-    assert.equal(response.body.blueprint.name, STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name);
+    assert.equal(response.body.blueprint.name, `${STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name} — Alpha NetBox`);
+    assert.equal(response.body.blueprint.sourceType, "netbox_inventory_source");
+    assert.equal(response.body.blueprint.sourceId, `${ORG_A}-source`);
     assert.equal(response.body.activeVersion.version, 1);
     assert.equal(response.body.blueprint.activeVersionId, response.body.activeVersion.id);
+  });
+
+  it("default NetBox VM blueprint requires a source", async () => {
+    await req
+      .post("/api/governance/defaults/netbox-vm")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .expect(400);
+
+    assert.equal(storage.blueprints.length, 0);
+  });
+
+  it("default NetBox VM blueprint creation dedupes per org source object type", async () => {
+    const first = await req
+      .post("/api/governance/defaults/netbox-vm")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ netboxSourceId: `${ORG_A}-source` })
+      .expect(201);
+    const second = await req
+      .post("/api/governance/defaults/netbox-vm")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ netboxSourceId: `${ORG_A}-source` })
+      .expect(200);
+    const third = await req
+      .post("/api/governance/defaults/netbox-vm")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ netboxSourceId: `${ORG_A}-secondary-source` })
+      .expect(201);
+
+    assert.equal(first.body.blueprint.id, second.body.blueprint.id);
+    assert.notEqual(first.body.blueprint.id, third.body.blueprint.id);
+    assert.equal(storage.blueprints.length, 2);
   });
 
   it("viewer can list blueprints", async () => {
@@ -459,6 +518,39 @@ describe("governance routes", () => {
     assert.equal(response.body.find((source: any) => source.id === `${ORG_A}-source`).cachedVmCount, 1);
   });
 
+  it("materializes NetBox CMDB accounts as governance sources without exposing tokens", async () => {
+    storage.sources.length = 0;
+    storage.cmdbAccounts.push({
+      id: "cmdb-netbox-alpha",
+      orgId: ORG_A,
+      kind: "netbox",
+      name: "Docker NetBox",
+      enabled: true,
+      config: {
+        url: "http://host.docker.internal:8000",
+        token: "encrypted-token",
+      },
+      lastValidatedAt: null,
+      cachedData: {},
+      createdAt: new Date("2026-01-05T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+    });
+
+    const response = await req
+      .get("/api/governance/netbox-sources")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.length, 1);
+    assert.equal(response.body[0].id, "cmdb-netbox-alpha");
+    assert.equal(response.body[0].name, "Docker NetBox");
+    assert.equal(response.body[0].cmdbAccountId, "cmdb-netbox-alpha");
+    assert.equal(response.body[0].cachedVmCount, 0);
+    assert.equal(response.body[0].token, undefined);
+    assert.equal(storage.sources.length, 1);
+  });
+
   it("evaluation with netboxSourceId only evaluates VMs from that source", async () => {
     const { blueprint } = await createDefaultBlueprint(req, ORG_A);
     storage.vms.push(
@@ -520,6 +612,78 @@ describe("governance routes", () => {
     assert.equal(storage.netboxVmReadCount, 1);
   });
 
+  it("evaluation defaults to the blueprint bound source", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push(
+      {
+        id: "vm-alpha-bound-primary",
+        sourceId: `${ORG_A}-source`,
+        netboxId: 125,
+        name: "alpha-bound-primary",
+        ip: "192.0.2.16",
+        operatingSystem: "linux",
+        customFields: {
+          tenant: "alpha",
+          role: "app",
+          automatable: true,
+          provider_state: "present",
+          technical_owner: "platform",
+          service_owner: "payments",
+          data_owner: "cmdb",
+          operations_team: "ops",
+          business_owner: "finance",
+        },
+        tags: [],
+        lastImportedAt: new Date(),
+      },
+      {
+        id: "vm-alpha-bound-secondary",
+        sourceId: `${ORG_A}-secondary-source`,
+        netboxId: 126,
+        name: "alpha-bound-secondary",
+        ip: "192.0.2.17",
+        operatingSystem: "linux",
+        customFields: {
+          tenant: "alpha",
+          role: "app",
+          automatable: true,
+          provider_state: "present",
+          technical_owner: "platform",
+          service_owner: "payments",
+          data_owner: "cmdb",
+          operations_team: "ops",
+          business_owner: "finance",
+        },
+        tags: [],
+        lastImportedAt: new Date(),
+      },
+    );
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.evaluatedCount, 1);
+    assert.equal(storage.runs[0].netboxSourceId, `${ORG_A}-source`);
+    assert.equal(storage.objectEvaluations[0].objectId, "vm-alpha-bound-primary");
+  });
+
+  it("source-bound evaluation with no cached VMs is rejected clearly", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(400);
+
+    assert.match(response.body.message, /No cached NetBox VMs/i);
+    assert.equal(storage.runs.length, 0);
+    assert.equal(storage.objectEvaluations.length, 0);
+  });
+
   it("evaluation rejects cross-org netboxSourceId", async () => {
     const { blueprint } = await createDefaultBlueprint(req, ORG_A);
 
@@ -535,7 +699,25 @@ describe("governance routes", () => {
   });
 
   it("omitted netboxSourceId preserves all cached NetBox VM evaluation behavior", async () => {
-    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    const blueprintResponse = await req
+      .post("/api/governance/blueprints")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ name: "Legacy Sourceless Blueprint", objectType: "netbox_vm" })
+      .expect(201);
+    const versionResponse = await req
+      .post(`/api/governance/blueprints/${blueprintResponse.body.id}/versions`)
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ rules: STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.rules })
+      .expect(201);
+    await req
+      .post(`/api/governance/blueprints/${blueprintResponse.body.id}/activate`)
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ versionId: versionResponse.body.id })
+      .expect(200);
+
     storage.vms.push(
       {
         id: "vm-alpha-all-primary",
@@ -582,7 +764,7 @@ describe("governance routes", () => {
     );
 
     const response = await req
-      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .post(`/api/governance/blueprints/${blueprintResponse.body.id}/evaluate-cached-netbox-vms`)
       .set("x-role", "operator")
       .set("x-org-id", ORG_A)
       .expect(200);

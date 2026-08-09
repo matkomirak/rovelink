@@ -15,6 +15,8 @@ import {
   getGovernanceBlueprint,
   governanceKeys,
   listGovernanceBlueprintVersions,
+  listGovernanceNetBoxSources,
+  type GovernanceNetBoxSourceSummary,
 } from "@/lib/governance-api";
 import type { GovernanceBlueprint, GovernanceBlueprintVersion } from "@shared/schema";
 import type { GovernanceBlueprintRules } from "@shared/governance";
@@ -123,6 +125,14 @@ export default function GovernanceBlueprintDetail() {
     enabled: Boolean(id),
   });
 
+  const { data: sources = [] } = useQuery<GovernanceNetBoxSourceSummary[]>({
+    queryKey: governanceKeys.netboxSources,
+    queryFn: listGovernanceNetBoxSources,
+  });
+  const boundSourceName = blueprint?.sourceType === "netbox_inventory_source" && blueprint.sourceId
+    ? sources.find((source) => source.id === blueprint.sourceId)?.name ?? "Bound NetBox source"
+    : null;
+
   const activeVersion = useMemo(
     () => versions.find((version) => version.id === blueprint?.activeVersionId),
     [blueprint?.activeVersionId, versions],
@@ -190,10 +200,14 @@ export default function GovernanceBlueprintDetail() {
               {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-12" />)}
             </div>
           ) : blueprint ? (
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-5">
               <div>
                 <div className="text-xs text-muted-foreground">Object Type</div>
                 <Badge variant="outline">{blueprint.objectType}</Badge>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Bound Source</div>
+                <div className="font-medium">{boundSourceName ?? "No bound source"}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Status</div>
@@ -279,7 +293,7 @@ export default function GovernanceBlueprintDetail() {
       </Card>
 
       {activeVersion && <RulesPreview rules={activeVersion.rules as GovernanceBlueprintRules} />}
-      <GovernanceEvaluationLauncher open={launcherOpen} onOpenChange={setLauncherOpen} fixedBlueprintId={id} />
+      <GovernanceEvaluationLauncher open={launcherOpen} onOpenChange={setLauncherOpen} fixedBlueprintId={id} fixedBlueprint={blueprint} />
     </div>
   );
 }

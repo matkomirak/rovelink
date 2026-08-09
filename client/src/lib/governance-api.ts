@@ -29,6 +29,9 @@ export interface GovernanceNetBoxSourceSummary {
   cachedVmCount: number;
   lastImportAt: string | null;
   createdAt: string;
+  sourceType: "netbox_inventory_source";
+  cmdbAccountId: string | null;
+  cmdbAccountName: string | null;
 }
 
 export interface LatestGovernanceObjectEvaluationResponse {
@@ -119,8 +122,8 @@ export function listGovernanceBlueprintVersions(id: string) {
   return fetchJson<GovernanceBlueprintVersion[]>(`/api/governance/blueprints/${id}/versions`);
 }
 
-export function createDefaultNetboxVmBlueprint() {
-  return postJson<CreateDefaultBlueprintResponse>("/api/governance/defaults/netbox-vm");
+export function createDefaultNetboxVmBlueprint(netboxSourceId: string) {
+  return postJson<CreateDefaultBlueprintResponse>("/api/governance/defaults/netbox-vm", { netboxSourceId });
 }
 
 export function activateGovernanceBlueprintVersion(blueprintId: string, versionId: string) {

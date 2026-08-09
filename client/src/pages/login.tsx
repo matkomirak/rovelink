@@ -68,7 +68,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-slate-950 bg-[radial-gradient(circle_at_top,#0b5bbd55,transparent_36%),linear-gradient(180deg,#06101f,#020617)] p-4">
       <Card className="w-full max-w-md overflow-hidden border-slate-800/70 shadow-2xl">
         <div className="bg-slate-950 px-7 py-8 flex flex-col items-center justify-center gap-3">
-          <BrandLogo surface="dark" className="h-auto w-full max-w-[300px]" />
+          <BrandLogo surface="dark" className="text-[2.65rem]" />
           <p className="text-sm text-slate-300">Automation control for trusted infrastructure changes</p>
         </div>
         <CardContent className="bg-background pt-6">

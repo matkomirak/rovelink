@@ -13,6 +13,7 @@ import {
   Database,
   Boxes,
   GitBranch,
+  ClipboardCheck,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -85,6 +86,11 @@ const menuItems = [
     icon: BarChart3,
   },
   {
+    title: "Governance",
+    url: "/governance",
+    icon: ClipboardCheck,
+  },
+  {
     title: "Notifications",
     url: "/notifications",
     icon: Bell,
@@ -104,9 +110,9 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border p-0 overflow-hidden bg-slate-950">
-        <div className="px-4 py-4 flex items-center justify-center">
-          <BrandLogo surface="dark" className="h-auto w-full max-w-[190px]" />
+      <SidebarHeader className="h-20 border-b border-sidebar-border p-0 overflow-hidden bg-sidebar">
+        <div className="flex h-full items-center px-4">
+          <BrandLogo className="text-[1.65rem] text-sidebar-foreground" />
         </div>
       </SidebarHeader>
       <SidebarContent>

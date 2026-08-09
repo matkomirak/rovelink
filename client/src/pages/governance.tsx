@@ -1,0 +1,171 @@
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { ClipboardCheck, FilePlus2, History, RefreshCw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient } from "@/lib/queryClient";
+import {
+  createDefaultNetboxVmBlueprint,
+  governanceKeys,
+  listGovernanceBlueprints,
+  listGovernanceBlueprintVersions,
+} from "@/lib/governance-api";
+import type { GovernanceBlueprint, GovernanceBlueprintVersion } from "@shared/schema";
+
+function formatDate(value: Date | string | null | undefined) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
+
+function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "active") return "default";
+  if (status === "archived") return "outline";
+  return "secondary";
+}
+
+export default function Governance() {
+  const { toast } = useToast();
+  const { data: blueprints = [], isLoading, isError, error, refetch, isFetching } = useQuery<GovernanceBlueprint[]>({
+    queryKey: governanceKeys.blueprints,
+    queryFn: listGovernanceBlueprints,
+  });
+  const versionQueries = useQueries({
+    queries: blueprints.map((blueprint) => ({
+      queryKey: governanceKeys.versions(blueprint.id),
+      queryFn: () => listGovernanceBlueprintVersions(blueprint.id),
+      enabled: Boolean(blueprint.activeVersionId),
+    })),
+  });
+  const activeVersionLabels = new Map<string, string>();
+  blueprints.forEach((blueprint, index) => {
+    if (!blueprint.activeVersionId) {
+      activeVersionLabels.set(blueprint.id, "no active version");
+      return;
+    }
+
+    const versions = versionQueries[index]?.data as GovernanceBlueprintVersion[] | undefined;
+    const activeVersion = versions?.find((version) => version.id === blueprint.activeVersionId);
+    activeVersionLabels.set(blueprint.id, activeVersion ? `v${activeVersion.version}` : "active version set");
+  });
+
+  const createDefault = useMutation({
+    mutationFn: createDefaultNetboxVmBlueprint,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: governanceKeys.blueprints });
+      toast({
+        title: "Default blueprint ready",
+        description: `${result.blueprint.name} is available for NetBox VM evaluations.`,
+      });
+    },
+    onError: (mutationError: Error) => {
+      toast({ variant: "destructive", title: "Could not create default blueprint", description: mutationError.message });
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Governance</h1>
+          <p className="text-sm text-muted-foreground">
+            Define CMDB governance blueprints, evaluate cached NetBox VMs, and review findings before automation decisions.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" asChild data-testid="link-governance-runs">
+            <Link href="/governance/evaluation-runs">
+              <History className="h-4 w-4 mr-2" />
+              Evaluation Runs
+            </Link>
+          </Button>
+          <Button
+            onClick={() => createDefault.mutate()}
+            disabled={createDefault.isPending}
+            data-testid="button-create-default-governance-blueprint"
+          >
+            {createDefault.isPending ? (
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FilePlus2 className="h-4 w-4 mr-2" />
+            )}
+            Create Default NetBox VM Blueprint
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardCheck className="h-5 w-5" />
+                Blueprints
+              </CardTitle>
+              <CardDescription>{blueprints.length} governance blueprint{blueprints.length === 1 ? "" : "s"}</CardDescription>
+            </div>
+            <Button variant="ghost" size="icon" onClick={() => refetch()} disabled={isFetching} title="Refresh blueprints">
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+              {(error as Error).message}
+            </div>
+          ) : isLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : blueprints.length === 0 ? (
+            <div className="rounded-md border border-dashed p-8 text-center">
+              <p className="font-medium">No governance blueprints yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Create the default NetBox VM blueprint to start evaluating cached CMDB data.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Object Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Active Version</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Updated</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {blueprints.map((blueprint) => (
+                    <TableRow key={blueprint.id}>
+                      <TableCell className="font-medium">{blueprint.name}</TableCell>
+                      <TableCell><Badge variant="outline">{blueprint.objectType}</Badge></TableCell>
+                      <TableCell><Badge variant={statusVariant(blueprint.status)}>{blueprint.status}</Badge></TableCell>
+                      <TableCell>{activeVersionLabels.get(blueprint.id) ?? "active version set"}</TableCell>
+                      <TableCell>{formatDate(blueprint.createdAt)}</TableCell>
+                      <TableCell>{formatDate(blueprint.updatedAt)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/governance/blueprints/${blueprint.id}`}>View</Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

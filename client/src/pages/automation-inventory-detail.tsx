@@ -23,6 +23,7 @@ interface InventoryStructure {
     ansible_host?: string;
     groups: string[];
     vars: Record<string, string>;
+    governance?: GateGovernanceSummary | null;
   }>;
 }
 
@@ -40,6 +41,7 @@ interface BlockedAsset {
   missing: string[];
   blocked_reason: string;
   last_evaluated: string;
+  governance?: GateGovernanceSummary | null;
   // Provider tracking fields
   gateProviderId?: string | null;
   clusterName?: string | null;
@@ -65,6 +67,68 @@ interface PolicyResponse {
     requireRole: boolean;
     requireContacts: boolean;
   };
+}
+
+interface GateGovernanceSummary {
+  governanceScore: number;
+  automationReadiness: boolean;
+  governanceFindingCount: number;
+  recommendedActions: string[];
+  latestGovernanceEvaluationId: string;
+  latestGovernanceEvaluationRunId: string;
+  latestGovernanceEvaluatedAt: string;
+}
+
+function GateGovernanceContext({
+  governance,
+  onOpenRun,
+}: {
+  governance?: GateGovernanceSummary | null;
+  onOpenRun?: (runId: string) => void;
+}) {
+  if (!governance) {
+    return (
+      <div className="text-xs text-muted-foreground">
+        Governance context: not evaluated
+      </div>
+    );
+  }
+
+  const hasBlockAction = governance.recommendedActions.includes("block_automation");
+  const statusLabel = governance.automationReadiness
+    ? "Governance ready"
+    : hasBlockAction
+      ? "Governance block recommended"
+      : "Governance warning";
+  const statusVariant = governance.automationReadiness ? "default" : hasBlockAction ? "destructive" : "secondary";
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span className="font-medium text-foreground">Governance context:</span>
+      <Badge variant={statusVariant}>{statusLabel}</Badge>
+      <span>score {governance.governanceScore}</span>
+      <span>{governance.governanceFindingCount} findings</span>
+      {governance.recommendedActions.length > 0 && (
+        <span className="max-w-full truncate">
+          actions: {governance.recommendedActions.slice(0, 3).join(", ")}
+        </span>
+      )}
+      {onOpenRun && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-auto px-1 py-0 text-xs underline underline-offset-2"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenRun(governance.latestGovernanceEvaluationRunId);
+          }}
+        >
+          View evaluation
+        </Button>
+      )}
+    </div>
+  );
 }
 
 export default function AutomationInventoryDetail() {
@@ -496,6 +560,10 @@ export default function AutomationInventoryDetail() {
                                   {hostData.ansible_host}
                                 </div>
                               )}
+                              <GateGovernanceContext
+                                governance={hostData?.governance}
+                                onOpenRun={(runId) => setLocation(`/governance/evaluation-runs/${runId}`)}
+                              />
                             </div>
                           </div>
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -614,6 +682,10 @@ export default function AutomationInventoryDetail() {
                             {host.ansible_host || "No IP"} - {host.groups.length}{" "}
                             {host.groups.length === 1 ? "group" : "groups"}
                           </div>
+                          <GateGovernanceContext
+                            governance={host.governance}
+                            onOpenRun={(runId) => setLocation(`/governance/evaluation-runs/${runId}`)}
+                          />
                         </div>
                       </div>
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -697,6 +769,10 @@ export default function AutomationInventoryDetail() {
                             )}
                           </div>
                         </div>
+                        <GateGovernanceContext
+                          governance={asset.governance}
+                          onOpenRun={(runId) => setLocation(`/governance/evaluation-runs/${runId}`)}
+                        />
                         {providerMissing && (
                           <div className="text-xs text-red-600 mt-2 bg-red-500/5 p-2 rounded">
                             This VM is no longer present in the provider inventory (provider_state = missing). It has been marked offline automatically.

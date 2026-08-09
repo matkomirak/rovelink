@@ -3,6 +3,7 @@ import {
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
   providerAccounts, syncRuns, externalObjects, groupCache, netboxVms, netboxInventorySources,
   cmdbAccounts, pipelines, pipelineMappings, pipelineRuns, organizations,
+  governanceBlueprints, governanceBlueprintVersions, governanceEvaluationRuns, governanceObjectEvaluations,
   type User, type InsertUser,
   type Organization,
   type Project, type InsertProject,
@@ -21,6 +22,10 @@ import {
   type Pipeline, type InsertPipeline,
   type PipelineMapping, type InsertPipelineMapping,
   type PipelineRun, type InsertPipelineRun,
+  type GovernanceBlueprint, type InsertGovernanceBlueprint,
+  type GovernanceBlueprintVersion, type InsertGovernanceBlueprintVersion,
+  type GovernanceEvaluationRun, type InsertGovernanceEvaluationRun,
+  type GovernanceObjectEvaluation, type InsertGovernanceObjectEvaluation,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql, inArray } from "drizzle-orm";
@@ -142,6 +147,27 @@ export interface IStorage {
 
   // Sync Run (unified) operations
   getAllSyncRuns(limit: number, orgId: string): Promise<SyncRun[]>;
+
+  // Governance Blueprint operations - orgId REQUIRED (tenant-owned)
+  createGovernanceBlueprint(blueprint: InsertGovernanceBlueprint): Promise<GovernanceBlueprint>;
+  listGovernanceBlueprints(orgId: string): Promise<GovernanceBlueprint[]>;
+  getGovernanceBlueprint(id: string, orgId: string): Promise<GovernanceBlueprint | undefined>;
+  updateGovernanceBlueprint(id: string, data: Partial<GovernanceBlueprint>, orgId: string): Promise<GovernanceBlueprint | undefined>;
+  createGovernanceBlueprintVersion(version: InsertGovernanceBlueprintVersion): Promise<GovernanceBlueprintVersion>;
+  getGovernanceBlueprintVersion(id: string, orgId: string): Promise<GovernanceBlueprintVersion | undefined>;
+  listGovernanceBlueprintVersions(blueprintId: string, orgId: string): Promise<GovernanceBlueprintVersion[]>;
+  activateGovernanceBlueprintVersion(blueprintId: string, versionId: string, orgId: string): Promise<GovernanceBlueprint | undefined>;
+  getActiveGovernanceBlueprintForObjectType(objectType: string, orgId: string): Promise<{ blueprint: GovernanceBlueprint; version: GovernanceBlueprintVersion } | undefined>;
+  createGovernanceEvaluationRun(run: InsertGovernanceEvaluationRun): Promise<GovernanceEvaluationRun>;
+  storeGovernanceObjectEvaluation(evaluation: InsertGovernanceObjectEvaluation): Promise<GovernanceObjectEvaluation>;
+  listGovernanceEvaluationRuns(orgId: string, limit?: number): Promise<GovernanceEvaluationRun[]>;
+  getGovernanceEvaluationRun(id: string, orgId: string): Promise<GovernanceEvaluationRun | undefined>;
+  listGovernanceObjectEvaluations(runId: string, orgId: string): Promise<GovernanceObjectEvaluation[]>;
+  getLatestGovernanceEvaluationForObject(
+    orgId: string,
+    objectType: string,
+    objectId: string
+  ): Promise<{ evaluation: GovernanceObjectEvaluation; run: GovernanceEvaluationRun | null } | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -789,6 +815,224 @@ export class DatabaseStorage implements IStorage {
       .where(inArray(syncRuns.providerAccountId, orgProviderIds))
       .orderBy(desc(syncRuns.createdAt))
       .limit(limit);
+  }
+
+  // Governance Blueprint operations
+  async createGovernanceBlueprint(insertBlueprint: InsertGovernanceBlueprint): Promise<GovernanceBlueprint> {
+    const [blueprint] = await db
+      .insert(governanceBlueprints)
+      .values({ ...insertBlueprint, updatedAt: new Date() })
+      .returning();
+    return blueprint;
+  }
+
+  async listGovernanceBlueprints(orgId: string): Promise<GovernanceBlueprint[]> {
+    return await db
+      .select()
+      .from(governanceBlueprints)
+      .where(eq(governanceBlueprints.orgId, orgId))
+      .orderBy(desc(governanceBlueprints.createdAt));
+  }
+
+  async getGovernanceBlueprint(id: string, orgId: string): Promise<GovernanceBlueprint | undefined> {
+    const [blueprint] = await db
+      .select()
+      .from(governanceBlueprints)
+      .where(and(eq(governanceBlueprints.id, id), eq(governanceBlueprints.orgId, orgId)));
+    return blueprint || undefined;
+  }
+
+  async updateGovernanceBlueprint(
+    id: string,
+    data: Partial<GovernanceBlueprint>,
+    orgId: string
+  ): Promise<GovernanceBlueprint | undefined> {
+    const { id: _ignoredId, orgId: _ignoredOrgId, activeVersionId: _ignoredActiveVersionId, ...safeData } = data;
+    const [updated] = await db
+      .update(governanceBlueprints)
+      .set({ ...safeData, updatedAt: new Date() })
+      .where(and(eq(governanceBlueprints.id, id), eq(governanceBlueprints.orgId, orgId)))
+      .returning();
+    return updated || undefined;
+  }
+
+  async createGovernanceBlueprintVersion(
+    insertVersion: InsertGovernanceBlueprintVersion
+  ): Promise<GovernanceBlueprintVersion> {
+    const parent = await this.getGovernanceBlueprint(insertVersion.blueprintId, insertVersion.orgId);
+    if (!parent) {
+      throw new Error("Governance blueprint not found");
+    }
+
+    const [version] = await db
+      .insert(governanceBlueprintVersions)
+      .values(insertVersion)
+      .returning();
+    return version;
+  }
+
+  async getGovernanceBlueprintVersion(id: string, orgId: string): Promise<GovernanceBlueprintVersion | undefined> {
+    const [version] = await db
+      .select()
+      .from(governanceBlueprintVersions)
+      .where(and(eq(governanceBlueprintVersions.id, id), eq(governanceBlueprintVersions.orgId, orgId)));
+    return version || undefined;
+  }
+
+  async listGovernanceBlueprintVersions(blueprintId: string, orgId: string): Promise<GovernanceBlueprintVersion[]> {
+    const parent = await this.getGovernanceBlueprint(blueprintId, orgId);
+    if (!parent) return [];
+
+    return await db
+      .select()
+      .from(governanceBlueprintVersions)
+      .where(and(eq(governanceBlueprintVersions.blueprintId, blueprintId), eq(governanceBlueprintVersions.orgId, orgId)))
+      .orderBy(desc(governanceBlueprintVersions.version));
+  }
+
+  async activateGovernanceBlueprintVersion(
+    blueprintId: string,
+    versionId: string,
+    orgId: string
+  ): Promise<GovernanceBlueprint | undefined> {
+    const parent = await this.getGovernanceBlueprint(blueprintId, orgId);
+    if (!parent) return undefined;
+
+    const version = await this.getGovernanceBlueprintVersion(versionId, orgId);
+    if (!version || version.blueprintId !== blueprintId) return undefined;
+
+    const [updated] = await db
+      .update(governanceBlueprints)
+      .set({
+        activeVersionId: version.id,
+        status: "active",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(governanceBlueprints.id, blueprintId), eq(governanceBlueprints.orgId, orgId)))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getActiveGovernanceBlueprintForObjectType(
+    objectType: string,
+    orgId: string
+  ): Promise<{ blueprint: GovernanceBlueprint; version: GovernanceBlueprintVersion } | undefined> {
+    const [blueprint] = await db
+      .select()
+      .from(governanceBlueprints)
+      .where(and(eq(governanceBlueprints.objectType, objectType), eq(governanceBlueprints.orgId, orgId), eq(governanceBlueprints.status, "active")))
+      .orderBy(desc(governanceBlueprints.updatedAt))
+      .limit(1);
+
+    if (!blueprint?.activeVersionId) return undefined;
+
+    const version = await this.getGovernanceBlueprintVersion(blueprint.activeVersionId, orgId);
+    if (!version || version.blueprintId !== blueprint.id) return undefined;
+
+    return { blueprint, version };
+  }
+
+  async createGovernanceEvaluationRun(insertRun: InsertGovernanceEvaluationRun): Promise<GovernanceEvaluationRun> {
+    const blueprint = await this.getGovernanceBlueprint(insertRun.blueprintId, insertRun.orgId);
+    const version = await this.getGovernanceBlueprintVersion(insertRun.blueprintVersionId, insertRun.orgId);
+    if (!blueprint || !version || version.blueprintId !== blueprint.id) {
+      throw new Error("Governance blueprint version not found");
+    }
+
+    if (insertRun.netboxSourceId) {
+      const source = await this.getNetboxInventorySource(insertRun.netboxSourceId, insertRun.orgId);
+      if (!source) {
+        throw new Error("NetBox inventory source not found");
+      }
+    }
+
+    if (insertRun.cmdbAccountId) {
+      const account = await this.getCmdbAccount(insertRun.cmdbAccountId, insertRun.orgId);
+      if (!account) {
+        throw new Error("CMDB account not found");
+      }
+    }
+
+    const [run] = await db
+      .insert(governanceEvaluationRuns)
+      .values(insertRun)
+      .returning();
+    return run;
+  }
+
+  async storeGovernanceObjectEvaluation(
+    insertEvaluation: InsertGovernanceObjectEvaluation
+  ): Promise<GovernanceObjectEvaluation> {
+    if (!insertEvaluation.runId) {
+      throw new Error("Governance object evaluation requires runId");
+    }
+
+    const run = await this.getGovernanceEvaluationRun(insertEvaluation.runId, insertEvaluation.orgId);
+    if (!run) {
+      throw new Error("Governance evaluation run not found");
+    }
+    if (
+      run.blueprintId !== insertEvaluation.blueprintId ||
+      run.blueprintVersionId !== insertEvaluation.blueprintVersionId
+    ) {
+      throw new Error("Governance object evaluation does not match its run");
+    }
+
+    const [evaluation] = await db
+      .insert(governanceObjectEvaluations)
+      .values(insertEvaluation)
+      .returning();
+    return evaluation;
+  }
+
+  async listGovernanceEvaluationRuns(orgId: string, limit: number = 50): Promise<GovernanceEvaluationRun[]> {
+    return await db
+      .select()
+      .from(governanceEvaluationRuns)
+      .where(eq(governanceEvaluationRuns.orgId, orgId))
+      .orderBy(desc(governanceEvaluationRuns.createdAt))
+      .limit(limit);
+  }
+
+  async getGovernanceEvaluationRun(id: string, orgId: string): Promise<GovernanceEvaluationRun | undefined> {
+    const [run] = await db
+      .select()
+      .from(governanceEvaluationRuns)
+      .where(and(eq(governanceEvaluationRuns.id, id), eq(governanceEvaluationRuns.orgId, orgId)));
+    return run || undefined;
+  }
+
+  async listGovernanceObjectEvaluations(runId: string, orgId: string): Promise<GovernanceObjectEvaluation[]> {
+    const run = await this.getGovernanceEvaluationRun(runId, orgId);
+    if (!run) return [];
+
+    return await db
+      .select()
+      .from(governanceObjectEvaluations)
+      .where(and(eq(governanceObjectEvaluations.runId, runId), eq(governanceObjectEvaluations.orgId, orgId)))
+      .orderBy(desc(governanceObjectEvaluations.evaluatedAt));
+  }
+
+  async getLatestGovernanceEvaluationForObject(
+    orgId: string,
+    objectType: string,
+    objectId: string
+  ): Promise<{ evaluation: GovernanceObjectEvaluation; run: GovernanceEvaluationRun | null } | undefined> {
+    const [evaluation] = await db
+      .select()
+      .from(governanceObjectEvaluations)
+      .where(and(
+        eq(governanceObjectEvaluations.orgId, orgId),
+        eq(governanceObjectEvaluations.objectType, objectType),
+        eq(governanceObjectEvaluations.objectId, objectId),
+      ))
+      .orderBy(desc(governanceObjectEvaluations.evaluatedAt))
+      .limit(1);
+
+    if (!evaluation) return undefined;
+
+    const run = await this.getGovernanceEvaluationRun(evaluation.runId, orgId);
+    return { evaluation, run: run ?? null };
   }
 }
 

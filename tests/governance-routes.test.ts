@@ -1,0 +1,622 @@
+import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
+import express from "express";
+import supertest from "supertest";
+import { createGovernanceRouter } from "../server/routes/governance";
+import { STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT } from "../server/services/governance-blueprint-evaluator";
+import type { IStorage } from "../server/storage";
+import type {
+  GovernanceBlueprint,
+  GovernanceBlueprintVersion,
+  GovernanceEvaluationRun,
+  GovernanceObjectEvaluation,
+  NetboxVm,
+} from "../shared/schema";
+
+const ORG_A = "org-alpha";
+const ORG_B = "org-beta";
+
+type FakeStorage = ReturnType<typeof createFakeGovernanceStorage>;
+
+function makeRequest(storage: FakeStorage) {
+  const app = express();
+  app.use(express.json());
+  app.use((req: any, _res, next) => {
+    req.orgId = req.header("x-org-id") || ORG_A;
+    req.user = {
+      id: req.header("x-user-id") || "user-test",
+      role: req.header("x-role") || "viewer",
+      orgId: req.orgId,
+    };
+    next();
+  });
+  app.use("/api/governance", createGovernanceRouter(storage as unknown as IStorage));
+  return supertest(app);
+}
+
+function createFakeGovernanceStorage() {
+  const blueprints: GovernanceBlueprint[] = [];
+  const versions: GovernanceBlueprintVersion[] = [];
+  const runs: GovernanceEvaluationRun[] = [];
+  const objectEvaluations: GovernanceObjectEvaluation[] = [];
+  const vms: NetboxVm[] = [];
+  let netboxVmReadCount = 0;
+  let sequence = 0;
+
+  const nextId = (prefix: string) => `${prefix}-${++sequence}`;
+  const now = () => new Date();
+
+  return {
+    blueprints,
+    versions,
+    runs,
+    objectEvaluations,
+    vms,
+    get netboxVmReadCount() {
+      return netboxVmReadCount;
+    },
+
+    async createGovernanceBlueprint(input: any) {
+      const blueprint: GovernanceBlueprint = {
+        id: nextId("blueprint"),
+        activeVersionId: null,
+        createdAt: now(),
+        updatedAt: now(),
+        description: null,
+        createdBy: null,
+        ...input,
+      };
+      blueprints.push(blueprint);
+      return blueprint;
+    },
+
+    async listGovernanceBlueprints(orgId: string) {
+      return blueprints.filter((blueprint) => blueprint.orgId === orgId);
+    },
+
+    async getGovernanceBlueprint(id: string, orgId: string) {
+      return blueprints.find((blueprint) => blueprint.id === id && blueprint.orgId === orgId);
+    },
+
+    async updateGovernanceBlueprint(id: string, data: Partial<GovernanceBlueprint>, orgId: string) {
+      const blueprint = await this.getGovernanceBlueprint(id, orgId);
+      if (!blueprint) return undefined;
+      Object.assign(blueprint, {
+        ...data,
+        id: blueprint.id,
+        orgId: blueprint.orgId,
+        activeVersionId: blueprint.activeVersionId,
+        updatedAt: now(),
+      });
+      return blueprint;
+    },
+
+    async createGovernanceBlueprintVersion(input: any) {
+      const parent = await this.getGovernanceBlueprint(input.blueprintId, input.orgId);
+      if (!parent) throw new Error("Governance blueprint not found");
+      if (versions.some((version) => version.blueprintId === input.blueprintId && version.version === input.version)) {
+        throw new Error("Governance blueprint version already exists");
+      }
+      const version: GovernanceBlueprintVersion = {
+        id: nextId("version"),
+        createdAt: now(),
+        createdBy: null,
+        ...input,
+      };
+      versions.push(version);
+      return version;
+    },
+
+    async getGovernanceBlueprintVersion(id: string, orgId: string) {
+      return versions.find((version) => version.id === id && version.orgId === orgId);
+    },
+
+    async listGovernanceBlueprintVersions(blueprintId: string, orgId: string) {
+      const parent = await this.getGovernanceBlueprint(blueprintId, orgId);
+      if (!parent) return [];
+      return versions.filter((version) => version.blueprintId === blueprintId && version.orgId === orgId);
+    },
+
+    async activateGovernanceBlueprintVersion(blueprintId: string, versionId: string, orgId: string) {
+      const blueprint = await this.getGovernanceBlueprint(blueprintId, orgId);
+      const version = await this.getGovernanceBlueprintVersion(versionId, orgId);
+      if (!blueprint || !version || version.blueprintId !== blueprintId) return undefined;
+      blueprint.activeVersionId = version.id;
+      blueprint.status = "active";
+      blueprint.updatedAt = now();
+      return blueprint;
+    },
+
+    async getActiveGovernanceBlueprintForObjectType(objectType: string, orgId: string) {
+      const blueprint = blueprints.find((item) => (
+        item.orgId === orgId &&
+        item.objectType === objectType &&
+        item.activeVersionId
+      ));
+      const version = blueprint
+        ? versions.find((item) => item.id === blueprint.activeVersionId && item.blueprintId === blueprint.id)
+        : undefined;
+      return blueprint && version ? { blueprint, version } : undefined;
+    },
+
+    async createGovernanceEvaluationRun(input: any) {
+      const blueprint = await this.getGovernanceBlueprint(input.blueprintId, input.orgId);
+      const version = await this.getGovernanceBlueprintVersion(input.blueprintVersionId, input.orgId);
+      if (!blueprint || !version || version.blueprintId !== blueprint.id) {
+        throw new Error("Governance blueprint version not found");
+      }
+      if (input.netboxSourceId && input.netboxSourceId !== `${input.orgId}-source`) {
+        throw new Error("NetBox inventory source not found");
+      }
+      if (input.cmdbAccountId && input.cmdbAccountId !== `${input.orgId}-cmdb`) {
+        throw new Error("CMDB account not found");
+      }
+      const run: GovernanceEvaluationRun = {
+        id: nextId("run"),
+        cmdbAccountId: null,
+        netboxSourceId: null,
+        counts: {},
+        error: null,
+        startedAt: null,
+        completedAt: null,
+        createdAt: now(),
+        ...input,
+      };
+      runs.push(run);
+      return run;
+    },
+
+    async storeGovernanceObjectEvaluation(input: any) {
+      if (!input.runId) throw new Error("Governance object evaluation requires runId");
+      const run = await this.getGovernanceEvaluationRun(input.runId, input.orgId);
+      if (!run) throw new Error("Governance evaluation run not found");
+      if (run && (run.blueprintId !== input.blueprintId || run.blueprintVersionId !== input.blueprintVersionId)) {
+        throw new Error("Governance object evaluation does not match its run");
+      }
+      const evaluation: GovernanceObjectEvaluation = {
+        id: nextId("object-evaluation"),
+        objectId: null,
+        externalId: null,
+        objectName: null,
+        objectSnapshot: {},
+        evaluatedAt: now(),
+        ...input,
+      };
+      objectEvaluations.push(evaluation);
+      return evaluation;
+    },
+
+    async listGovernanceEvaluationRuns(orgId: string, limit = 50) {
+      return runs.filter((run) => run.orgId === orgId).slice(0, limit);
+    },
+
+    async getGovernanceEvaluationRun(id: string, orgId: string) {
+      return runs.find((run) => run.id === id && run.orgId === orgId);
+    },
+
+    async listGovernanceObjectEvaluations(runId: string, orgId: string) {
+      const run = await this.getGovernanceEvaluationRun(runId, orgId);
+      if (!run) return [];
+      return objectEvaluations.filter((evaluation) => evaluation.runId === runId && evaluation.orgId === orgId);
+    },
+
+    async getLatestGovernanceEvaluationForObject(orgId: string, objectType: string, objectId: string) {
+      const evaluation = objectEvaluations
+        .filter((item) => item.orgId === orgId && item.objectType === objectType && item.objectId === objectId)
+        .sort((a, b) => b.evaluatedAt.getTime() - a.evaluatedAt.getTime())[0];
+      if (!evaluation) return undefined;
+
+      return {
+        evaluation,
+        run: await this.getGovernanceEvaluationRun(evaluation.runId, orgId) ?? null,
+      };
+    },
+
+    async getNetboxVms(orgId: string) {
+      netboxVmReadCount += 1;
+      return vms.filter((vm) => vm.sourceId === `${orgId}-source`);
+    },
+  };
+}
+
+async function createDefaultBlueprint(req: ReturnType<typeof supertest>, orgId = ORG_A) {
+  const response = await req
+    .post("/api/governance/defaults/netbox-vm")
+    .set("x-role", "admin")
+    .set("x-org-id", orgId)
+    .expect((res) => {
+      assert.ok([200, 201].includes(res.status));
+    });
+  return response.body as { blueprint: GovernanceBlueprint; activeVersion: GovernanceBlueprintVersion };
+}
+
+describe("governance routes", () => {
+  let storage: FakeStorage;
+  let req: ReturnType<typeof supertest>;
+
+  beforeEach(() => {
+    storage = createFakeGovernanceStorage();
+    req = makeRequest(storage);
+  });
+
+  it("admin can create the default NetBox VM blueprint", async () => {
+    const response = await req
+      .post("/api/governance/defaults/netbox-vm")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .expect(201);
+
+    assert.equal(response.body.blueprint.orgId, ORG_A);
+    assert.equal(response.body.blueprint.name, STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name);
+    assert.equal(response.body.activeVersion.version, 1);
+    assert.equal(response.body.blueprint.activeVersionId, response.body.activeVersion.id);
+  });
+
+  it("viewer can list blueprints", async () => {
+    await createDefaultBlueprint(req, ORG_A);
+
+    const response = await req
+      .get("/api/governance/blueprints")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.length, 1);
+    assert.equal(response.body[0].orgId, ORG_A);
+  });
+
+  it("viewer cannot create blueprint", async () => {
+    await req
+      .post("/api/governance/blueprints")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .send({ name: "Nope", objectType: "netbox_vm" })
+      .expect(403);
+  });
+
+  it("admin cannot create blueprint as active directly", async () => {
+    const response = await req
+      .post("/api/governance/blueprints")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ name: "Direct Active", objectType: "netbox_vm", status: "active" })
+      .expect(400);
+
+    assert.match(response.body.message, /activate endpoint/i);
+    assert.equal(storage.blueprints.length, 0);
+  });
+
+  it("admin cannot patch blueprint to active directly", async () => {
+    const createResponse = await req
+      .post("/api/governance/blueprints")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ name: "Draft Blueprint", objectType: "netbox_vm" })
+      .expect(201);
+
+    const response = await req
+      .patch(`/api/governance/blueprints/${createResponse.body.id}`)
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ status: "active" })
+      .expect(400);
+
+    assert.match(response.body.message, /activate endpoint/i);
+    assert.equal(storage.blueprints[0].status, "draft");
+  });
+
+  it("malformed blueprint rules are rejected and do not create versions", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    const initialVersionCount = storage.versions.filter((version) => version.blueprintId === blueprint.id).length;
+    const baseRules = STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.rules;
+    const malformedRules = [
+      {
+        ...baseRules,
+        unexpectedLayer: {},
+      },
+      {
+        ...baseRules,
+        dataManagement: [
+          ...baseRules.dataManagement,
+          { ...baseRules.dataManagement[0] },
+        ],
+      },
+      {
+        ...baseRules,
+        relevance: {
+          ...baseRules.relevance,
+          audit: 4,
+        },
+      },
+      {
+        ...baseRules,
+        dataManagement: baseRules.dataManagement.map((rule, index) => (
+          index === 0 ? { ...rule, weight: 10.1 } : rule
+        )),
+      },
+      {
+        ...baseRules,
+        ownership: baseRules.ownership.map((rule, index) => (
+          index === 0 ? { ...rule, weight: 0.05 } : rule
+        )),
+      },
+    ];
+
+    for (const rules of malformedRules) {
+      await req
+        .post(`/api/governance/blueprints/${blueprint.id}/versions`)
+        .set("x-role", "admin")
+        .set("x-org-id", ORG_A)
+        .send({ rules })
+        .expect(400);
+    }
+
+    assert.equal(storage.versions.filter((version) => version.blueprintId === blueprint.id).length, initialVersionCount);
+  });
+
+  it("operator can run cached NetBox VM evaluation without live NetBox", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push({
+      id: "vm-alpha-1",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 101,
+      name: "alpha-vm",
+      ip: "192.0.2.10",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+        data_owner: "cmdb",
+        operations_team: "ops",
+        business_owner: "finance",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.evaluatedCount, 1);
+    assert.equal(response.body.compliantCount, 1);
+    assert.equal(storage.runs.length, 1);
+    assert.equal(storage.objectEvaluations.length, 1);
+    assert.equal(storage.objectEvaluations[0].objectId, "vm-alpha-1");
+    assert.equal(storage.objectEvaluations[0].externalId, "101");
+  });
+
+  it("viewer cannot run evaluation", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(403);
+  });
+
+  it("org A cannot read org B blueprint", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_B);
+
+    await req
+      .get(`/api/governance/blueprints/${blueprint.id}`)
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(404);
+  });
+
+  it("org A cannot activate org B version", async () => {
+    const { blueprint, activeVersion } = await createDefaultBlueprint(req, ORG_B);
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/activate`)
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ versionId: activeVersion.id })
+      .expect(404);
+  });
+
+  it("activeVersionId cannot point to a version from another blueprint", async () => {
+    const first = await createDefaultBlueprint(req, ORG_A);
+    const secondResponse = await req
+      .post("/api/governance/blueprints")
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ name: "Second Blueprint", objectType: "netbox_vm" })
+      .expect(201);
+    const versionResponse = await req
+      .post(`/api/governance/blueprints/${secondResponse.body.id}/versions`)
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ rules: STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.rules })
+      .expect(201);
+
+    await req
+      .post(`/api/governance/blueprints/${first.blueprint.id}/activate`)
+      .set("x-role", "admin")
+      .set("x-org-id", ORG_A)
+      .send({ versionId: versionResponse.body.id })
+      .expect(404);
+  });
+
+  it("cached NetBox VM with missing owner creates persisted finding output", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push({
+      id: "vm-alpha-missing-owner",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 202,
+      name: "alpha-missing-owner",
+      ip: "192.0.2.20",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.evaluatedCount, 1);
+    assert.equal(storage.objectEvaluations.length, 1);
+    const persisted = storage.objectEvaluations[0];
+    assert.equal(persisted.objectId, "vm-alpha-missing-owner");
+    assert.ok(persisted.findings.some((finding: any) => (
+      finding.layer === "ownership" &&
+      finding.role === "technical_owner"
+    )));
+    assert.ok(persisted.recommendedActions.includes("enrich"));
+  });
+
+  it("viewer can read the latest object evaluation without live NetBox reads", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push({
+      id: "vm-alpha-latest",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 303,
+      name: "alpha-latest",
+      ip: "192.0.2.30",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+        data_owner: "cmdb",
+        operations_team: "ops",
+        business_owner: "finance",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    const netboxReadsBeforeLatestLookup = storage.netboxVmReadCount;
+    const response = await req
+      .get("/api/governance/objects/netbox_vm/vm-alpha-latest/latest-evaluation")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.evaluation.objectId, "vm-alpha-latest");
+    assert.equal(response.body.evaluation.externalId, "303");
+    assert.equal(response.body.run.id, storage.runs[0].id);
+    assert.equal(storage.netboxVmReadCount, netboxReadsBeforeLatestLookup);
+  });
+
+  it("latest object evaluation returns null when none exists", async () => {
+    const response = await req
+      .get("/api/governance/objects/netbox_vm/missing-vm/latest-evaluation")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body, null);
+  });
+
+  it("org A cannot read org B object evaluation", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_B);
+    storage.vms.push({
+      id: "vm-beta-private",
+      sourceId: `${ORG_B}-source`,
+      netboxId: 404,
+      name: "beta-private",
+      ip: "192.0.2.40",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "beta",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+        data_owner: "cmdb",
+        operations_team: "ops",
+        business_owner: "finance",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_B)
+      .expect(200);
+
+    const response = await req
+      .get("/api/governance/objects/netbox_vm/vm-beta-private/latest-evaluation")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body, null);
+  });
+
+  it("latest object evaluation uses objectId and not VM name", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push({
+      id: "vm-object-id-only",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 505,
+      name: "shared-vm-name",
+      ip: "192.0.2.50",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+        data_owner: "cmdb",
+        operations_team: "ops",
+        business_owner: "finance",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    const byNameResponse = await req
+      .get("/api/governance/objects/netbox_vm/shared-vm-name/latest-evaluation")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+    const byIdResponse = await req
+      .get("/api/governance/objects/netbox_vm/vm-object-id-only/latest-evaluation")
+      .set("x-role", "viewer")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(byNameResponse.body, null);
+    assert.equal(byIdResponse.body.evaluation.objectId, "vm-object-id-only");
+    assert.equal(byIdResponse.body.evaluation.objectName, "shared-vm-name");
+  });
+});

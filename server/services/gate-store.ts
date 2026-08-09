@@ -17,7 +17,10 @@ export interface GateDecision {
   orgId: string;             // Organization that owns this decision
   assetId: string;           // Stable internal identity - NOT vm name
   vmName: string;            // Display only - NOT authoritative
-  netboxVmId?: number;
+  netboxVmId?: number;       // Legacy/source NetBox numeric VM ID
+  governanceObjectType?: "netbox_vm";
+  governanceObjectId?: string; // Local netbox_vms.id; future enforcement must require this
+  sourceNetboxId?: number;
   allowed: boolean;
   missing: string[];
   evaluatedAt: Date;
@@ -40,7 +43,10 @@ export interface GateEvaluationInput {
 export interface GateDecisionSnapshot {
   assetId: string;
   vmName: string;
-  netboxVmId?: number;
+  netboxVmId?: number;       // Legacy/source NetBox numeric VM ID
+  governanceObjectType?: "netbox_vm";
+  governanceObjectId?: string; // Local netbox_vms.id; future enforcement must require this
+  sourceNetboxId?: number;
   allowed: boolean;
   missing: string[];
   reason?: string;

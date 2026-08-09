@@ -47,6 +47,7 @@ import notificationRoutes from "./routes/notifications";
 import settingsRoutes from "./routes/settings";
 import netboxRoutes from "./routes/netbox-sources";
 import orgRoutes from "./routes/organizations";
+import governanceRoutes from "./routes/governance";
 import { isLocalDevRuntime, validateProductionRuntimeConfig } from "./services/runtime-config";
 
 // ─── JWT setup ────────────────────────────────────────────────────────────────
@@ -230,6 +231,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/settings", authMiddleware, settingsRoutes);
   app.use("/api/netbox", authMiddleware, requireOrgContext, netboxRoutes);
   app.use("/api/netbox-sources", authMiddleware, requireOrgContext, netboxRoutes);
+  app.use("/api/governance", authMiddleware, requireOrgContext, governanceRoutes);
   app.use("/api/organizations", authMiddleware, orgRoutes);
   app.use("/api/admin/organizations", authMiddleware, orgRoutes);
   app.use("/api/org", authMiddleware, requireOrgContext, orgRoutes);

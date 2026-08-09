@@ -16,6 +16,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { NetboxInventorySource, NetboxVm } from "@shared/schema";
 import { insertNetboxInventorySourceSchema, insertNetboxVmSchema } from "@shared/schema";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { GovernanceObjectStatusBadge, GovernanceObjectSummaryCard } from "@/components/governance-object-summary-card";
 
 const sourceFormSchema = insertNetboxInventorySourceSchema.extend({
   name: z.string().min(1, "Name is required"),
@@ -425,7 +426,7 @@ export default function NetBoxInventories() {
                     data-testid="button-edit-vm"
                   >
                     <Pencil className="mr-2 h-4 w-4" />
-                    Edit VM
+                    VM Details
                   </Button>
                 )}
                 <Button
@@ -481,6 +482,7 @@ export default function NetBoxInventories() {
                     <TableHead>Source</TableHead>
                     <TableHead>Custom Fields</TableHead>
                     <TableHead>Tags</TableHead>
+                    <TableHead>Governance</TableHead>
                     <TableHead>Last Imported</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -560,6 +562,9 @@ export default function NetBoxInventories() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
+                        <TableCell>
+                          <GovernanceObjectStatusBadge objectType="netbox_vm" objectId={vm.id} />
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(vm.lastImportedAt).toLocaleString()}
                         </TableCell>
@@ -580,9 +585,9 @@ export default function NetBoxInventories() {
       }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit Virtual Machine</DialogTitle>
+            <DialogTitle>VM Details</DialogTitle>
             <DialogDescription>
-              Update VM details. Changes are saved to the local database only.
+              Inspect cached VM data, local edits, and latest governance findings. Changes are saved to the local database only.
             </DialogDescription>
           </DialogHeader>
           {editingVm && (
@@ -633,6 +638,7 @@ export default function NetBoxInventories() {
                   </div>
                 </div>
               )}
+              <GovernanceObjectSummaryCard objectType="netbox_vm" objectId={editingVm.id} />
               <Button
                 className="w-full"
                 onClick={async () => {

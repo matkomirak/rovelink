@@ -89,7 +89,9 @@ export async function createInventoryForRunWithSnapshot(
   const allowedHosts: Array<{
     safeName: string;
     ip: string | null;
-    netboxId: number | undefined;
+    governanceObjectType: "netbox_vm";
+    governanceObjectId: string;
+    sourceNetboxId: number | undefined;
   }> = [];
 
   for (const vm of dbVms) {
@@ -110,6 +112,9 @@ export async function createInventoryForRunWithSnapshot(
       assetId: result.assetId,
       vmName: vm.name,
       netboxVmId: vm.netboxId,
+      governanceObjectType: "netbox_vm",
+      governanceObjectId: vm.id,
+      sourceNetboxId: vm.netboxId,
       allowed: result.allowed,
       missing: result.missing,
       reason: result.reason,
@@ -124,6 +129,9 @@ export async function createInventoryForRunWithSnapshot(
       assetId: result.assetId,
       vmName: vm.name,
       netboxVmId: vm.netboxId,
+      governanceObjectType: "netbox_vm",
+      governanceObjectId: vm.id,
+      sourceNetboxId: vm.netboxId,
       allowed: result.allowed,
       missing: result.missing,
       evaluatedAt: new Date(),
@@ -137,7 +145,9 @@ export async function createInventoryForRunWithSnapshot(
       allowedHosts.push({
         safeName: vm.name.replace(/[^A-Za-z0-9_\-.]/g, "_"),
         ip,
-        netboxId: vm.netboxId,
+        governanceObjectType: "netbox_vm",
+        governanceObjectId: vm.id,
+        sourceNetboxId: vm.netboxId,
       });
     }
   }
@@ -184,8 +194,11 @@ export async function createInventoryForRunWithSnapshot(
       if (ansiblePort) {
         lines.push(`      ansible_port: ${ansiblePort}`);
       }
-      if (host.netboxId != null) {
-        lines.push(`      rovelink_netbox_id: ${host.netboxId}`);
+      lines.push(`      rovelink_governance_object_type: "${host.governanceObjectType}"`);
+      lines.push(`      rovelink_governance_object_id: "${host.governanceObjectId}"`);
+      if (host.sourceNetboxId != null) {
+        lines.push(`      rovelink_netbox_id: ${host.sourceNetboxId}`);
+        lines.push(`      rovelink_source_netbox_id: ${host.sourceNetboxId}`);
       }
       lines.push(`      rovelink_gate_status: allowed`);
       lines.push(`      rovelink_org_id: "${orgId}"`);

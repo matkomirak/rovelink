@@ -1,8 +1,25 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, jsonb, boolean, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import type {
+  GovernanceBlueprintRules,
+  GovernanceEvaluationResult,
+  GovernanceFinding,
+  RecommendedGovernanceAction,
+} from "./governance";
+export type {
+  DataManagementMode,
+  DataManagementRule,
+  GovernanceBlueprintRules,
+  GovernanceEvaluationResult,
+  GovernanceFinding,
+  OwnershipRole,
+  OwnershipRule,
+  RecommendedGovernanceAction,
+  RelevanceRule,
+} from "./governance";
 
 // Organizations table for multi-tenancy
 export const organizations = pgTable("organizations", {
@@ -419,6 +436,135 @@ export const netboxVmsRelations = relations(netboxVms, ({ one }) => ({
   }),
 }));
 
+// Governance Blueprints - versioned CMDB governance policy definitions.
+export const governanceBlueprints = pgTable("governance_blueprints", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  objectType: text("object_type").notNull(),
+  status: text("status").notNull().default("draft"), // draft, active, archived
+  activeVersionId: varchar("active_version_id"),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  idxGovernanceBlueprintsOrgObjectType: index("idx_governance_blueprints_org_object_type").on(table.orgId, table.objectType),
+}));
+
+export const governanceBlueprintVersions = pgTable("governance_blueprint_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  blueprintId: varchar("blueprint_id").notNull().references(() => governanceBlueprints.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(1),
+  rules: jsonb("rules").$type<GovernanceBlueprintRules>().notNull(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqueBlueprintVersion: uniqueIndex("unique_governance_blueprint_version").on(table.blueprintId, table.version),
+}));
+
+export const governanceEvaluationRuns = pgTable("governance_evaluation_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  blueprintId: varchar("blueprint_id").notNull().references(() => governanceBlueprints.id, { onDelete: "cascade" }),
+  blueprintVersionId: varchar("blueprint_version_id").notNull().references(() => governanceBlueprintVersions.id, { onDelete: "cascade" }),
+  cmdbAccountId: varchar("cmdb_account_id").references(() => cmdbAccounts.id, { onDelete: "set null" }),
+  netboxSourceId: varchar("netbox_source_id").references(() => netboxInventorySources.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("queued"), // queued, running, ok, failed
+  counts: jsonb("counts").default({}),
+  error: text("error"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  idxGovernanceEvaluationRunsOrgCreated: index("idx_governance_evaluation_runs_org_created").on(table.orgId, table.createdAt),
+}));
+
+export const governanceObjectEvaluations = pgTable("governance_object_evaluations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  runId: varchar("run_id").notNull().references(() => governanceEvaluationRuns.id, { onDelete: "cascade" }),
+  blueprintId: varchar("blueprint_id").notNull().references(() => governanceBlueprints.id, { onDelete: "cascade" }),
+  blueprintVersionId: varchar("blueprint_version_id").notNull().references(() => governanceBlueprintVersions.id, { onDelete: "cascade" }),
+  objectType: text("object_type").notNull(),
+  objectId: varchar("object_id"),
+  externalId: text("external_id"),
+  objectName: text("object_name"),
+  governanceScore: integer("governance_score").notNull(),
+  dataManagementScore: integer("data_management_score").notNull(),
+  ownershipScore: integer("ownership_score").notNull(),
+  relevanceWeightedPriority: integer("relevance_weighted_priority").notNull(),
+  automationReady: boolean("automation_ready").notNull().default(false),
+  findings: jsonb("findings").$type<GovernanceFinding[]>().notNull().default([]),
+  recommendedActions: jsonb("recommended_actions").$type<RecommendedGovernanceAction[]>().notNull().default([]),
+  result: jsonb("result").$type<GovernanceEvaluationResult>().notNull(),
+  objectSnapshot: jsonb("object_snapshot").default({}),
+  evaluatedAt: timestamp("evaluated_at").notNull().defaultNow(),
+}, (table) => ({
+  idxGovernanceObjectEvaluationsOrgRunEvaluated: index("idx_governance_object_evaluations_org_run_evaluated").on(table.orgId, table.runId, table.evaluatedAt),
+}));
+
+export const governanceBlueprintsRelations = relations(governanceBlueprints, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [governanceBlueprints.orgId],
+    references: [organizations.id],
+  }),
+  creator: one(users, {
+    fields: [governanceBlueprints.createdBy],
+    references: [users.id],
+  }),
+  versions: many(governanceBlueprintVersions),
+  evaluationRuns: many(governanceEvaluationRuns),
+}));
+
+export const governanceBlueprintVersionsRelations = relations(governanceBlueprintVersions, ({ one, many }) => ({
+  blueprint: one(governanceBlueprints, {
+    fields: [governanceBlueprintVersions.blueprintId],
+    references: [governanceBlueprints.id],
+  }),
+  creator: one(users, {
+    fields: [governanceBlueprintVersions.createdBy],
+    references: [users.id],
+  }),
+  evaluationRuns: many(governanceEvaluationRuns),
+}));
+
+export const governanceEvaluationRunsRelations = relations(governanceEvaluationRuns, ({ one, many }) => ({
+  blueprint: one(governanceBlueprints, {
+    fields: [governanceEvaluationRuns.blueprintId],
+    references: [governanceBlueprints.id],
+  }),
+  blueprintVersion: one(governanceBlueprintVersions, {
+    fields: [governanceEvaluationRuns.blueprintVersionId],
+    references: [governanceBlueprintVersions.id],
+  }),
+  cmdbAccount: one(cmdbAccounts, {
+    fields: [governanceEvaluationRuns.cmdbAccountId],
+    references: [cmdbAccounts.id],
+  }),
+  netboxSource: one(netboxInventorySources, {
+    fields: [governanceEvaluationRuns.netboxSourceId],
+    references: [netboxInventorySources.id],
+  }),
+  objectEvaluations: many(governanceObjectEvaluations),
+}));
+
+export const governanceObjectEvaluationsRelations = relations(governanceObjectEvaluations, ({ one }) => ({
+  run: one(governanceEvaluationRuns, {
+    fields: [governanceObjectEvaluations.runId],
+    references: [governanceEvaluationRuns.id],
+  }),
+  blueprint: one(governanceBlueprints, {
+    fields: [governanceObjectEvaluations.blueprintId],
+    references: [governanceBlueprints.id],
+  }),
+  blueprintVersion: one(governanceBlueprintVersions, {
+    fields: [governanceObjectEvaluations.blueprintVersionId],
+    references: [governanceBlueprintVersions.id],
+  }),
+}));
+
 // Insert schemas for forms
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -534,6 +680,28 @@ export const insertAutomationInventorySchema = createInsertSchema(automationInve
   lastRefreshedAt: true,
 });
 
+export const insertGovernanceBlueprintSchema = createInsertSchema(governanceBlueprints).omit({
+  id: true,
+  activeVersionId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertGovernanceBlueprintVersionSchema = createInsertSchema(governanceBlueprintVersions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertGovernanceEvaluationRunSchema = createInsertSchema(governanceEvaluationRuns).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertGovernanceObjectEvaluationSchema = createInsertSchema(governanceObjectEvaluations).omit({
+  id: true,
+  evaluatedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -588,6 +756,18 @@ export type PipelineRun = typeof pipelineRuns.$inferSelect;
 
 export type InsertAutomationInventory = z.infer<typeof insertAutomationInventorySchema>;
 export type AutomationInventory = typeof automationInventories.$inferSelect;
+
+export type InsertGovernanceBlueprint = typeof governanceBlueprints.$inferInsert;
+export type GovernanceBlueprint = typeof governanceBlueprints.$inferSelect;
+
+export type InsertGovernanceBlueprintVersion = typeof governanceBlueprintVersions.$inferInsert;
+export type GovernanceBlueprintVersion = typeof governanceBlueprintVersions.$inferSelect;
+
+export type InsertGovernanceEvaluationRun = typeof governanceEvaluationRuns.$inferInsert;
+export type GovernanceEvaluationRun = typeof governanceEvaluationRuns.$inferSelect;
+
+export type InsertGovernanceObjectEvaluation = typeof governanceObjectEvaluations.$inferInsert;
+export type GovernanceObjectEvaluation = typeof governanceObjectEvaluations.$inferSelect;
 
 // Eligibility Policy type for automation gate rules
 export interface EligibilityPolicy {

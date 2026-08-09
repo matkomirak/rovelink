@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import { db } from "../db";
-import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory, type EligibilityPolicy } from "../../shared/schema";
+import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory, type EligibilityPolicy, type NetboxVm } from "../../shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
@@ -10,6 +10,8 @@ import { deriveAssetId } from "../services/asset-identity";
 import { gateStore } from "../services/gate-store";
 import { sendInternalError } from "../services/api-errors";
 import { hasRoleAtLeast } from "../auth/roles";
+import { storage as appStorage } from "../storage";
+import { enrichGateDecisionsWithGovernance, enrichInventoryHostsWithGovernance } from "../services/gate-governance-context";
 
 // Auth request type — orgId is stamped by auth middleware
 interface AuthRequest extends Request {
@@ -220,6 +222,7 @@ router.post("/", async (req: AuthRequest, res: Response) => {
         // Build full groups and hosts structure for caching
         const groupsMap = new Map<string, Set<string>>();
         const hostsMap = new Map<string, any>();
+        const cachedGovernanceVms = await appStorage.getNetboxVms(orgId);
         
         for (const vm of allowedVms) {
           const hostName = vm.name;
@@ -281,6 +284,7 @@ router.post("/", async (req: AuthRequest, res: Response) => {
           hostsMap.set(hostName, {
             name: hostName,
             ansible_host: ip,
+            ...buildGovernanceIdentityForNetboxApiVm(vm, cachedGovernanceVms),
             groups: hostGroups,
             vars: {
               status: vm.status?.value || vm.status || '',
@@ -493,10 +497,16 @@ router.get("/:id/structure", async (req: AuthRequest, res: Response) => {
       const cachedData = inventory.cachedData as { groups?: any[]; hosts?: any[] } | null;
       
       if (cachedData && cachedData.groups && cachedData.hosts) {
-        // Return cached data
+        const hostsWithGovernance = await enrichInventoryHostsWithGovernance(
+          appStorage,
+          orgId,
+          cachedData.hosts,
+        );
+
+        // Return cached data with read-only governance context from stored evaluations.
         return res.json({
           groups: cachedData.groups,
-          hosts: cachedData.hosts,
+          hosts: hostsWithGovernance,
           cachedAt: inventory.lastRefreshedAt,
         });
       }
@@ -603,6 +613,7 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
     // Build full groups and hosts structure for caching
     const groupsMap = new Map<string, Set<string>>();
     const hostsMap = new Map<string, any>();
+    const cachedGovernanceVms = await appStorage.getNetboxVms(orgId);
     
     for (const vm of allowedVms) {
       const hostName = vm.name;
@@ -664,6 +675,7 @@ router.post("/:id/refresh", async (req: AuthRequest, res: Response) => {
       hostsMap.set(hostName, {
         name: hostName,
         ansible_host: ip,
+        ...buildGovernanceIdentityForNetboxApiVm(vm, cachedGovernanceVms),
         groups: hostGroups,
         vars: {
           status: vm.status?.value || vm.status || '',
@@ -1268,15 +1280,17 @@ router.get("/:id/blocked.json", async (req: AuthRequest, res: Response) => {
 
     // Read ONLY blocked assets from gate store
     const blockedDecisions = await readBlockedAssets(orgId);
+    const blockedWithGovernance = await enrichGateDecisionsWithGovernance(appStorage, orgId, blockedDecisions);
 
     // Format blocked assets according to spec
-    const blockedAssets = blockedDecisions.map(decision => ({
+    const blockedAssets = blockedWithGovernance.map(decision => ({
       asset_id: decision.assetId,
       name: decision.vmName,
       source: cmdb.name,
       missing: decision.missing,
       blocked_reason: decision.reason || "Missing governance data",
       last_evaluated: decision.evaluatedAt.toISOString(),
+      governance: decision.governance,
     }));
 
     // Set headers for JSON file download
@@ -1341,15 +1355,17 @@ router.get("/:id/blocked", async (req: AuthRequest, res: Response) => {
 
     // Read blocked assets from gate store
     const blockedDecisions = await readBlockedAssets(orgId);
+    const blockedWithGovernance = await enrichGateDecisionsWithGovernance(appStorage, orgId, blockedDecisions);
 
     // Format for UI
-    const blocked = blockedDecisions.map(decision => ({
+    const blocked = blockedWithGovernance.map(decision => ({
       asset_id: decision.assetId,
       name: decision.vmName,
       source: cmdb.name,
       missing: decision.missing,
       blocked_reason: decision.reason || "Missing governance data",
       last_evaluated: decision.evaluatedAt.toISOString(),
+      governance: decision.governance,
     }));
 
     res.json({
@@ -1502,6 +1518,45 @@ function generateAnsibleInventoryYaml(hostsSection: Record<string, any>, vms: an
   }
 
   return yaml;
+}
+
+function buildGovernanceIdentityForNetboxApiVm(vm: any, cachedVms: NetboxVm[]): Record<string, any> {
+  const sourceNetboxId = getSourceNetboxId(vm);
+  if (sourceNetboxId == null) return {};
+
+  const matchedVm = findCachedGovernanceVm(sourceNetboxId, vm.name, cachedVms);
+  if (!matchedVm) {
+    return { sourceNetboxId };
+  }
+
+  return {
+    governanceObjectType: "netbox_vm",
+    governanceObjectId: matchedVm.id,
+    netboxVmId: matchedVm.id,
+    sourceNetboxId,
+  };
+}
+
+function findCachedGovernanceVm(sourceNetboxId: number, vmName: string, cachedVms: NetboxVm[]): NetboxVm | null {
+  const candidates = cachedVms.filter((vm) => vm.netboxId === sourceNetboxId);
+  if (candidates.length === 0) return null;
+
+  const exactName = candidates.find((vm) => vm.name === vmName);
+  if (exactName) return exactName;
+
+  // Legacy/best-effort display compatibility for inventories generated before
+  // local netbox_vms.id was persisted. Enforcement must require governanceObjectId.
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function getSourceNetboxId(vm: any): number | null {
+  const candidate = vm?.id ?? vm?.netboxId ?? vm?.netbox_id;
+  if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  if (typeof candidate === "string" && candidate.trim()) {
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 export default router;

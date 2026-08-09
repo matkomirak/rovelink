@@ -37,6 +37,10 @@ const AutomationInventories = lazy(() => import("@/pages/automation-inventories"
 const AutomationInventoryNew = lazy(() => import("@/pages/automation-inventory-new"));
 const AutomationInventoryDetail = lazy(() => import("@/pages/automation-inventory-detail"));
 const AutomationInventoryEdit = lazy(() => import("@/pages/automation-inventory-edit"));
+const Governance = lazy(() => import("@/pages/governance"));
+const GovernanceBlueprintDetail = lazy(() => import("@/pages/governance-blueprint-detail"));
+const GovernanceEvaluationRuns = lazy(() => import("@/pages/governance-evaluation-runs"));
+const GovernanceEvaluationRunDetail = lazy(() => import("@/pages/governance-evaluation-run-detail"));
 
 function PageLoader() {
   return (
@@ -74,6 +78,10 @@ function AuthenticatedRouter() {
         <Route path="/compare" component={RunComparison} />
         <Route path="/reports" component={Reports} />
         <Route path="/notifications" component={Notifications} />
+        <Route path="/governance" component={Governance} />
+        <Route path="/governance/blueprints/:id" component={GovernanceBlueprintDetail} />
+        <Route path="/governance/evaluation-runs" component={GovernanceEvaluationRuns} />
+        <Route path="/governance/evaluation-runs/:id" component={GovernanceEvaluationRunDetail} />
         <Route path="/settings" component={Settings} />
         <Route component={NotFound} />
       </Switch>
@@ -113,7 +121,7 @@ function AppContent() {
       <div className="flex h-screen w-full">
         <AppSidebar />
         <div className="flex flex-col flex-1">
-          <header className="flex items-center justify-between p-4 border-b border-border">
+          <header className="flex h-20 items-center justify-between border-b border-border px-4">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <ThemeToggle />
           </header>

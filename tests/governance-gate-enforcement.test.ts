@@ -1,7 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { applyGovernanceGateEnforcement } from "../server/services/governance-gate-enforcement";
-import { normalizeEligibilityPolicy, type GovernanceEnforcementPolicy, type GovernanceObjectEvaluation } from "../shared/schema";
+import {
+  mergeEligibilityPolicyPatch,
+  normalizeEligibilityPolicy,
+  type EligibilityPolicy,
+  type GovernanceEnforcementPolicy,
+  type GovernanceObjectEvaluation,
+} from "../shared/schema";
 
 const defaultPolicy: GovernanceEnforcementPolicy = {
   mode: "observe_only",
@@ -56,6 +62,18 @@ function makeEvaluation(overrides: Partial<GovernanceObjectEvaluation> = {}): Go
 const identity = {
   governanceObjectType: "netbox_vm" as const,
   governanceObjectId: "vm-local-1",
+};
+
+const fullPolicy: EligibilityPolicy = {
+  requireRole: true,
+  requireContacts: true,
+  governance: {
+    mode: "observe_only",
+    requireGovernanceEvaluation: false,
+    minimumGovernanceScore: 80,
+    blockOnRecommendedAction: true,
+    allowedReadinessStates: ["ready"],
+  },
 };
 
 describe("governance gate enforcement", () => {
@@ -300,5 +318,54 @@ describe("governance gate enforcement", () => {
     assert.equal(loaderCalled, false);
     assert.equal(result.allowed, false);
     assert.match(result.reason ?? "", /missing governance object identity/);
+  });
+});
+
+describe("inventory eligibility policy patch merging", () => {
+  it("partial governance PATCH preserves requireRole", () => {
+    const result = mergeEligibilityPolicyPatch(fullPolicy, {
+      governance: { mode: "enforce" },
+    });
+
+    assert.equal(result.requireRole, true);
+    assert.equal(result.governance.mode, "enforce");
+  });
+
+  it("partial governance PATCH preserves requireContacts", () => {
+    const result = mergeEligibilityPolicyPatch(fullPolicy, {
+      governance: { mode: "warn_only" },
+    });
+
+    assert.equal(result.requireContacts, true);
+    assert.equal(result.governance.mode, "warn_only");
+  });
+
+  it("partial boolean PATCH preserves governance settings", () => {
+    const result = mergeEligibilityPolicyPatch(fullPolicy, {
+      requireContacts: false,
+    });
+
+    assert.equal(result.requireRole, true);
+    assert.equal(result.requireContacts, false);
+    assert.equal(result.governance.mode, "observe_only");
+    assert.equal(result.governance.minimumGovernanceScore, 80);
+  });
+
+  it("partial governance PATCH preserves unrelated governance fields", () => {
+    const result = mergeEligibilityPolicyPatch(fullPolicy, {
+      governance: { mode: "enforce" },
+    });
+
+    assert.equal(result.governance.minimumGovernanceScore, 80);
+    assert.equal(result.governance.blockOnRecommendedAction, true);
+    assert.deepEqual(result.governance.allowedReadinessStates, ["ready"]);
+  });
+
+  it("malformed nested governance PATCH is rejected", () => {
+    assert.throws(() => mergeEligibilityPolicyPatch(fullPolicy, {
+      governance: {
+        minimumGovernanceScore: 101,
+      },
+    }));
   });
 });

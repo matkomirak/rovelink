@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import { db } from "../db";
-import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory, type EligibilityPolicy, type NetboxVm, normalizeEligibilityPolicy } from "../../shared/schema";
+import { automationInventories, cmdbAccounts, type AutomationInventory, type InsertAutomationInventory, type EligibilityPolicy, type NetboxVm, mergeEligibilityPolicyPatch, normalizeEligibilityPolicy } from "../../shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { insertAutomationInventorySchema } from "../../shared/schema";
 import { NetBoxAdapter } from "../services/netbox-adapter";
@@ -875,7 +875,7 @@ router.patch("/:id/policy", async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "Inventory not found" });
     }
 
-    const policy = normalizeEligibilityPolicy(req.body);
+    const policy = mergeEligibilityPolicyPatch(existing.eligibilityPolicy, req.body);
 
     await db
       .update(automationInventories)

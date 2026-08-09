@@ -787,6 +787,8 @@ export const governanceEnforcementPolicySchema = z.object({
   allowedReadinessStates: z.array(governanceReadinessStateSchema).nonempty().default(["ready"]),
 }).strict();
 
+export const governanceEnforcementPolicyPatchSchema = governanceEnforcementPolicySchema.partial().strict();
+
 export const DEFAULT_GOVERNANCE_ENFORCEMENT_POLICY: GovernanceEnforcementPolicy = {
   mode: "observe_only",
   requireGovernanceEvaluation: false,
@@ -801,6 +803,12 @@ export const eligibilityPolicySchema = z.object({
   governance: governanceEnforcementPolicySchema.default(DEFAULT_GOVERNANCE_ENFORCEMENT_POLICY),
 }).strict();
 
+export const eligibilityPolicyPatchSchema = z.object({
+  requireRole: z.boolean().optional(),
+  requireContacts: z.boolean().optional(),
+  governance: governanceEnforcementPolicyPatchSchema.optional(),
+}).strict();
+
 export type GovernanceEnforcementMode = z.infer<typeof governanceEnforcementModeSchema>;
 export type GovernanceReadinessState = z.infer<typeof governanceReadinessStateSchema>;
 export type GovernanceEnforcementPolicy = z.infer<typeof governanceEnforcementPolicySchema>;
@@ -808,6 +816,22 @@ export type EligibilityPolicy = z.infer<typeof eligibilityPolicySchema>;
 
 export function normalizeEligibilityPolicy(policy: unknown): EligibilityPolicy {
   return eligibilityPolicySchema.parse(policy ?? {});
+}
+
+export function mergeEligibilityPolicyPatch(existingPolicy: unknown, patch: unknown): EligibilityPolicy {
+  const existing = normalizeEligibilityPolicy(existingPolicy);
+  const parsedPatch = eligibilityPolicyPatchSchema.parse(patch);
+
+  return normalizeEligibilityPolicy({
+    ...existing,
+    ...parsedPatch,
+    governance: parsedPatch.governance
+      ? {
+          ...existing.governance,
+          ...parsedPatch.governance,
+        }
+      : existing.governance,
+  });
 }
 
 // Provider Hints - non-authoritative metadata from providers

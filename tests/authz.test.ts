@@ -85,6 +85,17 @@ describe("Role hierarchy — admin routes are accessible by platform_admin", () 
       `Expected not 401/403, got ${res.status}`
     );
   });
+
+  test("PATCH /api/inventories/:id/policy as admin is not 401/403", async () => {
+    const res = await req
+      .patch("/api/inventories/nonexistent/policy")
+      .set("Authorization", `Bearer ${makeToken("admin")}`)
+      .send({ requireRole: true });
+    assert.ok(
+      res.status !== 401 && res.status !== 403,
+      `Expected not 401/403, got ${res.status}`
+    );
+  });
 });
 
 describe("Role hierarchy — operator routes accessible by admin and platform_admin", () => {
@@ -146,6 +157,14 @@ describe("Role hierarchy — viewer cannot access admin/operator routes", () => 
 
   test("POST /api/credentials without token returns 401", async () => {
     await req.post("/api/credentials").send({ name: "test" }).expect(401);
+  });
+
+  test("PATCH /api/inventories/:id/policy as viewer returns 403", async () => {
+    await req
+      .patch("/api/inventories/nonexistent/policy")
+      .set("Authorization", `Bearer ${makeToken("viewer")}`)
+      .send({ requireRole: true })
+      .expect(403);
   });
 });
 

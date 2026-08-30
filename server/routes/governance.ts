@@ -10,6 +10,7 @@ import {
   type NormalizedGovernanceObject,
 } from "../services/governance-blueprint-evaluator";
 import { NetBoxAdapter } from "../services/netbox-adapter";
+import { netboxCustomerScopeResolver } from "../services/customer-scope-netbox-resolver";
 import { governanceBlueprintRulesSchema } from "@shared/governance";
 import type {
   CmdbAccount,
@@ -21,6 +22,7 @@ import type {
   NetboxInventorySource,
   NetboxVm,
 } from "@shared/schema";
+import type { ResolvedCustomerScopeAssignment } from "@shared/customer-scope";
 import { decryptNetboxToken, encryptNetboxToken } from "../services/secrets";
 
 interface AuthRequest extends Request {
@@ -192,6 +194,69 @@ function defaultNetboxVmBlueprintName(sourceName: string): string {
   return `${STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.name} — ${sourceName}`;
 }
 
+async function upsertResolvedCustomerScopeAssignment(
+  storage: IStorage,
+  orgId: string,
+  sourceId: string,
+  cachedVm: NetboxVm,
+  resolved: ResolvedCustomerScopeAssignment,
+  syncedAt: Date,
+): Promise<{ scopesUpserted: number; assignmentsUpserted: number; unassignedCount: number }> {
+  let scopesUpserted = 0;
+  let assignmentsUpserted = 0;
+
+  if (resolved.relationship === "unassigned") {
+    await storage.upsertCustomerScopeObjectAssignment({
+      orgId,
+      sourceType: "netbox_inventory_source",
+      sourceId,
+      objectType: "netbox_vm",
+      objectId: cachedVm.id,
+      customerScopeId: null,
+      relationship: "unassigned",
+      derivedFrom: resolved.derivedFrom,
+      confidence: resolved.confidence,
+      metadata: resolved.metadata ?? null,
+      lastSyncedAt: syncedAt,
+    });
+    return { scopesUpserted, assignmentsUpserted: 1, unassignedCount: 1 };
+  }
+
+  for (const scope of resolved.customerScopes) {
+    const persistedScope = await storage.upsertCustomerScope({
+      orgId,
+      sourceType: "netbox_inventory_source",
+      sourceId,
+      externalId: scope.externalId,
+      name: scope.name,
+      displayName: scope.displayName ?? null,
+      strategy: scope.strategy,
+      isolation: scope.isolation ?? null,
+      parentExternalId: scope.parentExternalId ?? null,
+      metadata: scope.metadata ?? null,
+      lastSyncedAt: syncedAt,
+    });
+    scopesUpserted += 1;
+
+    await storage.upsertCustomerScopeObjectAssignment({
+      orgId,
+      sourceType: "netbox_inventory_source",
+      sourceId,
+      objectType: "netbox_vm",
+      objectId: cachedVm.id,
+      customerScopeId: persistedScope.id,
+      relationship: resolved.relationship,
+      derivedFrom: resolved.derivedFrom,
+      confidence: resolved.confidence,
+      metadata: resolved.metadata ?? null,
+      lastSyncedAt: syncedAt,
+    });
+    assignmentsUpserted += 1;
+  }
+
+  return { scopesUpserted, assignmentsUpserted, unassignedCount: 0 };
+}
+
 export function createGovernanceRouter(storage: IStorage = defaultStorage, deps: GovernanceRouterDeps = {}) {
   const router = express.Router();
 
@@ -246,11 +311,47 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage, deps:
 
       const liveVms = await (deps.listNetboxVmsForSource ?? listLiveNetboxVmsForSource)(source);
       let importedCount = 0;
+      let customerScopesUpserted = 0;
+      let customerAssignmentsUpserted = 0;
+      let customerUnassignedCount = 0;
+      let customerScopeResolutionErrors = 0;
       for (const liveVm of liveVms) {
         const cachedVm = toCachedNetboxVm(source.id, liveVm);
         if (!Number.isFinite(cachedVm.netboxId)) continue;
-        await storage.upsertNetboxVm(cachedVm);
+        const persistedVm = await storage.upsertNetboxVm(cachedVm);
         importedCount += 1;
+
+        try {
+          const resolved = await netboxCustomerScopeResolver.resolveCiScopes({
+            orgId,
+            sourceType: "netbox_inventory_source",
+            sourceId: source.id,
+            providerKey: "netbox",
+            objectType: "netbox_vm",
+            objectId: persistedVm.id,
+            externalId: String(cachedVm.netboxId),
+            name: persistedVm.name,
+            raw: liveVm,
+          });
+          const summary = await upsertResolvedCustomerScopeAssignment(
+            storage,
+            orgId,
+            source.id,
+            persistedVm,
+            resolved,
+            new Date(),
+          );
+          customerScopesUpserted += summary.scopesUpserted;
+          customerAssignmentsUpserted += summary.assignmentsUpserted;
+          customerUnassignedCount += summary.unassignedCount;
+        } catch (error) {
+          customerScopeResolutionErrors += 1;
+          console.warn("Failed to resolve CustomerScope for cached NetBox VM", {
+            sourceId: source.id,
+            netboxId: cachedVm.netboxId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
 
       const updatedSource = await storage.updateNetboxInventorySource(
@@ -263,6 +364,10 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage, deps:
         sourceId: source.id,
         importedCount,
         cachedVmCount: importedCount,
+        customerScopesUpserted,
+        customerAssignmentsUpserted,
+        customerUnassignedCount,
+        customerScopeResolutionErrors,
         lastImportAt: updatedSource?.lastImportAt ?? null,
       });
     } catch (error) {

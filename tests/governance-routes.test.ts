@@ -7,10 +7,14 @@ import { STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT } from "../server/services/gove
 import type { IStorage } from "../server/storage";
 import type {
   CmdbAccount,
+  CustomerScope,
+  CustomerScopeObjectAssignment,
   GovernanceBlueprint,
   GovernanceBlueprintVersion,
   GovernanceEvaluationRun,
   GovernanceObjectEvaluation,
+  InsertCustomerScope,
+  InsertCustomerScopeObjectAssignment,
   NetboxInventorySource,
   NetboxVm,
 } from "../shared/schema";
@@ -75,6 +79,8 @@ function createFakeGovernanceStorage() {
     },
   ];
   const vms: NetboxVm[] = [];
+  const customerScopes: CustomerScope[] = [];
+  const customerScopeObjectAssignments: CustomerScopeObjectAssignment[] = [];
   let netboxVmReadCount = 0;
   let sequence = 0;
 
@@ -89,6 +95,8 @@ function createFakeGovernanceStorage() {
     cmdbAccounts,
     sources,
     vms,
+    customerScopes,
+    customerScopeObjectAssignments,
     get netboxVmReadCount() {
       return netboxVmReadCount;
     },
@@ -306,7 +314,157 @@ function createFakeGovernanceStorage() {
       const orgSourceIds = new Set(sources.filter((source) => source.orgId === orgId).map((source) => source.id));
       return vms.filter((vm) => vm.sourceId && orgSourceIds.has(vm.sourceId));
     },
+
+    async createCustomerScope(input: InsertCustomerScope) {
+      const existing = await this.getCustomerScopeByExternalId(
+        input.orgId,
+        input.sourceType,
+        input.sourceId,
+        input.externalId,
+      );
+      if (existing) throw new Error("duplicate customer scope external identity");
+
+      const scope: CustomerScope = {
+        id: input.id ?? nextId("customer-scope"),
+        displayName: null,
+        isolation: null,
+        parentExternalId: null,
+        metadata: null,
+        lastSyncedAt: null,
+        createdAt: now(),
+        updatedAt: now(),
+        ...input,
+      };
+      customerScopes.push(scope);
+      return scope;
+    },
+
+    async upsertCustomerScope(input: InsertCustomerScope) {
+      const existing = await this.getCustomerScopeByExternalId(
+        input.orgId,
+        input.sourceType,
+        input.sourceId,
+        input.externalId,
+      );
+      if (!existing) return this.createCustomerScope(input);
+
+      Object.assign(existing, {
+        ...input,
+        id: existing.id,
+        createdAt: existing.createdAt,
+        updatedAt: now(),
+      });
+      return existing;
+    },
+
+    async listCustomerScopes(orgId: string, sourceType?: string, sourceId?: string) {
+      return customerScopes.filter((scope) => (
+        scope.orgId === orgId &&
+        (!sourceType || scope.sourceType === sourceType) &&
+        (!sourceId || scope.sourceId === sourceId)
+      ));
+    },
+
+    async getCustomerScope(id: string, orgId: string) {
+      return customerScopes.find((scope) => scope.id === id && scope.orgId === orgId);
+    },
+
+    async getCustomerScopeByExternalId(
+      orgId: string,
+      sourceType: string,
+      sourceId: string,
+      externalId: string,
+    ) {
+      return customerScopes.find((scope) => (
+        scope.orgId === orgId &&
+        scope.sourceType === sourceType &&
+        scope.sourceId === sourceId &&
+        scope.externalId === externalId
+      ));
+    },
+
+    async createCustomerScopeObjectAssignment(input: InsertCustomerScopeObjectAssignment) {
+      if (input.customerScopeId) {
+        const scope = await this.getCustomerScope(input.customerScopeId, input.orgId);
+        if (!scope || scope.sourceType !== input.sourceType || scope.sourceId !== input.sourceId) {
+          throw new Error("CustomerScope assignment must reference a scope in the same organization and source");
+        }
+      }
+
+      const existing = findCustomerScopeObjectAssignment(input);
+      if (existing) throw new Error("duplicate customer scope object assignment");
+
+      const assignment: CustomerScopeObjectAssignment = {
+        id: input.id ?? nextId("customer-assignment"),
+        customerScopeId: null,
+        metadata: null,
+        lastSyncedAt: null,
+        createdAt: now(),
+        updatedAt: now(),
+        ...input,
+      };
+      customerScopeObjectAssignments.push(assignment);
+      return assignment;
+    },
+
+    async upsertCustomerScopeObjectAssignment(input: InsertCustomerScopeObjectAssignment) {
+      const existing = findCustomerScopeObjectAssignment(input);
+      if (!existing) return this.createCustomerScopeObjectAssignment(input);
+
+      Object.assign(existing, {
+        ...input,
+        id: existing.id,
+        createdAt: existing.createdAt,
+        updatedAt: now(),
+      });
+      return existing;
+    },
+
+    async listCustomerScopeObjectAssignments(orgId: string, sourceType?: string, sourceId?: string) {
+      return customerScopeObjectAssignments.filter((assignment) => (
+        assignment.orgId === orgId &&
+        (!sourceType || assignment.sourceType === sourceType) &&
+        (!sourceId || assignment.sourceId === sourceId)
+      ));
+    },
+
+    async listAssignmentsForObject(
+      orgId: string,
+      sourceType: string,
+      sourceId: string,
+      objectType: string,
+      objectId: string,
+    ) {
+      return customerScopeObjectAssignments.filter((assignment) => (
+        assignment.orgId === orgId &&
+        assignment.sourceType === sourceType &&
+        assignment.sourceId === sourceId &&
+        assignment.objectType === objectType &&
+        assignment.objectId === objectId
+      ));
+    },
+
+    async listAssignmentsForCustomerScope(orgId: string, customerScopeId: string) {
+      const scope = await this.getCustomerScope(customerScopeId, orgId);
+      if (!scope) return [];
+      return customerScopeObjectAssignments.filter((assignment) => (
+        assignment.orgId === orgId &&
+        assignment.customerScopeId === customerScopeId
+      ));
+    },
   };
+
+  function findCustomerScopeObjectAssignment(input: InsertCustomerScopeObjectAssignment) {
+    return customerScopeObjectAssignments.find((assignment) => (
+      assignment.orgId === input.orgId &&
+      assignment.sourceType === input.sourceType &&
+      assignment.sourceId === input.sourceId &&
+      assignment.objectType === input.objectType &&
+      assignment.objectId === input.objectId &&
+      assignment.customerScopeId === (input.customerScopeId ?? null) &&
+      assignment.relationship === input.relationship
+    ));
+  }
 }
 
 async function createDefaultBlueprint(req: ReturnType<typeof supertest>, orgId = ORG_A) {
@@ -626,6 +784,221 @@ describe("governance routes", () => {
       .expect(200);
 
     assert.equal(sourcesResponse.body.find((source: any) => source.id === `${ORG_A}-source`).cachedVmCount, 2);
+  });
+
+  it("sync with NetBox tenant creates CustomerScope and dedicated assignment using cached VM id", async () => {
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => [
+        {
+          id: 701,
+          name: "alpha-tenant-vm",
+          tenant: { id: 20, name: "Engineering", slug: "engineering" },
+          custom_fields: {},
+          tags: [],
+        },
+      ],
+    });
+
+    const response = await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.importedCount, 1);
+    assert.equal(response.body.customerScopesUpserted, 1);
+    assert.equal(response.body.customerAssignmentsUpserted, 1);
+    assert.equal(response.body.customerUnassignedCount, 0);
+    assert.equal(response.body.customerScopeResolutionErrors, 0);
+    assert.equal(storage.customerScopes.length, 1);
+    assert.equal(storage.customerScopes[0].externalId, "20");
+    assert.equal(storage.customerScopes[0].name, "Engineering");
+    assert.equal(storage.customerScopes[0].sourceId, `${ORG_A}-source`);
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+    assert.equal(storage.customerScopeObjectAssignments[0].objectId, storage.vms[0].id);
+    assert.equal(storage.customerScopeObjectAssignments[0].objectId.startsWith("vm-"), true);
+    assert.equal(storage.customerScopeObjectAssignments[0].relationship, "dedicated");
+    assert.equal(storage.customerScopeObjectAssignments[0].customerScopeId, storage.customerScopes[0].id);
+  });
+
+  it("sync without NetBox tenant creates explicit unassigned assignment", async () => {
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => [
+        {
+          id: 702,
+          name: "alpha-unassigned-vm",
+          custom_fields: {},
+          tags: [],
+        },
+      ],
+    });
+
+    const response = await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.customerScopesUpserted, 0);
+    assert.equal(response.body.customerAssignmentsUpserted, 1);
+    assert.equal(response.body.customerUnassignedCount, 1);
+    assert.equal(response.body.customerScopeResolutionErrors, 0);
+    assert.equal(storage.customerScopes.length, 0);
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+    assert.equal(storage.customerScopeObjectAssignments[0].objectId, storage.vms[0].id);
+    assert.equal(storage.customerScopeObjectAssignments[0].customerScopeId, null);
+    assert.equal(storage.customerScopeObjectAssignments[0].relationship, "unassigned");
+    assert.equal(storage.customerScopeObjectAssignments[0].derivedFrom, "provider");
+    assert.equal(storage.customerScopeObjectAssignments[0].confidence, "authoritative");
+  });
+
+  it("repeated sync is idempotent for CustomerScope and assignment records", async () => {
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => [
+        {
+          id: 703,
+          name: "alpha-repeat-vm",
+          tenant: { id: 21, name: "Operations" },
+          custom_fields: {},
+          tags: [],
+        },
+      ],
+    });
+
+    for (let i = 0; i < 2; i += 1) {
+      await syncReq
+        .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+        .set("x-role", "operator")
+        .set("x-org-id", ORG_A)
+        .expect(200);
+    }
+
+    assert.equal(storage.vms.length, 1);
+    assert.equal(storage.customerScopes.length, 1);
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+    assert.equal(storage.customerScopeObjectAssignments[0].objectId, storage.vms[0].id);
+  });
+
+  it("tenant rename updates existing CustomerScope by external id", async () => {
+    let tenantName = "Old Name";
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => [
+        {
+          id: 704,
+          name: "alpha-renamed-tenant-vm",
+          tenant: { id: 22, name: tenantName },
+          custom_fields: {},
+          tags: [],
+        },
+      ],
+    });
+
+    await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+    tenantName = "New Name";
+    await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(storage.customerScopes.length, 1);
+    assert.equal(storage.customerScopes[0].externalId, "22");
+    assert.equal(storage.customerScopes[0].name, "New Name");
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+  });
+
+  it("same NetBox tenant id in two sources creates separate CustomerScopes", async () => {
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async (source) => [
+        {
+          id: source.id === `${ORG_A}-source` ? 705 : 706,
+          name: `vm-${source.id}`,
+          tenant: { id: 23, name: "Shared Tenant Id" },
+          custom_fields: {},
+          tags: [],
+        },
+      ],
+    });
+
+    await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+    await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-secondary-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(storage.customerScopes.length, 2);
+    assert.deepEqual(
+      storage.customerScopes.map((scope) => `${scope.sourceId}:${scope.externalId}`).sort(),
+      [`${ORG_A}-secondary-source:23`, `${ORG_A}-source:23`],
+    );
+    assert.equal(storage.customerScopeObjectAssignments.length, 2);
+  });
+
+  it("partial NetBox tenant does not create weak CustomerScope and records unassigned assignment", async () => {
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => [
+        {
+          id: 707,
+          name: "alpha-partial-tenant-vm",
+          tenant: { name: "Name Without Stable Id" },
+          custom_fields: {},
+          tags: [],
+        },
+      ],
+    });
+
+    const response = await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.customerScopesUpserted, 0);
+    assert.equal(response.body.customerUnassignedCount, 1);
+    assert.equal(storage.customerScopes.length, 0);
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+    assert.equal(storage.customerScopeObjectAssignments[0].relationship, "unassigned");
+    assert.equal(storage.customerScopeObjectAssignments[0].customerScopeId, null);
+  });
+
+  it("CustomerScope persistence failure does not prevent cached VM upsert", async () => {
+    storage.upsertCustomerScope = async () => {
+      throw new Error("customer scope write failed");
+    };
+    const syncReq = makeRequest(storage, {
+      listNetboxVmsForSource: async () => [
+        {
+          id: 708,
+          name: "alpha-scope-failure-vm",
+          tenant: { id: 24, name: "Scope Failure Tenant" },
+          custom_fields: {},
+          tags: [],
+        },
+      ],
+    });
+
+    const response = await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.importedCount, 1);
+    assert.equal(response.body.customerScopesUpserted, 0);
+    assert.equal(response.body.customerAssignmentsUpserted, 0);
+    assert.equal(response.body.customerScopeResolutionErrors, 1);
+    assert.equal(storage.vms.length, 1);
+    assert.equal(storage.customerScopes.length, 0);
+    assert.equal(storage.customerScopeObjectAssignments.length, 0);
   });
 
   it("sync cached VMs rejects cross-org sources", async () => {

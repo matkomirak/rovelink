@@ -544,7 +544,7 @@ export const customerScopeObjectAssignments = pgTable("customer_scope_object_ass
     table.sourceId,
     table.objectType,
     table.objectId,
-    table.customerScopeId,
+    sql`coalesce(customer_scope_id, '__unassigned__')`,
     table.relationship,
   ),
   idxCustomerScopeAssignmentsOrgObject: index("idx_customer_scope_assignments_org_object").on(

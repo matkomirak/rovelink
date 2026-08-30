@@ -314,6 +314,59 @@ describe("CustomerScope storage contract", () => {
     assert.equal((await store.listAssignmentsForCustomerScope("org-a", scope.id)).length, 1);
   });
 
+  test("updates duplicate unassigned assignment idempotently", async () => {
+    const store = new CustomerScopeMemoryStore();
+    const first = await store.upsertCustomerScopeObjectAssignment(makeAssignment({
+      objectId: "cached-vm-unassigned",
+      customerScopeId: null,
+      relationship: "unassigned",
+      derivedFrom: "manual",
+      confidence: "manual",
+      metadata: { revision: 1 },
+    }));
+    const second = await store.upsertCustomerScopeObjectAssignment(makeAssignment({
+      objectId: "cached-vm-unassigned",
+      customerScopeId: null,
+      relationship: "unassigned",
+      derivedFrom: "manual",
+      confidence: "manual",
+      metadata: { revision: 2 },
+    }));
+
+    assert.equal(second.id, first.id);
+    assert.equal(second.customerScopeId, null);
+    assert.equal(second.relationship, "unassigned");
+    assert.notEqual(second.relationship, "internal");
+    assert.deepEqual(second.metadata, { revision: 2 });
+    assert.equal(
+      (await store.listAssignmentsForObject(
+        "org-a",
+        "netbox_inventory_source",
+        "source-a",
+        "netbox_vm",
+        "cached-vm-unassigned",
+      )).length,
+      1,
+    );
+  });
+
+  test("rejects direct duplicate unassigned assignment create in the storage contract", async () => {
+    const store = new CustomerScopeMemoryStore();
+    const unassigned = makeAssignment({
+      objectId: "cached-vm-unassigned",
+      customerScopeId: null,
+      relationship: "unassigned",
+      derivedFrom: "manual",
+      confidence: "manual",
+    });
+
+    await store.createCustomerScopeObjectAssignment(unassigned);
+    await assert.rejects(
+      () => store.createCustomerScopeObjectAssignment(unassigned),
+      /duplicate/,
+    );
+  });
+
   test("rejects assignment to a scope from a different org or source", async () => {
     const store = new CustomerScopeMemoryStore();
     const scope = await store.createCustomerScope(makeScope({ orgId: "org-a", sourceId: "source-a" }));

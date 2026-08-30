@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, before, describe, test } from "node:test";
+import { after, before, beforeEach, describe, test } from "node:test";
 import express from "express";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
@@ -7,7 +7,7 @@ import supertest from "supertest";
 import { registerRoutes } from "../server/routes";
 import { storage } from "../server/storage";
 import { NetBoxAdapter } from "../server/services/netbox-adapter";
-import type { CmdbAccount } from "../shared/schema";
+import type { CmdbAccount, NetboxVm } from "../shared/schema";
 import type { Server } from "http";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
@@ -61,6 +61,28 @@ const netboxVms = [
   },
 ];
 
+const cachedNetboxVms: NetboxVm[] = [
+  {
+    id: "cached-alpha-vm-101",
+    sourceId: cmdbA.id,
+    netboxId: 101,
+    name: "alpha-app-001",
+    ip: "10.10.10.10",
+    operatingSystem: "Linux",
+    customFields: {
+      automatable: true,
+      tenant: "Engineering",
+      role: "Application",
+      api_key: "cached-api-key-must-not-leak",
+    },
+    tags: ["demo"],
+    lastImportedAt: new Date("2026-01-02T00:00:00.000Z"),
+  },
+];
+
+let cachedVmsForTest: NetboxVm[] = [];
+let liveListCalls = 0;
+
 const original = {
   getUser: storage.getUser,
   getCmdbAccount: storage.getCmdbAccount,
@@ -86,8 +108,11 @@ before(async () => {
     return account;
   };
   storage.getCmdbAccounts = async (orgId: string) => [cmdbA, cmdbB].filter((candidate) => candidate.orgId === orgId);
-  storage.getNetboxVms = async () => [];
-  NetBoxAdapter.prototype.listAllVms = async () => netboxVms;
+  storage.getNetboxVms = async (orgId: string) => orgId === ORG_A ? cachedVmsForTest : [];
+  NetBoxAdapter.prototype.listAllVms = async () => {
+    liveListCalls += 1;
+    return netboxVms;
+  };
 
   const app = express();
   app.use(cookieParser());
@@ -95,6 +120,11 @@ before(async () => {
   app.use(express.urlencoded({ extended: false }));
   server = await registerRoutes(app);
   req = supertest(server);
+});
+
+beforeEach(() => {
+  cachedVmsForTest = [];
+  liveListCalls = 0;
 });
 
 after(async () => {
@@ -118,6 +148,19 @@ describe("CMDB object browser routes", () => {
     assert.equal(res.body.objectTypes[0].name, "Virtual Machines");
   });
 
+  test("object types report cached VM count and cached mode", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/object-types`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.objectTypes[0].count, 1);
+    assert.equal(res.body.objectTypes[0].status, "cached");
+    assert.equal(res.body.objectTypes[0].mode, "cached");
+  });
+
   test("viewer can list NetBox VM objects for own CMDB without secrets", async () => {
     const res = await req
       .get(`/api/cmdbs/${cmdbA.id}/objects/netbox_vm`)
@@ -125,10 +168,30 @@ describe("CMDB object browser routes", () => {
       .expect(200);
 
     assert.equal(res.body.total, 1);
+    assert.equal(res.body.mode, "live");
     assert.equal(res.body.objects[0].name, "alpha-app-001");
     assert.equal(res.body.objects[0].raw.token, "[REDACTED]");
     assert.ok(!JSON.stringify(res.body).includes("super-secret-token"));
     assert.ok(!JSON.stringify(res.body).includes("must-not-leak"));
+  });
+
+  test("object list returns cached VMs when cache exists without calling live NetBox", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/objects/netbox_vm`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.mode, "cached");
+    assert.equal(res.body.total, 1);
+    assert.equal(res.body.objects[0].id, 101);
+    assert.equal(res.body.objects[0].name, "alpha-app-001");
+    assert.equal(res.body.objects[0].primary_ip.address, "10.10.10.10");
+    assert.equal(res.body.objects[0].custom_fields.api_key, "[REDACTED]");
+    assert.equal(res.body.objects[0].raw.customFields.api_key, "[REDACTED]");
+    assert.ok(!JSON.stringify(res.body).includes("cached-api-key-must-not-leak"));
+    assert.equal(liveListCalls, 0);
   });
 
   test("viewer can open NetBox VM detail for own CMDB", async () => {
@@ -139,6 +202,23 @@ describe("CMDB object browser routes", () => {
 
     assert.equal(res.body.object.name, "alpha-app-001");
     assert.equal(res.body.object.raw.token, "[REDACTED]");
+  });
+
+  test("object detail returns cached VM when cache exists without calling live NetBox", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/objects/netbox_vm/101`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.mode, "cached");
+    assert.equal(res.body.object.id, 101);
+    assert.equal(res.body.object.name, "alpha-app-001");
+    assert.equal(res.body.object.custom_fields.api_key, "[REDACTED]");
+    assert.equal(res.body.object.raw.customFields.api_key, "[REDACTED]");
+    assert.ok(!JSON.stringify(res.body).includes("cached-api-key-must-not-leak"));
+    assert.equal(liveListCalls, 0);
   });
 
   test("cross-org CMDB object access is rejected", async () => {

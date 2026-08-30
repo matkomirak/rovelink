@@ -72,7 +72,7 @@ const navigationSections = [
   {
     label: "Automation",
     items: [
-      { title: "Automation Inventories", url: "/automation-inventories", icon: Server },
+      { title: "Automation Inventories", url: "/automation-inventories", activeUrls: ["/inventories"], icon: Server },
       { title: "Templates", url: "/templates", icon: FileText },
       { title: "Credentials", url: "/credentials", icon: Key },
       { title: "Projects", url: "/projects", icon: FolderGit2 },
@@ -87,9 +87,16 @@ const navigationSections = [
   },
 ];
 
-function isActiveRoute(location: string, url: string) {
-  if (url === "/") return location === "/";
-  return location === url || location.startsWith(`${url}/`);
+function isActiveRoute(location: string, url: string, activeUrls: string[] = []) {
+  const urls = [url, ...activeUrls];
+  return urls.some((candidate) => {
+    if (candidate === "/") return location === "/";
+    return location === candidate || location.startsWith(`${candidate}/`);
+  });
+}
+
+function navItemIsActive(location: string, item: { url: string; activeUrls?: string[] }) {
+  return isActiveRoute(location, item.url, item.activeUrls);
 }
 
 export function AppSidebar() {
@@ -133,7 +140,7 @@ export function AppSidebar() {
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton
                         asChild
-                        isActive={isActiveRoute(location, item.url)}
+                        isActive={navItemIsActive(location, item)}
                         data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
                       >
                         <Link href={item.url}>

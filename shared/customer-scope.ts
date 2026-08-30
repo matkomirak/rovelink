@@ -174,7 +174,7 @@ export interface DiscoveredCustomerScope {
   displayName?: string;
   strategy: CustomerScopeStrategy;
   isolation?: CustomerScopeIsolation;
-  parentExternalId?: string;
+  parentExternalId?: string | null;
   metadata?: Record<string, unknown>;
 }
 

@@ -20,6 +20,8 @@ import {
   Search,
   Server,
   Tag,
+  TriangleAlert,
+  Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -46,6 +48,8 @@ interface CmdbObjectTypesResponse {
 
 interface NetBoxVmObject {
   id: number | string;
+  localObjectId?: string | null;
+  cachedVmId?: string | null;
   name: string;
   status?: { value?: string; label?: string } | string | null;
   platform?: { id?: number; name?: string } | null;
@@ -79,6 +83,54 @@ interface CmdbObjectDetailResponse {
   objectTypeName: string;
   mode: "cached" | "live";
   object: NetBoxVmObject;
+}
+
+interface CustomerScopeSummary {
+  customerScopeCount: number;
+  assignedObjectCount: number;
+  unassignedObjectCount: number;
+  relationshipCounts: Record<string, number>;
+  derivedFromCounts: Record<string, number>;
+  confidenceCounts: Record<string, number>;
+  latestLastSyncedAt: string | null;
+}
+
+interface CustomerScopeListItem {
+  id: string;
+  name: string;
+  displayName?: string | null;
+  externalId: string;
+  strategy: string;
+  isolation?: string | null;
+  assignmentCount: number;
+  relationshipCounts?: Record<string, number>;
+  lastSyncedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CustomerAssignment {
+  id: string;
+  objectType: string;
+  objectId: string;
+  relationship: "dedicated" | "shared" | "internal" | "unassigned";
+  derivedFrom: string;
+  confidence: string;
+  lastSyncedAt?: string | null;
+  customerScope: {
+    id: string;
+    name: string;
+    displayName?: string | null;
+    externalId: string;
+    strategy: string;
+    isolation?: string | null;
+  } | null;
+}
+
+interface CustomerAssignmentsResponse {
+  objectType: string;
+  objectId: string;
+  assignments: CustomerAssignment[];
 }
 
 function statusValue(status: NetBoxVmObject["status"]) {
@@ -123,6 +175,20 @@ function statusVariant(status?: string): "default" | "secondary" | "destructive"
   }
 }
 
+function relationshipVariant(relationship?: string): "default" | "secondary" | "destructive" | "outline" {
+  switch (relationship) {
+    case "dedicated":
+    case "shared":
+      return "default";
+    case "unassigned":
+      return "destructive";
+    case "internal":
+      return "secondary";
+    default:
+      return "outline";
+  }
+}
+
 function formatDate(value?: string | null) {
   if (!value) return undefined;
   const date = new Date(value);
@@ -136,6 +202,20 @@ function AttrRow({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="flex gap-3 py-2 border-b border-border/40 last:border-0">
       <span className="text-xs text-muted-foreground w-40 shrink-0 pt-0.5">{label}</span>
       <span className="text-xs flex-1 break-all">{value}</span>
+    </div>
+  );
+}
+
+function CountBadges({ counts }: { counts?: Record<string, number> }) {
+  const entries = Object.entries(counts ?? {}).filter(([, count]) => count > 0);
+  if (entries.length === 0) return <span className="text-muted-foreground/50">-</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {entries.map(([key, count]) => (
+        <Badge key={key} variant={relationshipVariant(key)} className="text-[10px]">
+          {key}: {count}
+        </Badge>
+      ))}
     </div>
   );
 }
@@ -172,21 +252,32 @@ function RawJsonView({ raw }: { raw: Record<string, unknown> }) {
 
 function CmdbObjectDetailSheet({
   object,
+  cmdbId,
+  objectType,
   sourceName,
   objectTypeName,
   open,
   onClose,
 }: {
   object: NetBoxVmObject | null;
+  cmdbId?: string;
+  objectType: string;
   sourceName: string;
   objectTypeName: string;
   open: boolean;
   onClose: () => void;
 }) {
+  const localObjectId = object?.localObjectId ?? object?.cachedVmId;
+  const customerAssignmentsQuery = useQuery<CustomerAssignmentsResponse>({
+    queryKey: ["/api/cmdbs", cmdbId, "objects", objectType, localObjectId, "customer-assignments"],
+    enabled: open && !!cmdbId && !!objectType && !!localObjectId,
+  });
+
   if (!object) return null;
   const tags = tagsFor(object);
   const raw = object.raw ?? {};
   const customFields = object.custom_fields ?? {};
+  const assignments = customerAssignmentsQuery.data?.assignments ?? [];
 
   return (
     <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
@@ -216,6 +307,58 @@ function CmdbObjectDetailSheet({
               <AttrRow label="Cluster" value={relationName(object.cluster)} />
               <AttrRow label="Site" value={relationName(object.site)} />
               <AttrRow label="Last synced/imported" value={formatDate(object.last_synced)} />
+            </Section>
+
+            <Section icon={Users} title="Customer Assignment">
+              {!localObjectId ? (
+                <div className="py-2 text-xs text-muted-foreground">
+                  Customer assignments are available after this VM is imported into the local cache.
+                </div>
+              ) : customerAssignmentsQuery.isLoading ? (
+                <div className="py-2 space-y-2">
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-2/3" />
+                </div>
+              ) : customerAssignmentsQuery.isError ? (
+                <div className="py-2 text-xs text-muted-foreground">
+                  Customer assignment data is not available for this object.
+                </div>
+              ) : assignments.length === 0 ? (
+                <div className="py-2 text-xs text-muted-foreground">
+                  No CustomerScope assignment has been synced for this VM yet.
+                </div>
+              ) : (
+                <div className="py-1 divide-y divide-border/40">
+                  {assignments.map((assignment) => (
+                    <div key={assignment.id} className="py-2 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={relationshipVariant(assignment.relationship)}>
+                          {assignment.relationship}
+                        </Badge>
+                        {assignment.relationship === "unassigned" && (
+                          <span className="inline-flex items-center gap-1 text-xs text-destructive">
+                            <TriangleAlert className="h-3.5 w-3.5" />
+                            Governance attention
+                          </span>
+                        )}
+                      </div>
+                      {assignment.customerScope ? (
+                        <>
+                          <AttrRow label="CustomerScope" value={assignment.customerScope.displayName ?? assignment.customerScope.name} />
+                          <AttrRow label="External ID" value={<span className="font-mono">{assignment.customerScope.externalId}</span>} />
+                          <AttrRow label="Strategy" value={<Badge variant="outline">{assignment.customerScope.strategy}</Badge>} />
+                          <AttrRow label="Isolation" value={assignment.customerScope.isolation ? <Badge variant="outline">{assignment.customerScope.isolation}</Badge> : undefined} />
+                        </>
+                      ) : (
+                        <AttrRow label="CustomerScope" value={<span className="text-destructive">No CustomerScope assigned</span>} />
+                      )}
+                      <AttrRow label="Derived from" value={<Badge variant="outline">{assignment.derivedFrom}</Badge>} />
+                      <AttrRow label="Confidence" value={<Badge variant="outline">{assignment.confidence}</Badge>} />
+                      <AttrRow label="Last synced" value={formatDate(assignment.lastSyncedAt)} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </Section>
 
             {(object.vcpus || object.memory || object.disk) && (
@@ -283,6 +426,16 @@ export default function CmdbDetail() {
     enabled: !!id && !!selectedObjectType,
   });
 
+  const customerScopeSummaryQuery = useQuery<CustomerScopeSummary>({
+    queryKey: ["/api/cmdbs", id, "customer-scope-summary"],
+    enabled: !!id,
+  });
+
+  const customerScopesQuery = useQuery<CustomerScopeListItem[]>({
+    queryKey: ["/api/cmdbs", id, "customer-scopes"],
+    enabled: !!id,
+  });
+
   const objectDetailQuery = useQuery<CmdbObjectDetailResponse>({
     queryKey: ["/api/cmdbs", id, "objects", selectedObjectType, selectedObjectId],
     enabled: !!id && !!selectedObjectId,
@@ -336,6 +489,111 @@ export default function CmdbDetail() {
           Refresh
         </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="w-5 h-5" />
+            Customer Scopes
+          </CardTitle>
+          <CardDescription>
+            Customer/environment boundaries synchronized from this CMDB source.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {customerScopeSummaryQuery.isError || customerScopesQuery.isError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm">
+              <p className="font-medium text-destructive">Failed to load CustomerScopes</p>
+              <p className="text-muted-foreground">
+                CustomerScope visibility is unavailable for this CMDB right now.
+              </p>
+            </div>
+          ) : customerScopeSummaryQuery.isLoading || customerScopesQuery.isLoading ? (
+            <div className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <Skeleton key={index} className="h-20 w-full" />
+                ))}
+              </div>
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">CustomerScopes</p>
+                  <p className="text-2xl font-semibold">{customerScopeSummaryQuery.data?.customerScopeCount ?? 0}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Assigned Objects</p>
+                  <p className="text-2xl font-semibold">{customerScopeSummaryQuery.data?.assignedObjectCount ?? 0}</p>
+                </div>
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-xs text-muted-foreground">Unassigned Objects</p>
+                  <p className="text-2xl font-semibold text-destructive">{customerScopeSummaryQuery.data?.unassignedObjectCount ?? 0}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Latest Sync</p>
+                  <p className="text-sm font-medium">{formatDate(customerScopeSummaryQuery.data?.latestLastSyncedAt) ?? "-"}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-md border p-3 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Relationships</p>
+                  <CountBadges counts={customerScopeSummaryQuery.data?.relationshipCounts} />
+                </div>
+                <div className="rounded-md border p-3 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Confidence</p>
+                  <CountBadges counts={customerScopeSummaryQuery.data?.confidenceCounts} />
+                </div>
+              </div>
+
+              {(customerScopesQuery.data?.length ?? 0) === 0 ? (
+                <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">
+                  No CustomerScopes synced yet. Sync cached VMs to discover NetBox tenants.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left px-4 py-3 font-medium">Name</th>
+                        <th className="text-left px-4 py-3 font-medium">Strategy</th>
+                        <th className="text-left px-4 py-3 font-medium">Isolation</th>
+                        <th className="text-left px-4 py-3 font-medium">Assignments</th>
+                        <th className="text-left px-4 py-3 font-medium">Relationships</th>
+                        <th className="text-left px-4 py-3 font-medium">Last synced</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerScopesQuery.data?.map((scope) => (
+                        <tr key={scope.id} className="border-b last:border-0">
+                          <td className="px-4 py-3">
+                            <div className="font-medium">{scope.displayName ?? scope.name}</div>
+                            <div className="text-xs text-muted-foreground font-mono">{scope.externalId}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="outline">{scope.strategy}</Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            {scope.isolation ? <Badge variant="outline">{scope.isolation}</Badge> : <span className="text-muted-foreground/50">-</span>}
+                          </td>
+                          <td className="px-4 py-3 font-medium">{scope.assignmentCount}</td>
+                          <td className="px-4 py-3">
+                            <CountBadges counts={scope.relationshipCounts} />
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{formatDate(scope.lastSyncedAt) ?? "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -508,6 +766,8 @@ export default function CmdbDetail() {
 
       <CmdbObjectDetailSheet
         object={objectDetailQuery.data?.object ?? null}
+        cmdbId={id}
+        objectType={selectedObjectType}
         sourceName={objectDetailQuery.data?.source.name ?? cmdb?.name ?? "CMDB"}
         objectTypeName={objectDetailQuery.data?.objectTypeName ?? "CMDB object"}
         open={!!selectedObjectId}

@@ -354,6 +354,8 @@ describe("CMDB object browser routes", () => {
     assert.equal(res.body.mode, "cached");
     assert.equal(res.body.total, 1);
     assert.equal(res.body.objects[0].id, 101);
+    assert.equal(res.body.objects[0].localObjectId, "cached-alpha-vm-101");
+    assert.equal(res.body.objects[0].cachedVmId, "cached-alpha-vm-101");
     assert.equal(res.body.objects[0].name, "alpha-app-001");
     assert.equal(res.body.objects[0].primary_ip.address, "10.10.10.10");
     assert.equal(res.body.objects[0].custom_fields.api_key, "[REDACTED]");
@@ -382,6 +384,8 @@ describe("CMDB object browser routes", () => {
 
     assert.equal(res.body.mode, "cached");
     assert.equal(res.body.object.id, 101);
+    assert.equal(res.body.object.localObjectId, "cached-alpha-vm-101");
+    assert.equal(res.body.object.cachedVmId, "cached-alpha-vm-101");
     assert.equal(res.body.object.name, "alpha-app-001");
     assert.equal(res.body.object.custom_fields.api_key, "[REDACTED]");
     assert.equal(res.body.object.raw.customFields.api_key, "[REDACTED]");

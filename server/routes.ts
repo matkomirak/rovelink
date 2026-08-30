@@ -156,6 +156,8 @@ function getNetboxVmDisplayFields(vm: any) {
 
   return {
     id: vm.netboxId ?? vm.id,
+    localObjectId: vm.netboxId !== undefined && vm.netboxId !== null ? vm.id : null,
+    cachedVmId: vm.netboxId !== undefined && vm.netboxId !== null ? vm.id : null,
     name: vm.name,
     status,
     platform: vm.platform ?? (vm.operatingSystem ? { name: vm.operatingSystem } : null),

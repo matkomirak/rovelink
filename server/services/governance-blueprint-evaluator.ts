@@ -257,6 +257,11 @@ export function evaluateGovernanceObject(
 
   addCustomerScopeFindings(object, findings, actions, customerScopePolicy);
 
+  if (customerScopePolicy.mode === "readiness" && customerScopePolicyViolations.size > 0) {
+    automationReady = false;
+    readinessReasons.push("CustomerScope policy is not satisfied for this object.");
+  }
+
   if (readinessReasons.length === 0) {
     readinessReasons.push("Governance blueprint checks passed.");
   }
@@ -307,7 +312,7 @@ function getCustomerScopePolicyViolations(
   policy: CustomerScopeGovernancePolicy
 ): Set<string> {
   const violations = new Set<string>();
-  if (policy.mode !== "score_only") return violations;
+  if (policy.mode !== "score_only" && policy.mode !== "readiness") return violations;
 
   const hasAssignmentField = Object.prototype.hasOwnProperty.call(object.fields, "customerAssignments");
   const assignments = hasAssignmentField && Array.isArray(object.fields.customerAssignments)
@@ -401,13 +406,12 @@ function addCustomerScopeFindings(
   actions: Set<RecommendedGovernanceAction>,
   customerScopePolicy: CustomerScopeGovernancePolicy,
 ): void {
-  void customerScopePolicy;
-
   if (!Object.prototype.hasOwnProperty.call(object.fields, "customerAssignments")) return;
 
   const assignments = Array.isArray(object.fields.customerAssignments)
     ? object.fields.customerAssignments
     : [];
+  const impactMessage = getCustomerScopeFindingImpactMessage(customerScopePolicy);
 
   if (assignments.length === 0) {
     addFinding(findings, actions, {
@@ -415,7 +419,7 @@ function addCustomerScopeFindings(
       severity: "warning",
       code: "CUSTOMER_SCOPE_MISSING",
       fieldKey: "customerAssignments",
-      message: "No CustomerScope assignment found. This object has no customer/environment assignment. Rovelink reports this as a visibility-only governance issue; it does not affect score or automation readiness yet.",
+      message: `No CustomerScope assignment found. This object has no customer/environment assignment. ${impactMessage}`,
       recommendedActions: ["report", "enrich"],
     });
     return;
@@ -435,7 +439,7 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_ASSIGNMENT_INVALID",
         fieldKey: "customerAssignments",
-        message: "CustomerScope assignment is inconsistent. The assignment relationship is missing or unsupported, so Rovelink cannot interpret the customer/environment boundary. This is visibility-only and does not affect score or automation readiness yet.",
+        message: `CustomerScope assignment is inconsistent. The assignment relationship is missing or unsupported, so Rovelink cannot interpret the customer/environment boundary. ${impactMessage}`,
         recommendedActions: ["validate"],
       });
       continue;
@@ -448,7 +452,7 @@ function addCustomerScopeFindings(
           severity: "warning",
           code: "CUSTOMER_ASSIGNMENT_INVALID",
           fieldKey: "customerAssignments",
-          message: "CustomerScope assignment is inconsistent. The assignment is marked unassigned but also references a CustomerScope, so the relationship and scope reference do not match expected rules. This is visibility-only and does not affect score or automation readiness yet.",
+          message: `CustomerScope assignment is inconsistent. The assignment is marked unassigned but also references a CustomerScope, so the relationship and scope reference do not match expected rules. ${impactMessage}`,
           recommendedActions: ["validate"],
         });
       } else {
@@ -457,7 +461,7 @@ function addCustomerScopeFindings(
           severity: "warning",
           code: "CUSTOMER_ASSIGNMENT_UNASSIGNED",
           fieldKey: "customerAssignments",
-          message: "Object is explicitly unassigned. The source indicates no customer/environment assignment for this object. Rovelink reports this as a visibility-only governance issue; it does not affect score or automation readiness yet.",
+          message: `Object is explicitly unassigned. The source indicates no customer/environment assignment for this object. ${impactMessage}`,
           recommendedActions: ["report", "enrich"],
         });
       }
@@ -470,7 +474,7 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_ASSIGNMENT_INVALID",
         fieldKey: "customerAssignments",
-        message: `CustomerScope assignment is inconsistent. The ${relationship} relationship requires a CustomerScope reference, but none was resolved. This is visibility-only and does not affect score or automation readiness yet.`,
+        message: `CustomerScope assignment is inconsistent. The ${relationship} relationship requires a CustomerScope reference, but none was resolved. ${impactMessage}`,
         recommendedActions: ["validate"],
       });
       continue;
@@ -482,7 +486,7 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_SCOPE_NOT_FOUND",
         fieldKey: "customerAssignments",
-        message: "CustomerScope reference could not be resolved. The assignment references a CustomerScope that was not found for this CMDB source. This is visibility-only and does not affect score or automation readiness yet.",
+        message: `CustomerScope reference could not be resolved. The assignment references a CustomerScope that was not found for this CMDB source. ${impactMessage}`,
         recommendedActions: ["validate"],
       });
     }
@@ -493,11 +497,23 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE",
         fieldKey: "customerAssignments",
-        message: `CustomerScope assignment confidence is not authoritative. The assignment exists but confidence is ${confidence}, so it should be reviewed before using it for policy. This is visibility-only and does not affect score or automation readiness yet.`,
+        message: `CustomerScope assignment confidence is not authoritative. The assignment exists but confidence is ${confidence}, so it should be reviewed before using it for policy. ${impactMessage}`,
         recommendedActions: ["validate"],
       });
     }
   }
+}
+
+function getCustomerScopeFindingImpactMessage(policy: CustomerScopeGovernancePolicy): string {
+  if (policy.mode === "score_only") {
+    return "This may affect governance score, but it does not affect automation readiness or block automation.";
+  }
+
+  if (policy.mode === "readiness") {
+    return "This may affect automation readiness, but it does not block automation through the Gate.";
+  }
+
+  return "Rovelink reports this as a visibility-only governance issue; it does not affect score or automation readiness yet.";
 }
 
 function getOwnerValue(

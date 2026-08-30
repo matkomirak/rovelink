@@ -81,6 +81,10 @@ See [`.env.example`](.env.example) for a full list. The minimum set required to 
 | i-doit | Full (JSON-RPC upsert) | Yes |
 | ServiceNow | Full (Table API upsert) | Yes |
 
+## Governance MVP
+
+See [Governance MVP](GOVERNANCE-MVP.md) for the current CMDB object browser, governance blueprint, cached CMDB evaluation, readiness, Automation GATE awareness, optional enforcement, and manual local test flow.
+
 ## Security
 
 - All provider and CMDB tokens are encrypted at rest using AES-256-GCM (`ENCRYPTION_KEY`).

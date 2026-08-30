@@ -97,6 +97,10 @@ http://host.docker.internal:8000
 
 Use the local NetBox API token from `.env.netbox`.
 
+## Test Governance MVP
+
+See [Governance MVP](GOVERNANCE-MVP.md) for the manual local checklist covering cached NetBox VM import, Governance Blueprints, evaluation runs, findings, readiness, Automation GATE context, and optional inventory-level enforcement.
+
 ## Sync A Public Git Project
 
 In Rovelink, create or update a Project with a public HTTPS Git URL. For example:

@@ -82,6 +82,8 @@ function createFakeGovernanceStorage() {
   const customerScopes: CustomerScope[] = [];
   const customerScopeObjectAssignments: CustomerScopeObjectAssignment[] = [];
   let netboxVmReadCount = 0;
+  let customerScopeReadCount = 0;
+  let customerScopeAssignmentReadCount = 0;
   let sequence = 0;
 
   const nextId = (prefix: string) => `${prefix}-${++sequence}`;
@@ -99,6 +101,12 @@ function createFakeGovernanceStorage() {
     customerScopeObjectAssignments,
     get netboxVmReadCount() {
       return netboxVmReadCount;
+    },
+    get customerScopeReadCount() {
+      return customerScopeReadCount;
+    },
+    get customerScopeAssignmentReadCount() {
+      return customerScopeAssignmentReadCount;
     },
 
     async createGovernanceBlueprint(input: any) {
@@ -358,6 +366,7 @@ function createFakeGovernanceStorage() {
     },
 
     async listCustomerScopes(orgId: string, sourceType?: string, sourceId?: string) {
+      customerScopeReadCount += 1;
       return customerScopes.filter((scope) => (
         scope.orgId === orgId &&
         (!sourceType || scope.sourceType === sourceType) &&
@@ -421,6 +430,7 @@ function createFakeGovernanceStorage() {
     },
 
     async listCustomerScopeObjectAssignments(orgId: string, sourceType?: string, sourceId?: string) {
+      customerScopeAssignmentReadCount += 1;
       return customerScopeObjectAssignments.filter((assignment) => (
         assignment.orgId === orgId &&
         (!sourceType || assignment.sourceType === sourceType) &&
@@ -477,6 +487,42 @@ async function createDefaultBlueprint(req: ReturnType<typeof supertest>, orgId =
       assert.ok([200, 201].includes(res.status));
     });
   return response.body as { blueprint: GovernanceBlueprint; activeVersion: GovernanceBlueprintVersion };
+}
+
+function addDedicatedCustomerScopeAssignment(storage: FakeStorage, vm: NetboxVm, sourceId = `${ORG_A}-source`, orgId = ORG_A) {
+  const scope: CustomerScope = {
+    id: `${vm.id}-scope`,
+    orgId,
+    sourceType: "netbox_inventory_source",
+    sourceId,
+    externalId: "scope-20",
+    name: "Engineering",
+    displayName: "Engineering",
+    strategy: "tenant",
+    isolation: "assignment",
+    parentExternalId: null,
+    metadata: null,
+    lastSyncedAt: new Date("2026-01-04T00:00:00.000Z"),
+    createdAt: new Date("2026-01-04T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-04T00:00:00.000Z"),
+  };
+  storage.customerScopes.push(scope);
+  storage.customerScopeObjectAssignments.push({
+    id: `${vm.id}-assignment`,
+    orgId,
+    sourceType: "netbox_inventory_source",
+    sourceId,
+    objectType: "netbox_vm",
+    objectId: vm.id,
+    customerScopeId: scope.id,
+    relationship: "dedicated",
+    derivedFrom: "provider",
+    confidence: "authoritative",
+    metadata: null,
+    lastSyncedAt: new Date("2026-01-04T00:00:00.000Z"),
+    createdAt: new Date("2026-01-04T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-04T00:00:00.000Z"),
+  });
 }
 
 describe("governance routes", () => {
@@ -643,7 +689,7 @@ describe("governance routes", () => {
 
   it("operator can run cached NetBox VM evaluation without live NetBox", async () => {
     const { blueprint } = await createDefaultBlueprint(req, ORG_A);
-    storage.vms.push({
+    const vm: NetboxVm = {
       id: "vm-alpha-1",
       sourceId: `${ORG_A}-source`,
       netboxId: 101,
@@ -663,7 +709,9 @@ describe("governance routes", () => {
       },
       tags: [],
       lastImportedAt: new Date(),
-    });
+    };
+    storage.vms.push(vm);
+    addDedicatedCustomerScopeAssignment(storage, vm);
 
     const response = await req
       .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
@@ -677,6 +725,203 @@ describe("governance routes", () => {
     assert.equal(storage.objectEvaluations.length, 1);
     assert.equal(storage.objectEvaluations[0].objectId, "vm-alpha-1");
     assert.equal(storage.objectEvaluations[0].externalId, "101");
+  });
+
+  it("cached VM evaluation loads CustomerScope assignments and scopes once for the selected source", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    const firstVm: NetboxVm = {
+      id: "vm-alpha-customer-one",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 151,
+      name: "alpha-customer-one",
+      ip: "192.0.2.151",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    };
+    const secondVm: NetboxVm = {
+      ...firstVm,
+      id: "vm-alpha-customer-two",
+      netboxId: 152,
+      name: "alpha-customer-two",
+    };
+    storage.vms.push(firstVm, secondVm);
+    addDedicatedCustomerScopeAssignment(storage, firstVm);
+    addDedicatedCustomerScopeAssignment(storage, secondVm);
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(storage.customerScopeAssignmentReadCount, 1);
+    assert.equal(storage.customerScopeReadCount, 1);
+    assert.equal(storage.objectEvaluations.length, 2);
+    assert.ok(storage.objectEvaluations.every((evaluation) => (
+      !evaluation.findings.some((finding: any) => String(finding.code).startsWith("CUSTOMER_"))
+    )));
+  });
+
+  it("cached VM evaluation persists CUSTOMER_SCOPE_MISSING when no assignment exists", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push({
+      id: "vm-alpha-no-customer-assignment",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 153,
+      name: "alpha-no-customer-assignment",
+      ip: "192.0.2.153",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.evaluatedCount, 1);
+    assert.equal(storage.objectEvaluations[0].objectId, "vm-alpha-no-customer-assignment");
+    assert.equal(storage.objectEvaluations[0].governanceScore, 100);
+    assert.equal(storage.objectEvaluations[0].automationReady, true);
+    assert.ok(storage.objectEvaluations[0].findings.some((finding: any) => (
+      finding.code === "CUSTOMER_SCOPE_MISSING"
+    )));
+  });
+
+  it("CustomerScope assignment lookup uses local VM id, not NetBox numeric id or VM name", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push({
+      id: "vm-alpha-local-identity",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 154,
+      name: "alpha-local-identity",
+      ip: "192.0.2.154",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+    storage.customerScopeObjectAssignments.push({
+      id: "assignment-netbox-id",
+      orgId: ORG_A,
+      sourceType: "netbox_inventory_source",
+      sourceId: `${ORG_A}-source`,
+      objectType: "netbox_vm",
+      objectId: "154",
+      customerScopeId: null,
+      relationship: "unassigned",
+      derivedFrom: "provider",
+      confidence: "authoritative",
+      metadata: null,
+      lastSyncedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }, {
+      id: "assignment-vm-name",
+      orgId: ORG_A,
+      sourceType: "netbox_inventory_source",
+      sourceId: `${ORG_A}-source`,
+      objectType: "netbox_vm",
+      objectId: "alpha-local-identity",
+      customerScopeId: null,
+      relationship: "unassigned",
+      derivedFrom: "provider",
+      confidence: "authoritative",
+      metadata: null,
+      lastSyncedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.ok(storage.objectEvaluations[0].findings.some((finding: any) => (
+      finding.code === "CUSTOMER_SCOPE_MISSING"
+    )));
+    assert.ok(!storage.objectEvaluations[0].findings.some((finding: any) => (
+      finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"
+    )));
+  });
+
+  it("CustomerScope lookup is scoped to the evaluated source", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    storage.vms.push({
+      id: "vm-alpha-source-scoped",
+      sourceId: `${ORG_A}-source`,
+      netboxId: 155,
+      name: "alpha-source-scoped",
+      ip: "192.0.2.155",
+      operatingSystem: "linux",
+      customFields: {
+        tenant: "alpha",
+        role: "app",
+        automatable: true,
+        provider_state: "present",
+        technical_owner: "platform",
+        service_owner: "payments",
+      },
+      tags: [],
+      lastImportedAt: new Date(),
+    });
+    storage.customerScopeObjectAssignments.push({
+      id: "assignment-wrong-source",
+      orgId: ORG_A,
+      sourceType: "netbox_inventory_source",
+      sourceId: `${ORG_A}-secondary-source`,
+      objectType: "netbox_vm",
+      objectId: "vm-alpha-source-scoped",
+      customerScopeId: null,
+      relationship: "unassigned",
+      derivedFrom: "provider",
+      confidence: "authoritative",
+      metadata: null,
+      lastSyncedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.ok(storage.objectEvaluations[0].findings.some((finding: any) => (
+      finding.code === "CUSTOMER_SCOPE_MISSING"
+    )));
+    assert.ok(!storage.objectEvaluations[0].findings.some((finding: any) => (
+      finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"
+    )));
   });
 
   it("viewer can list governance NetBox sources without tokens", async () => {

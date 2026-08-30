@@ -14,6 +14,8 @@ export interface NormalizedGovernanceObject {
   owners?: Partial<Record<string, unknown>>;
 }
 
+const CUSTOMER_ASSIGNMENT_RELATIONSHIPS = new Set(["dedicated", "shared", "internal", "unassigned"]);
+
 export const STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT = {
   name: "Standard NetBox VM Governance",
   objectType: "netbox_vm" as const,
@@ -243,6 +245,8 @@ export function evaluateGovernanceObject(
     if (highRelevance) actions.add("block_automation");
   }
 
+  addCustomerScopeFindings(object, findings, actions);
+
   if (readinessReasons.length === 0) {
     readinessReasons.push("Governance blueprint checks passed.");
   }
@@ -310,6 +314,108 @@ function sortActions(actions: Set<RecommendedGovernanceAction>): RecommendedGove
   return ACTION_ORDER.filter((action) => actions.has(action));
 }
 
+function addCustomerScopeFindings(
+  object: NormalizedGovernanceObject,
+  findings: GovernanceFinding[],
+  actions: Set<RecommendedGovernanceAction>,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(object.fields, "customerAssignments")) return;
+
+  const assignments = Array.isArray(object.fields.customerAssignments)
+    ? object.fields.customerAssignments
+    : [];
+
+  if (assignments.length === 0) {
+    addFinding(findings, actions, {
+      layer: "data_management",
+      severity: "warning",
+      code: "CUSTOMER_SCOPE_MISSING",
+      fieldKey: "customerAssignments",
+      message: "No CustomerScope assignment is available for this object.",
+      recommendedActions: ["report", "enrich"],
+    });
+    return;
+  }
+
+  for (const assignment of assignments) {
+    const record = isRecord(assignment) ? assignment : {};
+    const relationship = stringValue(record.relationship);
+    const confidence = stringValue(record.confidence);
+    const customerScope = isRecord(record.customerScope) ? record.customerScope : null;
+    const customerScopeId = stringValue(record.customerScopeId);
+    const hasCustomerScope = Boolean(customerScope || customerScopeId);
+
+    if (!relationship || !CUSTOMER_ASSIGNMENT_RELATIONSHIPS.has(relationship)) {
+      addFinding(findings, actions, {
+        layer: "data_management",
+        severity: "warning",
+        code: "CUSTOMER_ASSIGNMENT_INVALID",
+        fieldKey: "customerAssignments",
+        message: "CustomerScope assignment has an invalid or missing relationship.",
+        recommendedActions: ["validate"],
+      });
+      continue;
+    }
+
+    if (relationship === "unassigned") {
+      if (hasCustomerScope) {
+        addFinding(findings, actions, {
+          layer: "data_management",
+          severity: "warning",
+          code: "CUSTOMER_ASSIGNMENT_INVALID",
+          fieldKey: "customerAssignments",
+          message: "CustomerScope assignment is unassigned but also references a customer scope.",
+          recommendedActions: ["validate"],
+        });
+      } else {
+        addFinding(findings, actions, {
+          layer: "data_management",
+          severity: "warning",
+          code: "CUSTOMER_ASSIGNMENT_UNASSIGNED",
+          fieldKey: "customerAssignments",
+          message: "Object is explicitly unassigned to a CustomerScope.",
+          recommendedActions: ["report", "enrich"],
+        });
+      }
+      continue;
+    }
+
+    if ((relationship === "dedicated" || relationship === "shared") && !hasCustomerScope) {
+      addFinding(findings, actions, {
+        layer: "data_management",
+        severity: "warning",
+        code: "CUSTOMER_ASSIGNMENT_INVALID",
+        fieldKey: "customerAssignments",
+        message: `CustomerScope assignment relationship ${relationship} requires a customer scope.`,
+        recommendedActions: ["validate"],
+      });
+      continue;
+    }
+
+    if (customerScopeId && !customerScope) {
+      addFinding(findings, actions, {
+        layer: "data_management",
+        severity: "warning",
+        code: "CUSTOMER_SCOPE_NOT_FOUND",
+        fieldKey: "customerAssignments",
+        message: "CustomerScope assignment references a scope that was not found in the selected source.",
+        recommendedActions: ["validate"],
+      });
+    }
+
+    if (confidence && confidence !== "authoritative") {
+      addFinding(findings, actions, {
+        layer: "data_management",
+        severity: "warning",
+        code: "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE",
+        fieldKey: "customerAssignments",
+        message: `CustomerScope assignment confidence is ${confidence}, not authoritative.`,
+        recommendedActions: ["validate"],
+      });
+    }
+  }
+}
+
 function getOwnerValue(
   object: NormalizedGovernanceObject,
   role: string,
@@ -341,4 +447,12 @@ function hasGovernanceValue(value: unknown): boolean {
   if (typeof value === "string") return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }

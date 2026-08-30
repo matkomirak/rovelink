@@ -33,6 +33,41 @@ const baseObject: NormalizedGovernanceObject = {
 
 const baseRules = STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT.rules;
 
+function withCustomerAssignments(assignments: unknown[]): NormalizedGovernanceObject {
+  return {
+    ...baseObject,
+    fields: {
+      ...baseObject.fields,
+      customerAssignments: assignments,
+      customerAssignmentRelationship: (assignments[0] as any)?.relationship ?? null,
+      customerScopeCount: assignments.filter((assignment: any) => Boolean(assignment?.customerScope)).length,
+      hasCustomerScope: assignments.some((assignment: any) => Boolean(assignment?.customerScope)),
+      isCustomerUnassigned: assignments.some((assignment: any) => assignment?.relationship === "unassigned"),
+      customerAssignmentConfidence: (assignments[0] as any)?.confidence ?? null,
+      customerAssignmentDerivedFrom: (assignments[0] as any)?.derivedFrom ?? null,
+    },
+  };
+}
+
+function dedicatedCustomerScopeAssignment(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "assignment-1",
+    relationship: "dedicated",
+    derivedFrom: "provider",
+    confidence: "authoritative",
+    customerScopeId: "scope-1",
+    customerScope: {
+      id: "scope-1",
+      externalId: "20",
+      name: "Engineering",
+      displayName: "Engineering",
+      strategy: "tenant",
+      isolation: "assignment",
+    },
+    ...overrides,
+  };
+}
+
 describe("governanceBlueprintRulesSchema", () => {
   it("rejects unknown keys", () => {
     assert.throws(
@@ -121,6 +156,118 @@ describe("evaluateGovernanceObject", () => {
     assert.equal(result.automationReadiness.ready, true);
     assert.deepEqual(result.findings, []);
     assert.deepEqual(result.recommendedActions, ["ignore"]);
+  });
+
+  it("does not create a CustomerScope finding for a dedicated authoritative assignment", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment()]),
+      baseRules,
+    );
+
+    assert.ok(!result.findings.some((finding) => finding.code.startsWith("CUSTOMER_")));
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
+  });
+
+  it("creates CUSTOMER_SCOPE_MISSING when no CustomerScope assignment exists", () => {
+    const result = evaluateGovernanceObject(withCustomerAssignments([]), baseRules);
+
+    assert.ok(result.findings.some((finding) => (
+      finding.code === "CUSTOMER_SCOPE_MISSING" &&
+      finding.severity === "warning" &&
+      finding.layer === "data_management"
+    )));
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.scores.dataManagement, 100);
+    assert.equal(result.automationReadiness.ready, true);
+    assert.ok(!result.recommendedActions.includes("block_automation"));
+  });
+
+  it("creates CUSTOMER_ASSIGNMENT_UNASSIGNED without treating internal as unassigned", () => {
+    const unassigned = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment({
+        relationship: "unassigned",
+        customerScopeId: null,
+        customerScope: null,
+      })]),
+      baseRules,
+    );
+    const internal = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment({
+        relationship: "internal",
+        customerScopeId: null,
+        customerScope: null,
+      })]),
+      baseRules,
+    );
+
+    assert.ok(unassigned.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"));
+    assert.ok(!internal.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"));
+    assert.equal(unassigned.automationReadiness.ready, true);
+    assert.equal(internal.automationReadiness.ready, true);
+  });
+
+  it("accepts a shared CustomerScope assignment with scopes", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([
+        dedicatedCustomerScopeAssignment({ relationship: "shared" }),
+        dedicatedCustomerScopeAssignment({
+          id: "assignment-2",
+          relationship: "shared",
+          customerScopeId: "scope-2",
+          customerScope: {
+            id: "scope-2",
+            externalId: "21",
+            name: "Finance",
+            displayName: "Finance",
+            strategy: "tenant",
+            isolation: "assignment",
+          },
+        }),
+      ]),
+      baseRules,
+    );
+
+    assert.ok(!result.findings.some((finding) => finding.code.startsWith("CUSTOMER_")));
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
+  });
+
+  it("creates CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE for non-authoritative assignment confidence", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment({ confidence: "mapped" })]),
+      baseRules,
+    );
+
+    assert.ok(result.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE"));
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
+    assert.ok(!result.recommendedActions.includes("block_automation"));
+  });
+
+  it("creates CUSTOMER_ASSIGNMENT_INVALID for dedicated assignment without scope", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment({
+        customerScopeId: null,
+        customerScope: null,
+      })]),
+      baseRules,
+    );
+
+    assert.ok(result.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_INVALID"));
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
+  });
+
+  it("creates CUSTOMER_SCOPE_NOT_FOUND when assignment references a missing scope", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment({ customerScope: null })]),
+      baseRules,
+    );
+
+    assert.ok(result.findings.some((finding) => finding.code === "CUSTOMER_SCOPE_NOT_FOUND"));
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
   });
 
   it("creates an ownership finding when technical owner is missing", () => {

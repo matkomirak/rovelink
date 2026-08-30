@@ -14,7 +14,7 @@ import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
 import { sanitizeGitSyncError, syncGitProject } from "./services/git-project-sync";
-import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema } from "@shared/schema";
+import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema, type CustomerScope, type CustomerScopeObjectAssignment } from "@shared/schema";
 import { db } from "./db";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -109,6 +109,7 @@ const CMDB_OBJECT_TYPES = {
 
 type CmdbObjectType = keyof typeof CMDB_OBJECT_TYPES;
 type CmdbObjectMode = "cached" | "live";
+type CountMap = Record<string, number>;
 
 const SENSITIVE_OBJECT_KEYS = new Set([
   "authorization",
@@ -196,6 +197,99 @@ function buildCmdbObjectResponse(cmdb: any, objectType: CmdbObjectType, objects:
 async function getCachedNetboxVmsForCmdb(cmdbId: string, orgId: string) {
   const cachedVms = await storage.getNetboxVms(orgId).catch(() => []);
   return cachedVms.filter((vm: any) => vm.sourceId === cmdbId);
+}
+
+function incrementCount(counts: CountMap, key?: string | null) {
+  if (!key) return;
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function latestDate(...values: Array<Date | string | null | undefined>): Date | null {
+  let latest: Date | null = null;
+  for (const value of values) {
+    if (!value) continue;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) continue;
+    if (!latest || date > latest) latest = date;
+  }
+  return latest;
+}
+
+function sanitizeCustomerScope(scope: CustomerScope) {
+  return {
+    id: scope.id,
+    name: scope.name,
+    displayName: scope.displayName,
+    externalId: scope.externalId,
+    strategy: scope.strategy,
+    isolation: scope.isolation,
+    parentExternalId: scope.parentExternalId,
+    metadata: sanitizeCmdbObjectPayload(scope.metadata),
+    lastSyncedAt: scope.lastSyncedAt,
+    createdAt: scope.createdAt,
+    updatedAt: scope.updatedAt,
+  };
+}
+
+function sanitizeCustomerScopeForAssignment(scope: CustomerScope | undefined) {
+  if (!scope) return null;
+  return {
+    id: scope.id,
+    name: scope.name,
+    displayName: scope.displayName,
+    externalId: scope.externalId,
+    strategy: scope.strategy,
+    isolation: scope.isolation,
+  };
+}
+
+function serializeCustomerScopeAssignment(
+  assignment: CustomerScopeObjectAssignment,
+  scopesById: Map<string, CustomerScope>,
+) {
+  return {
+    id: assignment.id,
+    objectType: assignment.objectType,
+    objectId: assignment.objectId,
+    relationship: assignment.relationship,
+    derivedFrom: assignment.derivedFrom,
+    confidence: assignment.confidence,
+    metadata: sanitizeCmdbObjectPayload(assignment.metadata),
+    lastSyncedAt: assignment.lastSyncedAt,
+    customerScope: assignment.customerScopeId
+      ? sanitizeCustomerScopeForAssignment(scopesById.get(assignment.customerScopeId))
+      : null,
+  };
+}
+
+function summarizeCustomerScopeAssignments(assignments: CustomerScopeObjectAssignment[]) {
+  const relationshipCounts: CountMap = {};
+  const derivedFromCounts: CountMap = {};
+  const confidenceCounts: CountMap = {};
+  const assignedObjectIds = new Set<string>();
+  const unassignedObjectIds = new Set<string>();
+  let latestLastSyncedAt: Date | null = null;
+
+  for (const assignment of assignments) {
+    incrementCount(relationshipCounts, assignment.relationship);
+    incrementCount(derivedFromCounts, assignment.derivedFrom);
+    incrementCount(confidenceCounts, assignment.confidence);
+    if (assignment.relationship === "unassigned") {
+      unassignedObjectIds.add(assignment.objectId);
+    } else {
+      assignedObjectIds.add(assignment.objectId);
+    }
+    latestLastSyncedAt = latestDate(latestLastSyncedAt, assignment.lastSyncedAt);
+  }
+
+  return {
+    assignedObjectCount: assignedObjectIds.size,
+    unassignedObjectCount: unassignedObjectIds.size,
+    relationshipCounts,
+    derivedFromCounts,
+    confidenceCounts,
+    latestLastSyncedAt,
+  };
 }
 
 async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
@@ -883,6 +977,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/cmdbs/:id/customer-scope-summary", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+
+      const [scopes, assignments] = await Promise.all([
+        storage.listCustomerScopes(req.orgId!, "netbox_inventory_source", cmdb.id),
+        storage.listCustomerScopeObjectAssignments(req.orgId!, "netbox_inventory_source", cmdb.id),
+      ]);
+      const summary = summarizeCustomerScopeAssignments(assignments);
+
+      res.json({
+        customerScopeCount: scopes.length,
+        ...summary,
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.customer-scope-summary", "Failed to fetch CMDB customer scope summary");
+    }
+  });
+
+  app.get("/api/cmdbs/:id/customer-scopes", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+
+      const [scopes, assignments] = await Promise.all([
+        storage.listCustomerScopes(req.orgId!, "netbox_inventory_source", cmdb.id),
+        storage.listCustomerScopeObjectAssignments(req.orgId!, "netbox_inventory_source", cmdb.id),
+      ]);
+      const assignmentsByScopeId = new Map<string, CustomerScopeObjectAssignment[]>();
+      for (const assignment of assignments) {
+        if (!assignment.customerScopeId) continue;
+        const current = assignmentsByScopeId.get(assignment.customerScopeId) ?? [];
+        current.push(assignment);
+        assignmentsByScopeId.set(assignment.customerScopeId, current);
+      }
+
+      res.json(scopes.map((scope) => {
+        const scopeAssignments = assignmentsByScopeId.get(scope.id) ?? [];
+        return {
+          ...sanitizeCustomerScope(scope),
+          assignmentCount: scopeAssignments.length,
+          relationshipCounts: summarizeCustomerScopeAssignments(scopeAssignments).relationshipCounts,
+        };
+      }));
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.customer-scopes.list", "Failed to fetch CMDB customer scopes");
+    }
+  });
+
+  app.get("/api/cmdbs/:id/customer-scopes/:scopeId", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+
+      const scope = await storage.getCustomerScope(req.params.scopeId, req.orgId!);
+      if (!scope || scope.sourceType !== "netbox_inventory_source" || scope.sourceId !== cmdb.id) {
+        return res.status(404).json({ message: "Customer scope not found" });
+      }
+
+      const assignments = await storage.listAssignmentsForCustomerScope(req.orgId!, scope.id);
+      res.json({
+        scope: sanitizeCustomerScope(scope),
+        assignments: assignments
+          .filter((assignment) => (
+            assignment.sourceType === "netbox_inventory_source" &&
+            assignment.sourceId === cmdb.id
+          ))
+          .map((assignment) => ({
+            id: assignment.id,
+            objectId: assignment.objectId,
+            objectType: assignment.objectType,
+            relationship: assignment.relationship,
+            derivedFrom: assignment.derivedFrom,
+            confidence: assignment.confidence,
+            metadata: sanitizeCmdbObjectPayload(assignment.metadata),
+            lastSyncedAt: assignment.lastSyncedAt,
+          })),
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.customer-scopes.get", "Failed to fetch CMDB customer scope");
+    }
+  });
+
   app.patch("/api/cmdbs/:id", authMiddleware, requireRole("admin"), async (req: AuthRequest, res) => {
     try {
       const body = { ...req.body };
@@ -1005,6 +1189,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(buildCmdbObjectResponse(cmdb, objectType, vms, "live"));
     } catch (error: any) {
       sendInternalError(res, error, "cmdbs.objects.list", "Failed to fetch CMDB objects");
+    }
+  });
+
+  app.get(["/api/cmdbs/:id/objects/:objectType/:objectId/customer-assignments", "/api/cmdb/:id/objects/:objectType/:objectId/customer-assignments"], authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const objectType = req.params.objectType;
+      if (!isSupportedCmdbObjectType(objectType)) {
+        return sendClientError(res, 400, `Unsupported CMDB object type: ${objectType}`);
+      }
+
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      if (cmdb.kind !== "netbox") {
+        return sendClientError(res, 400, "Customer assignments are only supported for NetBox CMDB objects");
+      }
+
+      const cachedVms = await getCachedNetboxVmsForCmdb(cmdb.id, req.orgId!);
+      const cachedVm = cachedVms.find((vm: any) => String(vm.id) === String(req.params.objectId));
+      if (!cachedVm) {
+        return res.status(404).json({ message: "CMDB object not found" });
+      }
+
+      const [assignments, scopes] = await Promise.all([
+        storage.listAssignmentsForObject(
+          req.orgId!,
+          "netbox_inventory_source",
+          cmdb.id,
+          objectType,
+          cachedVm.id,
+        ),
+        storage.listCustomerScopes(req.orgId!, "netbox_inventory_source", cmdb.id),
+      ]);
+      const scopesById = new Map(scopes.map((scope) => [scope.id, scope]));
+
+      res.json({
+        objectType,
+        objectId: cachedVm.id,
+        assignments: assignments.map((assignment) => serializeCustomerScopeAssignment(assignment, scopesById)),
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.objects.customer-assignments", "Failed to fetch CMDB object customer assignments");
     }
   });
 

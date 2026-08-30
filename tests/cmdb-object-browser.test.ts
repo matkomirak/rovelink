@@ -7,7 +7,7 @@ import supertest from "supertest";
 import { registerRoutes } from "../server/routes";
 import { storage } from "../server/storage";
 import { NetBoxAdapter } from "../server/services/netbox-adapter";
-import type { CmdbAccount, NetboxVm } from "../shared/schema";
+import type { CmdbAccount, CustomerScope, CustomerScopeObjectAssignment, NetboxVm } from "../shared/schema";
 import type { Server } from "http";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
@@ -80,7 +80,134 @@ const cachedNetboxVms: NetboxVm[] = [
   },
 ];
 
+const customerScopesForTest: CustomerScope[] = [
+  {
+    id: "scope-alpha-engineering",
+    orgId: ORG_A,
+    sourceType: "netbox_inventory_source",
+    sourceId: cmdbA.id,
+    externalId: "20",
+    name: "Engineering",
+    displayName: "Engineering Team",
+    strategy: "tenant",
+    isolation: "assignment",
+    parentExternalId: null,
+    metadata: {
+      provider: "netbox",
+      slug: "engineering",
+      token: "scope-token-must-not-leak",
+    },
+    lastSyncedAt: new Date("2026-01-03T00:00:00.000Z"),
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:00:00.000Z"),
+  },
+  {
+    id: "scope-alpha-finance-secondary",
+    orgId: ORG_A,
+    sourceType: "netbox_inventory_source",
+    sourceId: "cmdb-alpha-secondary",
+    externalId: "21",
+    name: "Finance",
+    displayName: null,
+    strategy: "tenant",
+    isolation: "assignment",
+    parentExternalId: null,
+    metadata: { provider: "netbox" },
+    lastSyncedAt: new Date("2026-01-03T00:00:00.000Z"),
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:00:00.000Z"),
+  },
+  {
+    id: "scope-beta-engineering",
+    orgId: ORG_B,
+    sourceType: "netbox_inventory_source",
+    sourceId: cmdbB.id,
+    externalId: "20",
+    name: "Engineering Beta",
+    displayName: null,
+    strategy: "tenant",
+    isolation: "assignment",
+    parentExternalId: null,
+    metadata: { provider: "netbox" },
+    lastSyncedAt: new Date("2026-01-03T00:00:00.000Z"),
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:00:00.000Z"),
+  },
+];
+
+const customerScopeAssignmentsForTest: CustomerScopeObjectAssignment[] = [
+  {
+    id: "assignment-alpha-engineering",
+    orgId: ORG_A,
+    sourceType: "netbox_inventory_source",
+    sourceId: cmdbA.id,
+    objectType: "netbox_vm",
+    objectId: "cached-alpha-vm-101",
+    customerScopeId: "scope-alpha-engineering",
+    relationship: "dedicated",
+    derivedFrom: "provider",
+    confidence: "authoritative",
+    metadata: {
+      provider: "netbox",
+      secret: "assignment-secret-must-not-leak",
+    },
+    lastSyncedAt: new Date("2026-01-03T00:00:00.000Z"),
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:00:00.000Z"),
+  },
+  {
+    id: "assignment-alpha-unassigned",
+    orgId: ORG_A,
+    sourceType: "netbox_inventory_source",
+    sourceId: cmdbA.id,
+    objectType: "netbox_vm",
+    objectId: "cached-alpha-vm-102",
+    customerScopeId: null,
+    relationship: "unassigned",
+    derivedFrom: "provider",
+    confidence: "authoritative",
+    metadata: { provider: "netbox" },
+    lastSyncedAt: new Date("2026-01-04T00:00:00.000Z"),
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-04T00:00:00.000Z"),
+  },
+  {
+    id: "assignment-alpha-secondary",
+    orgId: ORG_A,
+    sourceType: "netbox_inventory_source",
+    sourceId: "cmdb-alpha-secondary",
+    objectType: "netbox_vm",
+    objectId: "cached-secondary-vm-201",
+    customerScopeId: "scope-alpha-finance-secondary",
+    relationship: "dedicated",
+    derivedFrom: "provider",
+    confidence: "authoritative",
+    metadata: { provider: "netbox" },
+    lastSyncedAt: new Date("2026-01-03T00:00:00.000Z"),
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:00:00.000Z"),
+  },
+  {
+    id: "assignment-beta-engineering",
+    orgId: ORG_B,
+    sourceType: "netbox_inventory_source",
+    sourceId: cmdbB.id,
+    objectType: "netbox_vm",
+    objectId: "cached-beta-vm-101",
+    customerScopeId: "scope-beta-engineering",
+    relationship: "dedicated",
+    derivedFrom: "provider",
+    confidence: "authoritative",
+    metadata: { provider: "netbox" },
+    lastSyncedAt: new Date("2026-01-03T00:00:00.000Z"),
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:00:00.000Z"),
+  },
+];
+
 let cachedVmsForTest: NetboxVm[] = [];
+let customerScopesInTest: CustomerScope[] = [];
+let customerScopeAssignmentsInTest: CustomerScopeObjectAssignment[] = [];
 let liveListCalls = 0;
 
 const original = {
@@ -88,6 +215,11 @@ const original = {
   getCmdbAccount: storage.getCmdbAccount,
   getCmdbAccounts: storage.getCmdbAccounts,
   getNetboxVms: storage.getNetboxVms,
+  listCustomerScopes: storage.listCustomerScopes,
+  getCustomerScope: storage.getCustomerScope,
+  listCustomerScopeObjectAssignments: storage.listCustomerScopeObjectAssignments,
+  listAssignmentsForCustomerScope: storage.listAssignmentsForCustomerScope,
+  listAssignmentsForObject: storage.listAssignmentsForObject,
   listAllVms: NetBoxAdapter.prototype.listAllVms,
 };
 
@@ -109,6 +241,35 @@ before(async () => {
   };
   storage.getCmdbAccounts = async (orgId: string) => [cmdbA, cmdbB].filter((candidate) => candidate.orgId === orgId);
   storage.getNetboxVms = async (orgId: string) => orgId === ORG_A ? cachedVmsForTest : [];
+  storage.listCustomerScopes = async (orgId: string, sourceType?: string, sourceId?: string) => customerScopesInTest.filter((scope) => (
+    scope.orgId === orgId &&
+    (!sourceType || scope.sourceType === sourceType) &&
+    (!sourceId || scope.sourceId === sourceId)
+  ));
+  storage.getCustomerScope = async (id: string, orgId: string) => customerScopesInTest.find((scope) => scope.id === id && scope.orgId === orgId);
+  storage.listCustomerScopeObjectAssignments = async (orgId: string, sourceType?: string, sourceId?: string) => customerScopeAssignmentsInTest.filter((assignment) => (
+    assignment.orgId === orgId &&
+    (!sourceType || assignment.sourceType === sourceType) &&
+    (!sourceId || assignment.sourceId === sourceId)
+  ));
+  storage.listAssignmentsForCustomerScope = async (orgId: string, customerScopeId: string) => {
+    const scope = customerScopesInTest.find((candidate) => candidate.id === customerScopeId && candidate.orgId === orgId);
+    if (!scope) return [];
+    return customerScopeAssignmentsInTest.filter((assignment) => assignment.orgId === orgId && assignment.customerScopeId === customerScopeId);
+  };
+  storage.listAssignmentsForObject = async (
+    orgId: string,
+    sourceType: string,
+    sourceId: string,
+    objectType: string,
+    objectId: string,
+  ) => customerScopeAssignmentsInTest.filter((assignment) => (
+    assignment.orgId === orgId &&
+    assignment.sourceType === sourceType &&
+    assignment.sourceId === sourceId &&
+    assignment.objectType === objectType &&
+    assignment.objectId === objectId
+  ));
   NetBoxAdapter.prototype.listAllVms = async () => {
     liveListCalls += 1;
     return netboxVms;
@@ -124,6 +285,8 @@ before(async () => {
 
 beforeEach(() => {
   cachedVmsForTest = [];
+  customerScopesInTest = [];
+  customerScopeAssignmentsInTest = [];
   liveListCalls = 0;
 });
 
@@ -132,6 +295,11 @@ after(async () => {
   storage.getCmdbAccount = original.getCmdbAccount;
   storage.getCmdbAccounts = original.getCmdbAccounts;
   storage.getNetboxVms = original.getNetboxVms;
+  storage.listCustomerScopes = original.listCustomerScopes;
+  storage.getCustomerScope = original.getCustomerScope;
+  storage.listCustomerScopeObjectAssignments = original.listCustomerScopeObjectAssignments;
+  storage.listAssignmentsForCustomerScope = original.listAssignmentsForCustomerScope;
+  storage.listAssignmentsForObject = original.listAssignmentsForObject;
   NetBoxAdapter.prototype.listAllVms = original.listAllVms;
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
@@ -225,6 +393,147 @@ describe("CMDB object browser routes", () => {
     await req
       .get(`/api/cmdbs/${cmdbA.id}/object-types`)
       .set("Authorization", `Bearer ${makeToken(ORG_B)}`)
+      .expect(404);
+  });
+
+  test("customer scope summary rejects cross-org CMDB access", async () => {
+    await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-summary`)
+      .set("Authorization", `Bearer ${makeToken(ORG_B)}`)
+      .expect(404);
+  });
+
+  test("customer scope summary returns assigned and unassigned counts without secrets", async () => {
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = customerScopeAssignmentsForTest;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-summary`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.customerScopeCount, 1);
+    assert.equal(res.body.assignedObjectCount, 1);
+    assert.equal(res.body.unassignedObjectCount, 1);
+    assert.equal(res.body.relationshipCounts.dedicated, 1);
+    assert.equal(res.body.relationshipCounts.unassigned, 1);
+    assert.equal(res.body.derivedFromCounts.provider, 2);
+    assert.equal(res.body.confidenceCounts.authoritative, 2);
+    assert.equal(res.body.latestLastSyncedAt, "2026-01-04T00:00:00.000Z");
+    assert.ok(!JSON.stringify(res.body).includes("super-secret-token"));
+  });
+
+  test("customer scope list returns only scopes for selected CMDB source", async () => {
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = customerScopeAssignmentsForTest;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scopes`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.length, 1);
+    assert.equal(res.body[0].id, "scope-alpha-engineering");
+    assert.equal(res.body[0].assignmentCount, 1);
+    assert.equal(res.body[0].relationshipCounts.dedicated, 1);
+    assert.equal(res.body[0].metadata.token, "[REDACTED]");
+    assert.ok(!JSON.stringify(res.body).includes("scope-token-must-not-leak"));
+    assert.ok(!JSON.stringify(res.body).includes("scope-alpha-finance-secondary"));
+    assert.ok(!JSON.stringify(res.body).includes("scope-beta-engineering"));
+  });
+
+  test("customer scope detail rejects scope from another org or source", async () => {
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = customerScopeAssignmentsForTest;
+
+    await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scopes/scope-beta-engineering`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(404);
+
+    await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scopes/scope-alpha-finance-secondary`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(404);
+  });
+
+  test("customer scope detail returns scope and source-scoped assignments without secrets", async () => {
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = customerScopeAssignmentsForTest;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scopes/scope-alpha-engineering`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.scope.id, "scope-alpha-engineering");
+    assert.equal(res.body.scope.metadata.token, "[REDACTED]");
+    assert.equal(res.body.assignments.length, 1);
+    assert.equal(res.body.assignments[0].objectId, "cached-alpha-vm-101");
+    assert.equal(res.body.assignments[0].relationship, "dedicated");
+    assert.equal(res.body.assignments[0].metadata.secret, "[REDACTED]");
+    assert.ok(!JSON.stringify(res.body).includes("scope-token-must-not-leak"));
+    assert.ok(!JSON.stringify(res.body).includes("assignment-secret-must-not-leak"));
+  });
+
+  test("object customer assignment route returns dedicated assignment joined with scope name", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = customerScopeAssignmentsForTest;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/objects/netbox_vm/cached-alpha-vm-101/customer-assignments`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.objectType, "netbox_vm");
+    assert.equal(res.body.objectId, "cached-alpha-vm-101");
+    assert.equal(res.body.assignments.length, 1);
+    assert.equal(res.body.assignments[0].relationship, "dedicated");
+    assert.equal(res.body.assignments[0].derivedFrom, "provider");
+    assert.equal(res.body.assignments[0].confidence, "authoritative");
+    assert.equal(res.body.assignments[0].customerScope.name, "Engineering");
+    assert.equal(res.body.assignments[0].customerScope.externalId, "20");
+    assert.equal(res.body.assignments[0].metadata.secret, "[REDACTED]");
+    assert.ok(!JSON.stringify(res.body).includes("assignment-secret-must-not-leak"));
+  });
+
+  test("object customer assignment route returns unassigned with customerScope null", async () => {
+    cachedVmsForTest = [
+      ...cachedNetboxVms,
+      {
+        ...cachedNetboxVms[0],
+        id: "cached-alpha-vm-102",
+        netboxId: 102,
+        name: "alpha-unassigned-001",
+      },
+    ];
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = customerScopeAssignmentsForTest;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/objects/netbox_vm/cached-alpha-vm-102/customer-assignments`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.assignments.length, 1);
+    assert.equal(res.body.assignments[0].relationship, "unassigned");
+    assert.equal(res.body.assignments[0].customerScope, null);
+  });
+
+  test("object customer assignment route uses local cached VM id, not VM name or NetBox numeric id", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = customerScopeAssignmentsForTest;
+
+    await req
+      .get(`/api/cmdbs/${cmdbA.id}/objects/netbox_vm/alpha-app-001/customer-assignments`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(404);
+
+    await req
+      .get(`/api/cmdbs/${cmdbA.id}/objects/netbox_vm/101/customer-assignments`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
       .expect(404);
   });
 

@@ -58,6 +58,33 @@ const reportingRulesSchema = z.object({
   highPriorityRelevanceScore: z.number().int().min(0).max(15).default(10),
 }).strict();
 
+export const customerScopePolicyModeSchema = z.enum([
+  "visibility_only",
+  "score_only",
+  "readiness",
+  "enforce",
+]);
+
+export const customerScopeGovernancePolicySchema = z.object({
+  mode: customerScopePolicyModeSchema.default("visibility_only"),
+  requireCustomerScopeAssignment: z.boolean().default(true),
+  allowUnassigned: z.boolean().default(false),
+  allowInternal: z.boolean().default(true),
+  allowShared: z.boolean().default(true),
+  requireAuthoritativeConfidence: z.boolean().default(false),
+  requireProviderDerivedAssignment: z.boolean().default(false),
+  treatMissingScopeReferenceAsBlocker: z.boolean().default(false),
+  maxAllowedCustomerScopeCount: z.number().int().min(0).nullable().default(null),
+  staleAssignmentMaxAgeDays: z.number().int().min(0).nullable().default(null),
+  scoreWeight: z.number().min(0).default(0),
+}).strict();
+
+export type CustomerScopePolicyMode = z.infer<typeof customerScopePolicyModeSchema>;
+export type CustomerScopeGovernancePolicy = z.infer<typeof customerScopeGovernancePolicySchema>;
+
+export const DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY: CustomerScopeGovernancePolicy =
+  customerScopeGovernancePolicySchema.parse({});
+
 export const governanceBlueprintRulesSchema = z.object({
   objectType: z.literal("netbox_vm"),
   dataManagement: z.array(dataManagementRuleSchema),
@@ -67,6 +94,7 @@ export const governanceBlueprintRulesSchema = z.object({
     minimumGovernanceScoreForAutomation: 70,
     highPriorityRelevanceScore: 10,
   }),
+  customerScope: customerScopeGovernancePolicySchema.default(DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY),
 }).strict().superRefine((rules, ctx) => {
   const fieldKeys = new Set<string>();
   for (let index = 0; index < rules.dataManagement.length; index += 1) {

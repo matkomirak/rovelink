@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   evaluateGovernanceObject,
+  getEffectiveCustomerScopeGovernancePolicy,
   type NormalizedGovernanceObject,
   STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT,
 } from "../server/services/governance-blueprint-evaluator";
 import {
+  DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
   type GovernanceBlueprintRules,
   governanceBlueprintRulesSchema,
 } from "../shared/governance";
@@ -144,6 +146,79 @@ describe("governanceBlueprintRulesSchema", () => {
   it("accepts the standard default blueprint rules", () => {
     assert.deepEqual(governanceBlueprintRulesSchema.parse(baseRules), baseRules);
   });
+
+  it("accepts legacy blueprint rules without a customerScope policy", () => {
+    const { customerScope: _customerScope, ...legacyRules } = baseRules;
+
+    const parsed = governanceBlueprintRulesSchema.parse(legacyRules);
+
+    assert.deepEqual(parsed.customerScope, DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY);
+  });
+
+  it("accepts each CustomerScope policy mode", () => {
+    for (const mode of ["visibility_only", "score_only", "readiness", "enforce"] as const) {
+      const parsed = governanceBlueprintRulesSchema.parse({
+        ...baseRules,
+        customerScope: {
+          ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+          mode,
+        },
+      });
+
+      assert.equal(parsed.customerScope.mode, mode);
+    }
+  });
+
+  it("rejects an invalid CustomerScope policy mode", () => {
+    assert.throws(
+      () => governanceBlueprintRulesSchema.parse({
+        ...baseRules,
+        customerScope: {
+          ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+          mode: "audit_the_moon",
+        },
+      }),
+      /invalid/i
+    );
+  });
+
+  it("accepts null CustomerScope policy numeric limits", () => {
+    const parsed = governanceBlueprintRulesSchema.parse({
+      ...baseRules,
+      customerScope: {
+        ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+        maxAllowedCustomerScopeCount: null,
+        staleAssignmentMaxAgeDays: null,
+      },
+    });
+
+    assert.equal(parsed.customerScope.maxAllowedCustomerScopeCount, null);
+    assert.equal(parsed.customerScope.staleAssignmentMaxAgeDays, null);
+  });
+
+  it("rejects negative CustomerScope policy numeric values", () => {
+    assert.throws(
+      () => governanceBlueprintRulesSchema.parse({
+        ...baseRules,
+        customerScope: {
+          ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+          scoreWeight: -1,
+        },
+      }),
+      /greater than or equal to 0/i
+    );
+
+    assert.throws(
+      () => governanceBlueprintRulesSchema.parse({
+        ...baseRules,
+        customerScope: {
+          ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+          staleAssignmentMaxAgeDays: -1,
+        },
+      }),
+      /greater than or equal to 0/i
+    );
+  });
 });
 
 describe("evaluateGovernanceObject", () => {
@@ -184,6 +259,53 @@ describe("evaluateGovernanceObject", () => {
     assert.equal(result.scores.dataManagement, 100);
     assert.equal(result.automationReadiness.ready, true);
     assert.ok(!result.recommendedActions.includes("block_automation"));
+  });
+
+  it("keeps missing CustomerScope policy behavior equivalent to explicit visibility_only", () => {
+    const { customerScope: _customerScope, ...legacyRules } = baseRules;
+    const explicitVisibilityOnlyRules = {
+      ...baseRules,
+      customerScope: {
+        ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+        mode: "visibility_only" as const,
+      },
+    };
+    const legacyResult = evaluateGovernanceObject(withCustomerAssignments([]), legacyRules as GovernanceBlueprintRules);
+    const visibilityOnlyResult = evaluateGovernanceObject(
+      withCustomerAssignments([]),
+      explicitVisibilityOnlyRules,
+    );
+
+    assert.deepEqual(getEffectiveCustomerScopeGovernancePolicy({}), DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY);
+    assert.deepEqual(
+      getEffectiveCustomerScopeGovernancePolicy(explicitVisibilityOnlyRules),
+      DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY
+    );
+    assert.deepEqual(legacyResult.findings, visibilityOnlyResult.findings);
+    assert.deepEqual(legacyResult.scores, visibilityOnlyResult.scores);
+    assert.deepEqual(legacyResult.automationReadiness, visibilityOnlyResult.automationReadiness);
+  });
+
+  it("does not apply CustomerScope policy modes to score or readiness yet", () => {
+    const baseline = evaluateGovernanceObject(withCustomerAssignments([]), baseRules);
+
+    for (const mode of ["score_only", "readiness", "enforce"] as const) {
+      const result = evaluateGovernanceObject(
+        withCustomerAssignments([]),
+        {
+          ...baseRules,
+          customerScope: {
+            ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+            mode,
+            scoreWeight: 5,
+          },
+        },
+      );
+
+      assert.deepEqual(result.scores, baseline.scores);
+      assert.deepEqual(result.automationReadiness, baseline.automationReadiness);
+      assert.ok(!result.recommendedActions.includes("block_automation"));
+    }
   });
 
   it("creates CUSTOMER_ASSIGNMENT_UNASSIGNED without treating internal as unassigned", () => {
@@ -420,6 +542,7 @@ describe("evaluateGovernanceObject", () => {
         minimumGovernanceScoreForAutomation: 70,
         highPriorityRelevanceScore: 10,
       },
+      customerScope: DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
     };
 
     const result = evaluateGovernanceObject(

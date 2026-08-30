@@ -1,4 +1,6 @@
 import {
+  DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+  type CustomerScopeGovernancePolicy,
   type GovernanceBlueprintRules,
   type GovernanceEvaluationResult,
   type GovernanceFinding,
@@ -131,6 +133,7 @@ export function evaluateGovernanceObject(
   rawRules: GovernanceBlueprintRules
 ): GovernanceEvaluationResult {
   const rules = governanceBlueprintRulesSchema.parse(rawRules);
+  const customerScopePolicy = getEffectiveCustomerScopeGovernancePolicy(rules);
 
   if (object.objectType !== rules.objectType) {
     throw new Error(`Governance blueprint object type ${rules.objectType} cannot evaluate ${object.objectType}`);
@@ -245,7 +248,7 @@ export function evaluateGovernanceObject(
     if (highRelevance) actions.add("block_automation");
   }
 
-  addCustomerScopeFindings(object, findings, actions);
+  addCustomerScopeFindings(object, findings, actions, customerScopePolicy);
 
   if (readinessReasons.length === 0) {
     readinessReasons.push("Governance blueprint checks passed.");
@@ -272,6 +275,12 @@ export function evaluateGovernanceObject(
     findings,
     recommendedActions: sortActions(actions),
   };
+}
+
+export function getEffectiveCustomerScopeGovernancePolicy(
+  rules: Partial<Pick<GovernanceBlueprintRules, "customerScope">>
+): CustomerScopeGovernancePolicy {
+  return rules.customerScope ?? DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY;
 }
 
 function scoreWeightedRules<T extends { weight?: number }>(
@@ -318,7 +327,10 @@ function addCustomerScopeFindings(
   object: NormalizedGovernanceObject,
   findings: GovernanceFinding[],
   actions: Set<RecommendedGovernanceAction>,
+  customerScopePolicy: CustomerScopeGovernancePolicy,
 ): void {
+  void customerScopePolicy;
+
   if (!Object.prototype.hasOwnProperty.call(object.fields, "customerAssignments")) return;
 
   const assignments = Array.isArray(object.fields.customerAssignments)

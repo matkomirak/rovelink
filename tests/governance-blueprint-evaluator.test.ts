@@ -300,23 +300,16 @@ describe("evaluateGovernanceObject", () => {
     assert.deepEqual(legacyResult.automationReadiness, visibilityOnlyResult.automationReadiness);
   });
 
-  it("does not apply CustomerScope enforce policy mode yet", () => {
-    const baseline = evaluateGovernanceObject(withCustomerAssignments([]), baseRules);
-
+  it("keeps enforce mode ready for a valid dedicated authoritative CustomerScope", () => {
     const result = evaluateGovernanceObject(
-      withCustomerAssignments([]),
-      {
-        ...baseRules,
-        customerScope: {
-          ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
-          mode: "enforce",
-          scoreWeight: 5,
-        },
-      },
+      withCustomerAssignments([dedicatedCustomerScopeAssignment()]),
+      withCustomerScopePolicy({ mode: "enforce", scoreWeight: 12 }),
     );
 
-    assert.deepEqual(result.scores, baseline.scores);
-    assert.deepEqual(result.automationReadiness, baseline.automationReadiness);
+    assert.equal(result.scores.dataManagement, 100);
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
+    assert.deepEqual(result.automationReadiness.reasons, ["Governance blueprint checks passed."]);
     assert.ok(!result.recommendedActions.includes("block_automation"));
   });
 
@@ -609,6 +602,147 @@ describe("evaluateGovernanceObject", () => {
     assert.equal(result.automationReadiness.ready, true);
     assert.deepEqual(result.automationReadiness.reasons, ["Governance blueprint checks passed."]);
     assert.ok(!result.recommendedActions.includes("block_automation"));
+  });
+
+  it("marks readiness false and recommends block_automation when CustomerScope assignment is missing in enforce mode", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([]),
+      withCustomerScopePolicy({ mode: "enforce", scoreWeight: 12 }),
+    );
+
+    assert.equal(result.scores.dataManagement, 100);
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, false);
+    assert.deepEqual(result.automationReadiness.reasons, [
+      "CustomerScope policy is not satisfied for this object.",
+    ]);
+    assert.ok(result.recommendedActions.includes("block_automation"));
+    assert.ok(result.findings.some((finding) => (
+      finding.code === "CUSTOMER_SCOPE_MISSING" &&
+      finding.message.includes("violates an enforcing CustomerScope blueprint policy") &&
+      finding.message.includes("actual blocking depends on Automation Inventory governance enforcement settings")
+    )));
+  });
+
+  it("handles enforce mode unassigned assignment according to allowUnassigned", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment({
+      relationship: "unassigned",
+      customerScopeId: null,
+      customerScope: null,
+    })]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      allowUnassigned: true,
+    }));
+    const disallowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      allowUnassigned: false,
+    }));
+
+    assert.equal(allowed.automationReadiness.ready, true);
+    assert.ok(!allowed.recommendedActions.includes("block_automation"));
+    assert.equal(disallowed.automationReadiness.ready, false);
+    assert.equal(disallowed.scores.dataManagement, 100);
+    assert.ok(disallowed.recommendedActions.includes("block_automation"));
+  });
+
+  it("handles enforce mode internal assignment according to allowInternal", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment({
+      relationship: "internal",
+      customerScopeId: null,
+      customerScope: null,
+    })]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      allowInternal: true,
+    }));
+    const disallowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      allowInternal: false,
+    }));
+
+    assert.equal(allowed.automationReadiness.ready, true);
+    assert.ok(!allowed.recommendedActions.includes("block_automation"));
+    assert.equal(disallowed.automationReadiness.ready, false);
+    assert.equal(disallowed.scores.dataManagement, 100);
+    assert.ok(!disallowed.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"));
+    assert.ok(disallowed.recommendedActions.includes("block_automation"));
+  });
+
+  it("handles enforce mode shared assignment according to allowShared", () => {
+    const object = withCustomerAssignments([
+      dedicatedCustomerScopeAssignment({ relationship: "shared" }),
+      dedicatedCustomerScopeAssignment({
+        id: "assignment-2",
+        relationship: "shared",
+        customerScopeId: "scope-2",
+        customerScope: {
+          id: "scope-2",
+          externalId: "21",
+          name: "Finance",
+          displayName: "Finance",
+          strategy: "tenant",
+          isolation: "assignment",
+        },
+      }),
+    ]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      allowShared: true,
+    }));
+    const disallowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      allowShared: false,
+    }));
+
+    assert.equal(allowed.automationReadiness.ready, true);
+    assert.ok(!allowed.recommendedActions.includes("block_automation"));
+    assert.equal(disallowed.automationReadiness.ready, false);
+    assert.equal(disallowed.scores.dataManagement, 100);
+    assert.ok(disallowed.recommendedActions.includes("block_automation"));
+  });
+
+  it("recommends block_automation for low confidence in enforce mode only when authoritative confidence is required", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment({ confidence: "mapped" })]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      requireAuthoritativeConfidence: false,
+    }));
+    const required = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      requireAuthoritativeConfidence: true,
+    }));
+
+    assert.equal(allowed.automationReadiness.ready, true);
+    assert.ok(!allowed.recommendedActions.includes("block_automation"));
+    assert.equal(required.automationReadiness.ready, false);
+    assert.equal(required.scores.dataManagement, 100);
+    assert.ok(required.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE"));
+    assert.ok(required.recommendedActions.includes("block_automation"));
+  });
+
+  it("recommends block_automation for missing CustomerScope reference in enforce mode when configured", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment({ customerScope: null })]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      treatMissingScopeReferenceAsBlocker: false,
+    }));
+    const required = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      mode: "enforce",
+      treatMissingScopeReferenceAsBlocker: true,
+    }));
+
+    assert.equal(allowed.automationReadiness.ready, true);
+    assert.ok(!allowed.recommendedActions.includes("block_automation"));
+    assert.equal(required.automationReadiness.ready, false);
+    assert.equal(required.scores.dataManagement, 100);
+    assert.ok(required.findings.some((finding) => finding.code === "CUSTOMER_SCOPE_NOT_FOUND"));
+    assert.ok(required.recommendedActions.includes("block_automation"));
   });
 
   it("creates CUSTOMER_ASSIGNMENT_UNASSIGNED without treating internal as unassigned", () => {

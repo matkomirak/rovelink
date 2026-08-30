@@ -257,9 +257,13 @@ export function evaluateGovernanceObject(
 
   addCustomerScopeFindings(object, findings, actions, customerScopePolicy);
 
-  if (customerScopePolicy.mode === "readiness" && customerScopePolicyViolations.size > 0) {
+  if (
+    (customerScopePolicy.mode === "readiness" || customerScopePolicy.mode === "enforce") &&
+    customerScopePolicyViolations.size > 0
+  ) {
     automationReady = false;
     readinessReasons.push("CustomerScope policy is not satisfied for this object.");
+    if (customerScopePolicy.mode === "enforce") actions.add("block_automation");
   }
 
   if (readinessReasons.length === 0) {
@@ -312,7 +316,7 @@ function getCustomerScopePolicyViolations(
   policy: CustomerScopeGovernancePolicy
 ): Set<string> {
   const violations = new Set<string>();
-  if (policy.mode !== "score_only" && policy.mode !== "readiness") return violations;
+  if (policy.mode !== "score_only" && policy.mode !== "readiness" && policy.mode !== "enforce") return violations;
 
   const hasAssignmentField = Object.prototype.hasOwnProperty.call(object.fields, "customerAssignments");
   const assignments = hasAssignmentField && Array.isArray(object.fields.customerAssignments)
@@ -511,6 +515,10 @@ function getCustomerScopeFindingImpactMessage(policy: CustomerScopeGovernancePol
 
   if (policy.mode === "readiness") {
     return "This may affect automation readiness, but it does not block automation through the Gate.";
+  }
+
+  if (policy.mode === "enforce") {
+    return "This violates an enforcing CustomerScope blueprint policy. The evaluation recommends blocking automation, but actual blocking depends on Automation Inventory governance enforcement settings.";
   }
 
   return "Rovelink reports this as a visibility-only governance issue; it does not affect score or automation readiness yet.";

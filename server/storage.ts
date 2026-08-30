@@ -4,6 +4,7 @@ import {
   providerAccounts, syncRuns, externalObjects, groupCache, netboxVms, netboxInventorySources,
   cmdbAccounts, pipelines, pipelineMappings, pipelineRuns, organizations,
   governanceBlueprints, governanceBlueprintVersions, governanceEvaluationRuns, governanceObjectEvaluations,
+  customerScopes, customerScopeObjectAssignments,
   type User, type InsertUser,
   type Organization,
   type Project, type InsertProject,
@@ -26,9 +27,11 @@ import {
   type GovernanceBlueprintVersion, type InsertGovernanceBlueprintVersion,
   type GovernanceEvaluationRun, type InsertGovernanceEvaluationRun,
   type GovernanceObjectEvaluation, type InsertGovernanceObjectEvaluation,
+  type CustomerScope, type InsertCustomerScope,
+  type CustomerScopeObjectAssignment, type InsertCustomerScopeObjectAssignment,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, lte, and, lt, sql, inArray } from "drizzle-orm";
+import { eq, desc, gte, lte, and, lt, sql, inArray, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // Organization lookup (cross-tenant safe — used for existence checks in user creation)
@@ -168,6 +171,18 @@ export interface IStorage {
     objectType: string,
     objectId: string
   ): Promise<{ evaluation: GovernanceObjectEvaluation; run: GovernanceEvaluationRun | null } | undefined>;
+
+  // CustomerScope operations — orgId REQUIRED (tenant-owned, CMDB-source-scoped)
+  createCustomerScope(scope: InsertCustomerScope): Promise<CustomerScope>;
+  upsertCustomerScope(scope: InsertCustomerScope): Promise<CustomerScope>;
+  listCustomerScopes(orgId: string, sourceType?: string, sourceId?: string): Promise<CustomerScope[]>;
+  getCustomerScope(id: string, orgId: string): Promise<CustomerScope | undefined>;
+  getCustomerScopeByExternalId(orgId: string, sourceType: string, sourceId: string, externalId: string): Promise<CustomerScope | undefined>;
+  createCustomerScopeObjectAssignment(assignment: InsertCustomerScopeObjectAssignment): Promise<CustomerScopeObjectAssignment>;
+  upsertCustomerScopeObjectAssignment(assignment: InsertCustomerScopeObjectAssignment): Promise<CustomerScopeObjectAssignment>;
+  listCustomerScopeObjectAssignments(orgId: string, sourceType?: string, sourceId?: string): Promise<CustomerScopeObjectAssignment[]>;
+  listAssignmentsForObject(orgId: string, sourceType: string, sourceId: string, objectType: string, objectId: string): Promise<CustomerScopeObjectAssignment[]>;
+  listAssignmentsForCustomerScope(orgId: string, customerScopeId: string): Promise<CustomerScopeObjectAssignment[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1033,6 +1048,192 @@ export class DatabaseStorage implements IStorage {
 
     const run = await this.getGovernanceEvaluationRun(evaluation.runId, orgId);
     return { evaluation, run: run ?? null };
+  }
+
+  async createCustomerScope(scope: InsertCustomerScope): Promise<CustomerScope> {
+    const [created] = await db
+      .insert(customerScopes)
+      .values(scope)
+      .returning();
+    return created;
+  }
+
+  async upsertCustomerScope(scope: InsertCustomerScope): Promise<CustomerScope> {
+    const existing = await this.getCustomerScopeByExternalId(
+      scope.orgId,
+      scope.sourceType,
+      scope.sourceId,
+      scope.externalId,
+    );
+
+    if (existing) {
+      const [updated] = await db
+        .update(customerScopes)
+        .set({ ...scope, updatedAt: new Date() })
+        .where(and(
+          eq(customerScopes.id, existing.id),
+          eq(customerScopes.orgId, scope.orgId),
+        ))
+        .returning();
+      return updated;
+    }
+
+    return this.createCustomerScope(scope);
+  }
+
+  async listCustomerScopes(orgId: string, sourceType?: string, sourceId?: string): Promise<CustomerScope[]> {
+    const conditions = [eq(customerScopes.orgId, orgId)];
+    if (sourceType) conditions.push(eq(customerScopes.sourceType, sourceType));
+    if (sourceId) conditions.push(eq(customerScopes.sourceId, sourceId));
+
+    return await db
+      .select()
+      .from(customerScopes)
+      .where(and(...conditions))
+      .orderBy(desc(customerScopes.updatedAt), desc(customerScopes.createdAt));
+  }
+
+  async getCustomerScope(id: string, orgId: string): Promise<CustomerScope | undefined> {
+    const [scope] = await db
+      .select()
+      .from(customerScopes)
+      .where(and(eq(customerScopes.id, id), eq(customerScopes.orgId, orgId)));
+    return scope ?? undefined;
+  }
+
+  async getCustomerScopeByExternalId(
+    orgId: string,
+    sourceType: string,
+    sourceId: string,
+    externalId: string,
+  ): Promise<CustomerScope | undefined> {
+    const [scope] = await db
+      .select()
+      .from(customerScopes)
+      .where(and(
+        eq(customerScopes.orgId, orgId),
+        eq(customerScopes.sourceType, sourceType),
+        eq(customerScopes.sourceId, sourceId),
+        eq(customerScopes.externalId, externalId),
+      ));
+    return scope ?? undefined;
+  }
+
+  async createCustomerScopeObjectAssignment(
+    assignment: InsertCustomerScopeObjectAssignment,
+  ): Promise<CustomerScopeObjectAssignment> {
+    await this.assertCustomerScopeAssignmentIsOrgScoped(assignment);
+    const [created] = await db
+      .insert(customerScopeObjectAssignments)
+      .values(assignment)
+      .returning();
+    return created;
+  }
+
+  async upsertCustomerScopeObjectAssignment(
+    assignment: InsertCustomerScopeObjectAssignment,
+  ): Promise<CustomerScopeObjectAssignment> {
+    await this.assertCustomerScopeAssignmentIsOrgScoped(assignment);
+    const existing = await this.findCustomerScopeObjectAssignment(assignment);
+
+    if (existing) {
+      const [updated] = await db
+        .update(customerScopeObjectAssignments)
+        .set({ ...assignment, updatedAt: new Date() })
+        .where(and(
+          eq(customerScopeObjectAssignments.id, existing.id),
+          eq(customerScopeObjectAssignments.orgId, assignment.orgId),
+        ))
+        .returning();
+      return updated;
+    }
+
+    return this.createCustomerScopeObjectAssignment(assignment);
+  }
+
+  async listCustomerScopeObjectAssignments(
+    orgId: string,
+    sourceType?: string,
+    sourceId?: string,
+  ): Promise<CustomerScopeObjectAssignment[]> {
+    const conditions = [eq(customerScopeObjectAssignments.orgId, orgId)];
+    if (sourceType) conditions.push(eq(customerScopeObjectAssignments.sourceType, sourceType));
+    if (sourceId) conditions.push(eq(customerScopeObjectAssignments.sourceId, sourceId));
+
+    return await db
+      .select()
+      .from(customerScopeObjectAssignments)
+      .where(and(...conditions))
+      .orderBy(desc(customerScopeObjectAssignments.updatedAt), desc(customerScopeObjectAssignments.createdAt));
+  }
+
+  async listAssignmentsForObject(
+    orgId: string,
+    sourceType: string,
+    sourceId: string,
+    objectType: string,
+    objectId: string,
+  ): Promise<CustomerScopeObjectAssignment[]> {
+    return await db
+      .select()
+      .from(customerScopeObjectAssignments)
+      .where(and(
+        eq(customerScopeObjectAssignments.orgId, orgId),
+        eq(customerScopeObjectAssignments.sourceType, sourceType),
+        eq(customerScopeObjectAssignments.sourceId, sourceId),
+        eq(customerScopeObjectAssignments.objectType, objectType),
+        eq(customerScopeObjectAssignments.objectId, objectId),
+      ))
+      .orderBy(desc(customerScopeObjectAssignments.updatedAt), desc(customerScopeObjectAssignments.createdAt));
+  }
+
+  async listAssignmentsForCustomerScope(
+    orgId: string,
+    customerScopeId: string,
+  ): Promise<CustomerScopeObjectAssignment[]> {
+    const scope = await this.getCustomerScope(customerScopeId, orgId);
+    if (!scope) return [];
+
+    return await db
+      .select()
+      .from(customerScopeObjectAssignments)
+      .where(and(
+        eq(customerScopeObjectAssignments.orgId, orgId),
+        eq(customerScopeObjectAssignments.customerScopeId, customerScopeId),
+      ))
+      .orderBy(desc(customerScopeObjectAssignments.updatedAt), desc(customerScopeObjectAssignments.createdAt));
+  }
+
+  private async assertCustomerScopeAssignmentIsOrgScoped(
+    assignment: InsertCustomerScopeObjectAssignment,
+  ): Promise<void> {
+    if (!assignment.customerScopeId) return;
+    const scope = await this.getCustomerScope(assignment.customerScopeId, assignment.orgId);
+    if (!scope || scope.sourceType !== assignment.sourceType || scope.sourceId !== assignment.sourceId) {
+      throw new Error("CustomerScope assignment must reference a scope in the same organization and source");
+    }
+  }
+
+  private async findCustomerScopeObjectAssignment(
+    assignment: InsertCustomerScopeObjectAssignment,
+  ): Promise<CustomerScopeObjectAssignment | undefined> {
+    const customerScopeCondition = assignment.customerScopeId
+      ? eq(customerScopeObjectAssignments.customerScopeId, assignment.customerScopeId)
+      : isNull(customerScopeObjectAssignments.customerScopeId);
+
+    const [existing] = await db
+      .select()
+      .from(customerScopeObjectAssignments)
+      .where(and(
+        eq(customerScopeObjectAssignments.orgId, assignment.orgId),
+        eq(customerScopeObjectAssignments.sourceType, assignment.sourceType),
+        eq(customerScopeObjectAssignments.sourceId, assignment.sourceId),
+        eq(customerScopeObjectAssignments.objectType, assignment.objectType),
+        eq(customerScopeObjectAssignments.objectId, assignment.objectId),
+        customerScopeCondition,
+        eq(customerScopeObjectAssignments.relationship, assignment.relationship),
+      ));
+    return existing ?? undefined;
   }
 }
 

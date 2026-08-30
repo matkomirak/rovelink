@@ -21,6 +21,58 @@ export type {
   RelevanceRule,
 } from "./governance";
 
+export const customerScopeStrategyValues = [
+  "tenant",
+  "mandant",
+  "domain",
+  "organization",
+  "company",
+  "entity",
+  "account",
+  "customer",
+  "custom_field",
+  "tag",
+  "manual",
+] as const;
+
+export const customerScopeIsolationValues = [
+  "hard",
+  "logical",
+  "assignment",
+  "custom",
+] as const;
+
+export const ciCustomerRelationshipValues = [
+  "dedicated",
+  "shared",
+  "internal",
+  "unassigned",
+] as const;
+
+export const customerScopeAssignmentDerivedFromValues = [
+  "provider",
+  "mapping_rule",
+  "manual",
+] as const;
+
+export const customerScopeAssignmentConfidenceValues = [
+  "authoritative",
+  "mapped",
+  "manual",
+] as const;
+
+export const customerScopeStrategySchema = z.enum(customerScopeStrategyValues);
+export const customerScopeIsolationSchema = z.enum(customerScopeIsolationValues);
+export const ciCustomerRelationshipSchema = z.enum(ciCustomerRelationshipValues);
+export const customerScopeAssignmentDerivedFromSchema = z.enum(customerScopeAssignmentDerivedFromValues);
+export const customerScopeAssignmentConfidenceSchema = z.enum(customerScopeAssignmentConfidenceValues);
+
+export type CustomerScopeStrategy = z.infer<typeof customerScopeStrategySchema>;
+export type CustomerScopeIsolation = z.infer<typeof customerScopeIsolationSchema>;
+export type CiCustomerRelationship = z.infer<typeof ciCustomerRelationshipSchema>;
+export type CustomerScopeAssignmentDerivedFrom = z.infer<typeof customerScopeAssignmentDerivedFromSchema>;
+export type CustomerScopeAssignmentConfidence = z.infer<typeof customerScopeAssignmentConfidenceSchema>;
+
 // Organizations table for multi-tenancy
 export const organizations = pgTable("organizations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -443,6 +495,87 @@ export const netboxVmsRelations = relations(netboxVms, ({ one }) => ({
   }),
 }));
 
+// CustomerScopes represent provider-neutral customer/environment boundaries inside CMDB sources.
+// They are separate from Rovelink application organizations, which remain the security boundary.
+export const customerScopes = pgTable("customer_scopes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  sourceType: text("source_type").notNull(),
+  sourceId: varchar("source_id").notNull(),
+  externalId: text("external_id").notNull(),
+  name: text("name").notNull(),
+  displayName: text("display_name"),
+  strategy: text("strategy").$type<CustomerScopeStrategy>().notNull(),
+  isolation: text("isolation").$type<CustomerScopeIsolation>(),
+  parentExternalId: text("parent_external_id"),
+  metadata: jsonb("metadata").$type<Record<string, unknown> | null>().default(null),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqueCustomerScopeExternal: uniqueIndex("unique_customer_scope_external").on(
+    table.orgId,
+    table.sourceType,
+    table.sourceId,
+    table.externalId,
+  ),
+  idxCustomerScopesOrgSource: index("idx_customer_scopes_org_source").on(table.orgId, table.sourceType, table.sourceId),
+}));
+
+export const customerScopeObjectAssignments = pgTable("customer_scope_object_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  sourceType: text("source_type").notNull(),
+  sourceId: varchar("source_id").notNull(),
+  objectType: text("object_type").notNull(),
+  objectId: varchar("object_id").notNull(),
+  customerScopeId: varchar("customer_scope_id").references(() => customerScopes.id, { onDelete: "set null" }),
+  relationship: text("relationship").$type<CiCustomerRelationship>().notNull(),
+  derivedFrom: text("derived_from").$type<CustomerScopeAssignmentDerivedFrom>().notNull(),
+  confidence: text("confidence").$type<CustomerScopeAssignmentConfidence>().notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown> | null>().default(null),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqueCustomerScopeObjectAssignment: uniqueIndex("unique_customer_scope_object_assignment").on(
+    table.orgId,
+    table.sourceType,
+    table.sourceId,
+    table.objectType,
+    table.objectId,
+    table.customerScopeId,
+    table.relationship,
+  ),
+  idxCustomerScopeAssignmentsOrgObject: index("idx_customer_scope_assignments_org_object").on(
+    table.orgId,
+    table.sourceType,
+    table.sourceId,
+    table.objectType,
+    table.objectId,
+  ),
+  idxCustomerScopeAssignmentsOrgScope: index("idx_customer_scope_assignments_org_scope").on(table.orgId, table.customerScopeId),
+}));
+
+export const customerScopesRelations = relations(customerScopes, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [customerScopes.orgId],
+    references: [organizations.id],
+  }),
+  assignments: many(customerScopeObjectAssignments),
+}));
+
+export const customerScopeObjectAssignmentsRelations = relations(customerScopeObjectAssignments, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [customerScopeObjectAssignments.orgId],
+    references: [organizations.id],
+  }),
+  customerScope: one(customerScopes, {
+    fields: [customerScopeObjectAssignments.customerScopeId],
+    references: [customerScopes.id],
+  }),
+}));
+
 // Governance Blueprints - versioned CMDB governance policy definitions.
 export const governanceBlueprints = pgTable("governance_blueprints", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -712,6 +845,25 @@ export const insertGovernanceObjectEvaluationSchema = createInsertSchema(governa
   evaluatedAt: true,
 });
 
+export const insertCustomerScopeSchema = createInsertSchema(customerScopes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  strategy: customerScopeStrategySchema,
+  isolation: customerScopeIsolationSchema.nullable().optional(),
+});
+
+export const insertCustomerScopeObjectAssignmentSchema = createInsertSchema(customerScopeObjectAssignments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  relationship: ciCustomerRelationshipSchema,
+  derivedFrom: customerScopeAssignmentDerivedFromSchema,
+  confidence: customerScopeAssignmentConfidenceSchema,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -778,6 +930,12 @@ export type GovernanceEvaluationRun = typeof governanceEvaluationRuns.$inferSele
 
 export type InsertGovernanceObjectEvaluation = typeof governanceObjectEvaluations.$inferInsert;
 export type GovernanceObjectEvaluation = typeof governanceObjectEvaluations.$inferSelect;
+
+export type InsertCustomerScope = typeof customerScopes.$inferInsert;
+export type CustomerScope = typeof customerScopes.$inferSelect;
+
+export type InsertCustomerScopeObjectAssignment = typeof customerScopeObjectAssignments.$inferInsert;
+export type CustomerScopeObjectAssignment = typeof customerScopeObjectAssignments.$inferSelect;
 
 export const governanceEnforcementModeSchema = z.enum(["observe_only", "warn_only", "enforce"]);
 export const governanceReadinessStateSchema = z.enum(["ready", "not_ready"]);

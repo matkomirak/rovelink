@@ -1,6 +1,16 @@
 import type {
+  CiCustomerRelationship,
+  CustomerScopeAssignmentConfidence,
+  CustomerScopeAssignmentDerivedFrom,
   CustomerScopeIsolation,
   CustomerScopeStrategy,
+} from "./schema";
+import {
+  ciCustomerRelationshipValues,
+  customerScopeAssignmentConfidenceValues,
+  customerScopeAssignmentDerivedFromValues,
+  customerScopeIsolationValues,
+  customerScopeStrategyValues,
 } from "./schema";
 
 export interface ProviderCustomerMapping {
@@ -149,3 +159,150 @@ export function assertCustomerScopeStrategySupported(
   }
   return mapping;
 }
+
+export interface CustomerScopeResolverContext {
+  orgId: string;
+  sourceType: string;
+  sourceId: string;
+  providerKey: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DiscoveredCustomerScope {
+  externalId: string;
+  name: string;
+  displayName?: string;
+  strategy: CustomerScopeStrategy;
+  isolation?: CustomerScopeIsolation;
+  parentExternalId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ExternalCiCustomerInput extends CustomerScopeResolverContext {
+  objectType: string;
+  objectId: string;
+  externalId?: string;
+  name?: string;
+  raw?: unknown;
+  providerFields?: Record<string, unknown>;
+}
+
+export interface ResolvedCustomerScopeAssignment {
+  relationship: CiCustomerRelationship;
+  customerScopes: DiscoveredCustomerScope[];
+  derivedFrom: CustomerScopeAssignmentDerivedFrom;
+  confidence: CustomerScopeAssignmentConfidence;
+  metadata?: Record<string, unknown>;
+  reason?: string;
+}
+
+export interface CustomerScopeResolver {
+  providerKey: string;
+  discoverScopes(input: CustomerScopeResolverContext): Promise<DiscoveredCustomerScope[]>;
+  resolveCiScopes(input: ExternalCiCustomerInput): Promise<ResolvedCustomerScopeAssignment>;
+}
+
+function includesString(values: readonly string[], value: string): boolean {
+  return values.includes(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+export function validateDiscoveredCustomerScope(scope: DiscoveredCustomerScope): string[] {
+  const errors: string[] = [];
+
+  if (!isNonEmptyString(scope.externalId)) {
+    errors.push("discovered customer scope externalId is required");
+  }
+  if (!isNonEmptyString(scope.name)) {
+    errors.push("discovered customer scope name is required");
+  }
+  if (!includesString(customerScopeStrategyValues, scope.strategy)) {
+    errors.push(`unsupported customer scope strategy: ${scope.strategy}`);
+  }
+  if (scope.isolation && !includesString(customerScopeIsolationValues, scope.isolation)) {
+    errors.push(`unsupported customer scope isolation: ${scope.isolation}`);
+  }
+
+  return errors;
+}
+
+export function assertValidDiscoveredCustomerScope(scope: DiscoveredCustomerScope): DiscoveredCustomerScope {
+  const errors = validateDiscoveredCustomerScope(scope);
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
+  return scope;
+}
+
+export function validateResolvedCustomerScopeAssignment(
+  assignment: ResolvedCustomerScopeAssignment,
+): string[] {
+  const errors: string[] = [];
+
+  if (!includesString(ciCustomerRelationshipValues, assignment.relationship)) {
+    errors.push(`unsupported customer scope relationship: ${assignment.relationship}`);
+  }
+  if (!includesString(customerScopeAssignmentDerivedFromValues, assignment.derivedFrom)) {
+    errors.push(`unsupported customer scope assignment source: ${assignment.derivedFrom}`);
+  }
+  if (!includesString(customerScopeAssignmentConfidenceValues, assignment.confidence)) {
+    errors.push(`unsupported customer scope assignment confidence: ${assignment.confidence}`);
+  }
+  if (!Array.isArray(assignment.customerScopes)) {
+    errors.push("customerScopes must be an array");
+    return errors;
+  }
+
+  assignment.customerScopes.forEach((scope, index) => {
+    validateDiscoveredCustomerScope(scope).forEach((error) => {
+      errors.push(`customerScopes[${index}]: ${error}`);
+    });
+  });
+
+  if (assignment.relationship === "unassigned" && assignment.customerScopes.length > 0) {
+    errors.push("unassigned customer scope assignment must not include customer scopes");
+  }
+  if (assignment.relationship === "dedicated" && assignment.customerScopes.length !== 1) {
+    errors.push("dedicated customer scope assignment must include exactly one customer scope");
+  }
+  if (assignment.relationship === "shared" && assignment.customerScopes.length < 1) {
+    errors.push("shared customer scope assignment must include at least one customer scope");
+  }
+
+  return errors;
+}
+
+export function assertValidResolvedCustomerScopeAssignment(
+  assignment: ResolvedCustomerScopeAssignment,
+): ResolvedCustomerScopeAssignment {
+  const errors = validateResolvedCustomerScopeAssignment(assignment);
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
+  return assignment;
+}
+
+export function createDefaultCustomerScopeResolver(
+  providerKey = "generic_manual",
+): CustomerScopeResolver {
+  return {
+    providerKey,
+    async discoverScopes() {
+      return [];
+    },
+    async resolveCiScopes() {
+      return {
+        relationship: "unassigned",
+        customerScopes: [],
+        derivedFrom: "manual",
+        confidence: "manual",
+        reason: `No CustomerScope resolver is configured for provider ${providerKey}; CI remains explicitly unassigned.`,
+      };
+    },
+  };
+}
+
+export const defaultCustomerScopeResolver = createDefaultCustomerScopeResolver();

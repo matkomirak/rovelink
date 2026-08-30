@@ -70,6 +70,20 @@ function dedicatedCustomerScopeAssignment(overrides: Record<string, unknown> = {
   };
 }
 
+function withCustomerScopePolicy(
+  overrides: Partial<GovernanceBlueprintRules["customerScope"]> = {}
+): GovernanceBlueprintRules {
+  return {
+    ...baseRules,
+    customerScope: {
+      ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
+      mode: "score_only",
+      scoreWeight: 12,
+      ...overrides,
+    },
+  };
+}
+
 describe("governanceBlueprintRulesSchema", () => {
   it("rejects unknown keys", () => {
     assert.throws(
@@ -286,10 +300,10 @@ describe("evaluateGovernanceObject", () => {
     assert.deepEqual(legacyResult.automationReadiness, visibilityOnlyResult.automationReadiness);
   });
 
-  it("does not apply CustomerScope policy modes to score or readiness yet", () => {
+  it("does not apply CustomerScope readiness and enforce policy modes yet", () => {
     const baseline = evaluateGovernanceObject(withCustomerAssignments([]), baseRules);
 
-    for (const mode of ["score_only", "readiness", "enforce"] as const) {
+    for (const mode of ["readiness", "enforce"] as const) {
       const result = evaluateGovernanceObject(
         withCustomerAssignments([]),
         {
@@ -306,6 +320,139 @@ describe("evaluateGovernanceObject", () => {
       assert.deepEqual(result.automationReadiness, baseline.automationReadiness);
       assert.ok(!result.recommendedActions.includes("block_automation"));
     }
+  });
+
+  it("does not reduce score_only score for a valid dedicated authoritative CustomerScope", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment()]),
+      withCustomerScopePolicy(),
+    );
+
+    assert.equal(result.scores.dataManagement, 100);
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
+    assert.ok(!result.recommendedActions.includes("block_automation"));
+  });
+
+  it("reduces score_only dataManagementScore when CustomerScope assignment is missing", () => {
+    const result = evaluateGovernanceObject(withCustomerAssignments([]), withCustomerScopePolicy());
+
+    assert.equal(result.scores.dataManagement, 88);
+    assert.equal(result.scores.governance, 94);
+    assert.equal(result.scores.ownership, 100);
+    assert.equal(result.automationReadiness.ready, true);
+    assert.deepEqual(result.automationReadiness.reasons, ["Governance blueprint checks passed."]);
+    assert.ok(!result.recommendedActions.includes("block_automation"));
+  });
+
+  it("keeps score_only score unchanged when scoreWeight is 0", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([]),
+      withCustomerScopePolicy({ scoreWeight: 0 }),
+    );
+
+    assert.equal(result.scores.dataManagement, 100);
+    assert.equal(result.scores.governance, 100);
+    assert.equal(result.automationReadiness.ready, true);
+  });
+
+  it("reduces score_only dataManagementScore when unassigned is not allowed", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([dedicatedCustomerScopeAssignment({
+        relationship: "unassigned",
+        customerScopeId: null,
+        customerScope: null,
+      })]),
+      withCustomerScopePolicy({ allowUnassigned: false }),
+    );
+
+    assert.equal(result.scores.dataManagement, 88);
+    assert.equal(result.scores.governance, 94);
+    assert.ok(!result.recommendedActions.includes("block_automation"));
+  });
+
+  it("handles score_only internal assignment according to allowInternal", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment({
+      relationship: "internal",
+      customerScopeId: null,
+      customerScope: null,
+    })]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({ allowInternal: true }));
+    const disallowed = evaluateGovernanceObject(object, withCustomerScopePolicy({ allowInternal: false }));
+
+    assert.equal(allowed.scores.dataManagement, 100);
+    assert.equal(disallowed.scores.dataManagement, 88);
+    assert.ok(!allowed.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"));
+    assert.ok(!disallowed.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"));
+  });
+
+  it("handles score_only shared assignment according to allowShared", () => {
+    const object = withCustomerAssignments([
+      dedicatedCustomerScopeAssignment({ relationship: "shared" }),
+      dedicatedCustomerScopeAssignment({
+        id: "assignment-2",
+        relationship: "shared",
+        customerScopeId: "scope-2",
+        customerScope: {
+          id: "scope-2",
+          externalId: "21",
+          name: "Finance",
+          displayName: "Finance",
+          strategy: "tenant",
+          isolation: "assignment",
+        },
+      }),
+    ]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({ allowShared: true }));
+    const disallowed = evaluateGovernanceObject(object, withCustomerScopePolicy({ allowShared: false }));
+
+    assert.equal(allowed.scores.dataManagement, 100);
+    assert.equal(disallowed.scores.dataManagement, 88);
+    assert.equal(disallowed.automationReadiness.ready, true);
+  });
+
+  it("reduces score_only score for low confidence only when authoritative confidence is required", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment({ confidence: "mapped" })]);
+
+    const allowed = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      requireAuthoritativeConfidence: false,
+    }));
+    const required = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      requireAuthoritativeConfidence: true,
+    }));
+
+    assert.equal(allowed.scores.dataManagement, 100);
+    assert.equal(required.scores.dataManagement, 88);
+    assert.ok(required.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE"));
+  });
+
+  it("reduces score_only score for missing CustomerScope reference when configured", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment({ customerScope: null })]);
+
+    const visibility = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      treatMissingScopeReferenceAsBlocker: false,
+    }));
+    const scored = evaluateGovernanceObject(object, withCustomerScopePolicy({
+      treatMissingScopeReferenceAsBlocker: true,
+    }));
+
+    assert.equal(visibility.scores.dataManagement, 100);
+    assert.equal(scored.scores.dataManagement, 88);
+    assert.ok(scored.findings.some((finding) => finding.code === "CUSTOMER_SCOPE_NOT_FOUND"));
+  });
+
+  it("bounds score_only CustomerScope score penalty", () => {
+    const result = evaluateGovernanceObject(
+      withCustomerAssignments([]),
+      withCustomerScopePolicy({ scoreWeight: 150 }),
+    );
+
+    assert.equal(result.scores.dataManagement, 0);
+    assert.equal(result.scores.governance, 50);
+    assert.equal(result.automationReadiness.ready, true);
+    assert.ok(!result.recommendedActions.includes("block_automation"));
   });
 
   it("creates CUSTOMER_ASSIGNMENT_UNASSIGNED without treating internal as unassigned", () => {

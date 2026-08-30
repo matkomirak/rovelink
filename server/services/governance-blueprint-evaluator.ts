@@ -144,7 +144,7 @@ export function evaluateGovernanceObject(
   const relevanceTotal = Object.values(rules.relevance).reduce((sum, value) => sum + value, 0);
   const highRelevance = relevanceTotal >= rules.reporting.highPriorityRelevanceScore;
 
-  const dataManagementScore = scoreWeightedRules(rules.dataManagement, (rule) => {
+  const baseDataManagementScore = scoreWeightedRules(rules.dataManagement, (rule) => {
     const value = getFieldValue(object, rule.fieldKey);
     const present = hasGovernanceValue(value);
 
@@ -218,6 +218,13 @@ export function evaluateGovernanceObject(
     return 1;
   });
 
+  const baseGovernanceScore = roundScore((baseDataManagementScore + ownershipScore) / 2);
+  const customerScopePolicyViolations = getCustomerScopePolicyViolations(object, customerScopePolicy);
+  const dataManagementScore = applyCustomerScopeScoreOnlyPenalty(
+    baseDataManagementScore,
+    customerScopePolicy,
+    customerScopePolicyViolations
+  );
   const governanceScore = roundScore((dataManagementScore + ownershipScore) / 2);
   const relevanceWeightedPriority = calculatePriority(relevanceTotal, governanceScore);
   const readinessReasons: string[] = [];
@@ -240,10 +247,10 @@ export function evaluateGovernanceObject(
     automationReady = false;
   }
 
-  if (governanceScore < rules.reporting.minimumGovernanceScoreForAutomation) {
+  if (baseGovernanceScore < rules.reporting.minimumGovernanceScoreForAutomation) {
     automationReady = false;
     readinessReasons.push(
-      `Governance score ${governanceScore} is below automation threshold ${rules.reporting.minimumGovernanceScoreForAutomation}.`
+      `Governance score ${baseGovernanceScore} is below automation threshold ${rules.reporting.minimumGovernanceScoreForAutomation}.`
     );
     if (highRelevance) actions.add("block_automation");
   }
@@ -281,6 +288,71 @@ export function getEffectiveCustomerScopeGovernancePolicy(
   rules: Partial<Pick<GovernanceBlueprintRules, "customerScope">>
 ): CustomerScopeGovernancePolicy {
   return rules.customerScope ?? DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY;
+}
+
+function applyCustomerScopeScoreOnlyPenalty(
+  dataManagementScore: number,
+  policy: CustomerScopeGovernancePolicy,
+  violations: Set<string>
+): number {
+  if (policy.mode !== "score_only" || policy.scoreWeight <= 0 || violations.size === 0) {
+    return dataManagementScore;
+  }
+
+  return roundScore(dataManagementScore - policy.scoreWeight);
+}
+
+function getCustomerScopePolicyViolations(
+  object: NormalizedGovernanceObject,
+  policy: CustomerScopeGovernancePolicy
+): Set<string> {
+  const violations = new Set<string>();
+  if (policy.mode !== "score_only") return violations;
+
+  const hasAssignmentField = Object.prototype.hasOwnProperty.call(object.fields, "customerAssignments");
+  const assignments = hasAssignmentField && Array.isArray(object.fields.customerAssignments)
+    ? object.fields.customerAssignments
+    : [];
+
+  if (policy.requireCustomerScopeAssignment && assignments.length === 0) {
+    violations.add("requireCustomerScopeAssignment");
+  }
+
+  for (const assignment of assignments) {
+    const record = isRecord(assignment) ? assignment : {};
+    const relationship = stringValue(record.relationship);
+    const confidence = stringValue(record.confidence);
+    const customerScope = isRecord(record.customerScope) ? record.customerScope : null;
+    const customerScopeId = stringValue(record.customerScopeId);
+    const hasCustomerScope = Boolean(customerScope || customerScopeId);
+
+    if (!relationship || !CUSTOMER_ASSIGNMENT_RELATIONSHIPS.has(relationship)) continue;
+
+    if (relationship === "unassigned" && !policy.allowUnassigned) {
+      violations.add("allowUnassigned");
+    }
+
+    if (relationship === "internal" && !policy.allowInternal) {
+      violations.add("allowInternal");
+    }
+
+    if (relationship === "shared" && !policy.allowShared) {
+      violations.add("allowShared");
+    }
+
+    if (policy.requireAuthoritativeConfidence && confidence !== "authoritative") {
+      violations.add("requireAuthoritativeConfidence");
+    }
+
+    if (
+      policy.treatMissingScopeReferenceAsBlocker &&
+      ((customerScopeId && !customerScope) || ((relationship === "dedicated" || relationship === "shared") && !hasCustomerScope))
+    ) {
+      violations.add("treatMissingScopeReferenceAsBlocker");
+    }
+  }
+
+  return violations;
 }
 
 function scoreWeightedRules<T extends { weight?: number }>(

@@ -175,7 +175,10 @@ describe("evaluateGovernanceObject", () => {
     assert.ok(result.findings.some((finding) => (
       finding.code === "CUSTOMER_SCOPE_MISSING" &&
       finding.severity === "warning" &&
-      finding.layer === "data_management"
+      finding.layer === "data_management" &&
+      finding.message.includes("No CustomerScope assignment found") &&
+      finding.message.includes("visibility-only") &&
+      finding.message.includes("does not affect score or automation readiness yet")
     )));
     assert.equal(result.scores.governance, 100);
     assert.equal(result.scores.dataManagement, 100);
@@ -201,7 +204,11 @@ describe("evaluateGovernanceObject", () => {
       baseRules,
     );
 
-    assert.ok(unassigned.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"));
+    assert.ok(unassigned.findings.some((finding) => (
+      finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED" &&
+      finding.message.includes("Object is explicitly unassigned") &&
+      finding.message.includes("visibility-only")
+    )));
     assert.ok(!internal.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_UNASSIGNED"));
     assert.equal(unassigned.automationReadiness.ready, true);
     assert.equal(internal.automationReadiness.ready, true);
@@ -239,7 +246,11 @@ describe("evaluateGovernanceObject", () => {
       baseRules,
     );
 
-    assert.ok(result.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE"));
+    assert.ok(result.findings.some((finding) => (
+      finding.code === "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE" &&
+      finding.message.includes("confidence is not authoritative") &&
+      finding.message.includes("visibility-only")
+    )));
     assert.equal(result.scores.governance, 100);
     assert.equal(result.automationReadiness.ready, true);
     assert.ok(!result.recommendedActions.includes("block_automation"));
@@ -254,7 +265,11 @@ describe("evaluateGovernanceObject", () => {
       baseRules,
     );
 
-    assert.ok(result.findings.some((finding) => finding.code === "CUSTOMER_ASSIGNMENT_INVALID"));
+    assert.ok(result.findings.some((finding) => (
+      finding.code === "CUSTOMER_ASSIGNMENT_INVALID" &&
+      finding.message.includes("CustomerScope assignment is inconsistent") &&
+      finding.message.includes("visibility-only")
+    )));
     assert.equal(result.scores.governance, 100);
     assert.equal(result.automationReadiness.ready, true);
   });
@@ -265,7 +280,11 @@ describe("evaluateGovernanceObject", () => {
       baseRules,
     );
 
-    assert.ok(result.findings.some((finding) => finding.code === "CUSTOMER_SCOPE_NOT_FOUND"));
+    assert.ok(result.findings.some((finding) => (
+      finding.code === "CUSTOMER_SCOPE_NOT_FOUND" &&
+      finding.message.includes("CustomerScope reference could not be resolved") &&
+      finding.message.includes("visibility-only")
+    )));
     assert.equal(result.scores.governance, 100);
     assert.equal(result.automationReadiness.ready, true);
   });

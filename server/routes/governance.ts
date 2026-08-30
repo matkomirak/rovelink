@@ -864,13 +864,18 @@ function summarizeEvaluationResults(results: GovernanceEvaluationResult[]) {
   const averageGovernanceScore = results.length
     ? Math.round(results.reduce((sum, result) => sum + result.scores.governance, 0) / results.length)
     : 0;
-  const findingCounts = new Map<string, { code: string; count: number; message: string }>();
+  const findingCounts = new Map<string, { code: string; count: number; message: string; severityRank: number }>();
 
   for (const result of results) {
     for (const finding of result.findings) {
       const existing = findingCounts.get(finding.code);
-      if (existing) existing.count += 1;
-      else findingCounts.set(finding.code, { code: finding.code, count: 1, message: finding.message });
+      const severityRank = findingSeverityRank(finding.severity);
+      if (existing) {
+        existing.count += 1;
+        existing.severityRank = Math.max(existing.severityRank, severityRank);
+      } else {
+        findingCounts.set(finding.code, { code: finding.code, count: 1, message: finding.message, severityRank });
+      }
     }
   }
 
@@ -879,8 +884,18 @@ function summarizeEvaluationResults(results: GovernanceEvaluationResult[]) {
     warningCount,
     blockedCount,
     averageGovernanceScore,
-    topFindings: Array.from(findingCounts.values()).sort((a, b) => b.count - a.count).slice(0, 5),
+    topFindings: Array.from(findingCounts.values())
+      .sort((a, b) => b.severityRank - a.severityRank || b.count - a.count || a.code.localeCompare(b.code))
+      .slice(0, 5)
+      .map(({ severityRank: _severityRank, ...finding }) => finding),
   };
+}
+
+function findingSeverityRank(severity: string): number {
+  if (severity === "blocker") return 3;
+  if (severity === "warning") return 2;
+  if (severity === "info") return 1;
+  return 0;
 }
 
 function firstSourceId(vms: NetboxVm[]): string | null {

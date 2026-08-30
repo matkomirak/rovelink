@@ -331,7 +331,7 @@ function addCustomerScopeFindings(
       severity: "warning",
       code: "CUSTOMER_SCOPE_MISSING",
       fieldKey: "customerAssignments",
-      message: "No CustomerScope assignment is available for this object.",
+      message: "No CustomerScope assignment found. This object has no customer/environment assignment. Rovelink reports this as a visibility-only governance issue; it does not affect score or automation readiness yet.",
       recommendedActions: ["report", "enrich"],
     });
     return;
@@ -351,7 +351,7 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_ASSIGNMENT_INVALID",
         fieldKey: "customerAssignments",
-        message: "CustomerScope assignment has an invalid or missing relationship.",
+        message: "CustomerScope assignment is inconsistent. The assignment relationship is missing or unsupported, so Rovelink cannot interpret the customer/environment boundary. This is visibility-only and does not affect score or automation readiness yet.",
         recommendedActions: ["validate"],
       });
       continue;
@@ -364,7 +364,7 @@ function addCustomerScopeFindings(
           severity: "warning",
           code: "CUSTOMER_ASSIGNMENT_INVALID",
           fieldKey: "customerAssignments",
-          message: "CustomerScope assignment is unassigned but also references a customer scope.",
+          message: "CustomerScope assignment is inconsistent. The assignment is marked unassigned but also references a CustomerScope, so the relationship and scope reference do not match expected rules. This is visibility-only and does not affect score or automation readiness yet.",
           recommendedActions: ["validate"],
         });
       } else {
@@ -373,7 +373,7 @@ function addCustomerScopeFindings(
           severity: "warning",
           code: "CUSTOMER_ASSIGNMENT_UNASSIGNED",
           fieldKey: "customerAssignments",
-          message: "Object is explicitly unassigned to a CustomerScope.",
+          message: "Object is explicitly unassigned. The source indicates no customer/environment assignment for this object. Rovelink reports this as a visibility-only governance issue; it does not affect score or automation readiness yet.",
           recommendedActions: ["report", "enrich"],
         });
       }
@@ -386,7 +386,7 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_ASSIGNMENT_INVALID",
         fieldKey: "customerAssignments",
-        message: `CustomerScope assignment relationship ${relationship} requires a customer scope.`,
+        message: `CustomerScope assignment is inconsistent. The ${relationship} relationship requires a CustomerScope reference, but none was resolved. This is visibility-only and does not affect score or automation readiness yet.`,
         recommendedActions: ["validate"],
       });
       continue;
@@ -398,7 +398,7 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_SCOPE_NOT_FOUND",
         fieldKey: "customerAssignments",
-        message: "CustomerScope assignment references a scope that was not found in the selected source.",
+        message: "CustomerScope reference could not be resolved. The assignment references a CustomerScope that was not found for this CMDB source. This is visibility-only and does not affect score or automation readiness yet.",
         recommendedActions: ["validate"],
       });
     }
@@ -409,7 +409,7 @@ function addCustomerScopeFindings(
         severity: "warning",
         code: "CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE",
         fieldKey: "customerAssignments",
-        message: `CustomerScope assignment confidence is ${confidence}, not authoritative.`,
+        message: `CustomerScope assignment confidence is not authoritative. The assignment exists but confidence is ${confidence}, so it should be reviewed before using it for policy. This is visibility-only and does not affect score or automation readiness yet.`,
         recommendedActions: ["validate"],
       });
     }

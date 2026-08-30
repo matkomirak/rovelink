@@ -924,6 +924,43 @@ describe("governance routes", () => {
     )));
   });
 
+  it("top findings prioritize severe blockers over higher-volume CustomerScope warnings", async () => {
+    const { blueprint } = await createDefaultBlueprint(req, ORG_A);
+    for (let index = 0; index < 3; index += 1) {
+      storage.vms.push({
+        id: `vm-alpha-top-findings-${index}`,
+        sourceId: `${ORG_A}-source`,
+        netboxId: 170 + index,
+        name: `alpha-top-findings-${index}`,
+        ip: `192.0.2.17${index}`,
+        operatingSystem: "linux",
+        customFields: {
+          tenant: "alpha",
+          role: index === 0 ? "" : "app",
+          automatable: true,
+          provider_state: "present",
+          technical_owner: "platform",
+          service_owner: "payments",
+        },
+        tags: [],
+        lastImportedAt: new Date(),
+      });
+    }
+
+    const response = await req
+      .post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+
+    assert.equal(response.body.topFindings[0].code, "required_data_missing");
+    assert.equal(response.body.topFindings.find((finding: any) => finding.code === "CUSTOMER_SCOPE_MISSING").count, 3);
+    assert.match(
+      response.body.topFindings.find((finding: any) => finding.code === "CUSTOMER_SCOPE_MISSING").message,
+      /visibility-only governance issue/,
+    );
+  });
+
   it("viewer can list governance NetBox sources without tokens", async () => {
     storage.vms.push({
       id: "vm-alpha-source-summary",

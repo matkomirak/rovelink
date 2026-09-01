@@ -171,6 +171,12 @@ export interface IStorage {
     objectType: string,
     objectId: string
   ): Promise<{ evaluation: GovernanceObjectEvaluation; run: GovernanceEvaluationRun | null } | undefined>;
+  listLatestGovernanceEvaluationsForSourceObjects(
+    orgId: string,
+    sourceId: string,
+    objectType: string,
+    objectIds: string[],
+  ): Promise<Array<{ evaluation: GovernanceObjectEvaluation; run: GovernanceEvaluationRun }>>;
 
   // CustomerScope operations — orgId REQUIRED (tenant-owned, CMDB-source-scoped)
   createCustomerScope(scope: InsertCustomerScope): Promise<CustomerScope>;
@@ -1048,6 +1054,40 @@ export class DatabaseStorage implements IStorage {
 
     const run = await this.getGovernanceEvaluationRun(evaluation.runId, orgId);
     return { evaluation, run: run ?? null };
+  }
+
+  async listLatestGovernanceEvaluationsForSourceObjects(
+    orgId: string,
+    sourceId: string,
+    objectType: string,
+    objectIds: string[],
+  ): Promise<Array<{ evaluation: GovernanceObjectEvaluation; run: GovernanceEvaluationRun }>> {
+    if (objectIds.length === 0) return [];
+
+    const rows = await db
+      .select({
+        evaluation: governanceObjectEvaluations,
+        run: governanceEvaluationRuns,
+      })
+      .from(governanceObjectEvaluations)
+      .innerJoin(governanceEvaluationRuns, eq(governanceObjectEvaluations.runId, governanceEvaluationRuns.id))
+      .where(and(
+        eq(governanceObjectEvaluations.orgId, orgId),
+        eq(governanceEvaluationRuns.orgId, orgId),
+        eq(governanceEvaluationRuns.netboxSourceId, sourceId),
+        eq(governanceObjectEvaluations.objectType, objectType),
+        inArray(governanceObjectEvaluations.objectId, objectIds),
+      ))
+      .orderBy(desc(governanceObjectEvaluations.evaluatedAt));
+
+    const latestByObjectId = new Map<string, { evaluation: GovernanceObjectEvaluation; run: GovernanceEvaluationRun }>();
+    for (const row of rows) {
+      const objectId = row.evaluation.objectId;
+      if (!objectId || latestByObjectId.has(objectId)) continue;
+      latestByObjectId.set(objectId, row);
+    }
+
+    return Array.from(latestByObjectId.values());
   }
 
   async createCustomerScope(scope: InsertCustomerScope): Promise<CustomerScope> {

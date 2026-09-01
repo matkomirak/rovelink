@@ -14,7 +14,7 @@ import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
 import { sanitizeGitSyncError, syncGitProject } from "./services/git-project-sync";
-import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema, type CustomerScope, type CustomerScopeObjectAssignment } from "@shared/schema";
+import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema, type CustomerScope, type CustomerScopeObjectAssignment, type GovernanceObjectEvaluation } from "@shared/schema";
 import { db } from "./db";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -291,6 +291,117 @@ function summarizeCustomerScopeAssignments(assignments: CustomerScopeObjectAssig
     derivedFromCounts,
     confidenceCounts,
     latestLastSyncedAt,
+  };
+}
+
+function assignmentFreshness(assignment: CustomerScopeObjectAssignment): number {
+  return latestDate(assignment.updatedAt, assignment.lastSyncedAt, assignment.createdAt)?.getTime() ?? 0;
+}
+
+function selectCurrentCustomerScopeAssignments(assignments: CustomerScopeObjectAssignment[]) {
+  const selectedByObjectId = new Map<string, CustomerScopeObjectAssignment[]>();
+
+  for (const assignment of [...assignments].sort((a, b) => assignmentFreshness(b) - assignmentFreshness(a))) {
+    const current = selectedByObjectId.get(assignment.objectId);
+    if (!current) {
+      selectedByObjectId.set(assignment.objectId, [assignment]);
+      continue;
+    }
+    if (assignment.relationship === "shared" && current.every((existing) => existing.relationship === "shared")) {
+      current.push(assignment);
+    }
+  }
+
+  return Array.from(selectedByObjectId.values()).flat();
+}
+
+function findingSeverityRank(severity?: string): number {
+  if (severity === "blocker") return 3;
+  if (severity === "warning") return 2;
+  if (severity === "info") return 1;
+  return 0;
+}
+
+function summarizeCustomerScopeGovernance(
+  params: {
+    sourceId: string;
+    customerScopeId: string | null;
+    customerScopeName: string;
+    objectIds: string[];
+    evaluations: GovernanceObjectEvaluation[];
+    unassigned: boolean;
+  },
+) {
+  const findingCounts: CountMap = {};
+  const topFindingCounts = new Map<string, { code: string; count: number; message: string; severity?: string; severityRank: number }>();
+  let latestEvaluationRunId: string | null = null;
+  let latestEvaluatedAt: Date | null = null;
+  let governanceScoreTotal = 0;
+  let readyCount = 0;
+  let notReadyCount = 0;
+  let blockAutomationRecommendationCount = 0;
+
+  for (const evaluation of params.evaluations) {
+    governanceScoreTotal += evaluation.governanceScore;
+    if (evaluation.automationReady) {
+      readyCount += 1;
+    } else {
+      notReadyCount += 1;
+    }
+    if (Array.isArray(evaluation.recommendedActions) && evaluation.recommendedActions.includes("block_automation")) {
+      blockAutomationRecommendationCount += 1;
+    }
+    if (!latestEvaluatedAt || evaluation.evaluatedAt > latestEvaluatedAt) {
+      latestEvaluatedAt = evaluation.evaluatedAt;
+      latestEvaluationRunId = evaluation.runId;
+    }
+
+    const findings = Array.isArray(evaluation.findings) ? evaluation.findings : [];
+    for (const finding of findings) {
+      if (!finding || typeof finding !== "object") continue;
+      const code = typeof finding.code === "string" ? finding.code : undefined;
+      if (!code) continue;
+      const message = typeof finding.message === "string" ? finding.message : code;
+      const severity = typeof finding.severity === "string" ? finding.severity : undefined;
+      const severityRank = findingSeverityRank(severity);
+      findingCounts[code] = (findingCounts[code] ?? 0) + 1;
+      const existing = topFindingCounts.get(code);
+      if (existing) {
+        existing.count += 1;
+        if (severityRank > existing.severityRank) {
+          existing.severity = severity;
+          existing.severityRank = severityRank;
+        }
+      } else {
+        topFindingCounts.set(code, { code, count: 1, message, severity, severityRank });
+      }
+    }
+  }
+
+  const evaluatedObjectCount = params.evaluations.length;
+  const objectCount = params.objectIds.length;
+
+  return {
+    sourceId: params.sourceId,
+    customerScopeId: params.customerScopeId,
+    customerScopeName: params.customerScopeName,
+    objectType: "netbox_vm",
+    objectCount,
+    assignedObjectCount: params.unassigned ? 0 : objectCount,
+    unassignedObjectCount: params.unassigned ? objectCount : 0,
+    evaluatedObjectCount,
+    unevaluatedObjectCount: Math.max(0, objectCount - evaluatedObjectCount),
+    latestEvaluationRunId,
+    latestEvaluatedAt,
+    averageGovernanceScore: evaluatedObjectCount > 0 ? Math.round(governanceScoreTotal / evaluatedObjectCount) : null,
+    readyCount,
+    notReadyCount,
+    blockAutomationRecommendationCount,
+    findingCounts,
+    topFindings: Array.from(topFindingCounts.values())
+      .sort((a, b) => b.severityRank - a.severityRank || b.count - a.count || a.code.localeCompare(b.code))
+      .slice(0, 5)
+      .map(({ severityRank: _severityRank, ...finding }) => finding),
   };
 }
 
@@ -1030,6 +1141,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
     } catch (error: any) {
       sendInternalError(res, error, "cmdbs.customer-scopes.list", "Failed to fetch CMDB customer scopes");
+    }
+  });
+
+  app.get("/api/cmdbs/:id/customer-scopes/:scopeId/governance-summary", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      if (cmdb.kind !== "netbox") {
+        return sendClientError(res, 400, "CustomerScope governance summaries are only supported for NetBox CMDBs");
+      }
+
+      const sourceType = "netbox_inventory_source";
+      const sourceId = cmdb.id;
+      const scopeId = req.params.scopeId;
+      const isUnassigned = scopeId === "unassigned";
+      let scope: CustomerScope | undefined;
+
+      if (!isUnassigned) {
+        scope = await storage.getCustomerScope(scopeId, req.orgId!);
+        if (!scope || scope.sourceType !== sourceType || scope.sourceId !== sourceId) {
+          return res.status(404).json({ message: "Customer scope not found" });
+        }
+      }
+
+      const [cachedVms, sourceAssignments] = await Promise.all([
+        getCachedNetboxVmsForCmdb(sourceId, req.orgId!),
+        storage.listCustomerScopeObjectAssignments(req.orgId!, sourceType, sourceId),
+      ]);
+      const cachedVmIds = new Set(cachedVms.map((vm) => vm.id));
+      const matchingAssignments = sourceAssignments.filter((assignment) => (
+        assignment.objectType === "netbox_vm" &&
+        cachedVmIds.has(assignment.objectId) &&
+        (isUnassigned
+          ? assignment.customerScopeId === null && assignment.relationship === "unassigned"
+          : assignment.customerScopeId === scopeId)
+      ));
+      const currentAssignments = selectCurrentCustomerScopeAssignments(matchingAssignments);
+      const objectIds = Array.from(new Set(currentAssignments.map((assignment) => assignment.objectId)));
+      const latestEvaluations = await storage.listLatestGovernanceEvaluationsForSourceObjects(
+        req.orgId!,
+        sourceId,
+        "netbox_vm",
+        objectIds,
+      );
+
+      res.json(summarizeCustomerScopeGovernance({
+        sourceId,
+        customerScopeId: isUnassigned ? null : scopeId,
+        customerScopeName: isUnassigned ? "Unassigned" : scope?.displayName ?? scope?.name ?? scopeId,
+        objectIds,
+        evaluations: latestEvaluations.map((entry) => entry.evaluation),
+        unassigned: isUnassigned,
+      }));
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.customer-scopes.governance-summary", "Failed to fetch CustomerScope governance summary");
     }
   });
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { ArrowLeft, ClipboardCheck, Loader2, PlayCircle, RefreshCw, ShieldCheck } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -139,9 +140,11 @@ function PolicySwitch({
 
 function CustomerScopePolicyCard({
   activeVersion,
+  hasNewerInactiveVersion,
   onEdit,
 }: {
   activeVersion: GovernanceBlueprintVersion | undefined;
+  hasNewerInactiveVersion: boolean;
   onEdit: () => void;
 }) {
   if (!activeVersion) {
@@ -174,7 +177,7 @@ function CustomerScopePolicyCard({
               CustomerScope Policy
             </CardTitle>
             <CardDescription>
-              Effective policy for active version v{activeVersion.version}. Saving creates a new inactive blueprint version.
+              Effective policy for active version v{activeVersion.version}.
             </CardDescription>
           </div>
           <Button variant="outline" onClick={onEdit} data-testid="button-edit-customer-scope-policy">
@@ -193,6 +196,23 @@ function CustomerScopePolicyCard({
           <p className="mt-2 text-xs font-medium">
             Blueprint enforce recommends blocking. Automation Inventory enforce decides whether automation actually blocks.
           </p>
+          {policy.mode === "enforce" && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Operational blocking still depends on Automation Inventory governance enforcement settings.
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+          <p className="font-medium">Evaluations currently use this active version only.</p>
+          <p className="mt-1 text-muted-foreground">
+            Saving policy changes creates a new inactive version. Activate that version before running evaluations with the changed policy.
+          </p>
+          {hasNewerInactiveVersion && (
+            <p className="mt-2 font-medium">
+              A newer inactive version exists. It will not affect evaluations until activated.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -410,6 +430,7 @@ export default function GovernanceBlueprintDetail() {
   const { toast } = useToast();
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [policyDialogOpen, setPolicyDialogOpen] = useState(false);
+  const [savedPolicyVersionId, setSavedPolicyVersionId] = useState<string | null>(null);
 
   const {
     data: blueprint,
@@ -447,10 +468,17 @@ export default function GovernanceBlueprintDetail() {
     () => versions.find((version) => version.id === blueprint?.activeVersionId),
     [blueprint?.activeVersionId, versions],
   );
+  const newestInactiveVersion = useMemo(() => {
+    if (!activeVersion) return undefined;
+    return versions
+      .filter((version) => version.id !== activeVersion.id && version.version > activeVersion.version)
+      .sort((a, b) => b.version - a.version)[0];
+  }, [activeVersion, versions]);
 
   const activateMutation = useMutation({
     mutationFn: (versionId: string) => activateGovernanceBlueprintVersion(id, versionId),
     onSuccess: () => {
+      setSavedPolicyVersionId(null);
       queryClient.invalidateQueries({ queryKey: governanceKeys.blueprint(id) });
       queryClient.invalidateQueries({ queryKey: governanceKeys.blueprints });
       toast({ title: "Blueprint version activated" });
@@ -469,13 +497,14 @@ export default function GovernanceBlueprintDetail() {
         customerScope,
       });
     },
-    onSuccess: () => {
+    onSuccess: (version) => {
+      setSavedPolicyVersionId(version.id);
       queryClient.invalidateQueries({ queryKey: governanceKeys.versions(id) });
       queryClient.invalidateQueries({ queryKey: governanceKeys.blueprint(id) });
       queryClient.invalidateQueries({ queryKey: governanceKeys.blueprints });
       toast({
         title: "CustomerScope policy saved",
-        description: "CustomerScope policy saved as a new blueprint version. Activate it when ready.",
+        description: `CustomerScope policy saved as version v${version.version}. It is not active yet. Activate v${version.version} before running evaluations with this policy.`,
       });
       setPolicyDialogOpen(false);
     },
@@ -569,7 +598,7 @@ export default function GovernanceBlueprintDetail() {
       <Card>
         <CardHeader>
           <CardTitle>Versions</CardTitle>
-          <CardDescription>Blueprint versions are read-only here; activation is explicit.</CardDescription>
+          <CardDescription>Blueprint versions are read-only here; activation is explicit. Evaluations use the active version only.</CardDescription>
         </CardHeader>
         <CardContent>
           {versionsError ? (
@@ -596,38 +625,66 @@ export default function GovernanceBlueprintDetail() {
               No versions found for this blueprint.
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {versions.map((version) => {
-                  const isActive = version.id === blueprint?.activeVersionId;
-                  return (
-                    <TableRow key={version.id}>
-                      <TableCell className="font-medium">v{version.version}</TableCell>
-                      <TableCell>{formatDate(version.createdAt)}</TableCell>
-                      <TableCell>{isActive ? <Badge>Active</Badge> : <Badge variant="outline">Inactive</Badge>}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isActive || activateMutation.isPending}
-                          onClick={() => activateMutation.mutate(version.id)}
-                        >
-                          Activate
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <div className="space-y-3">
+              {(savedPolicyVersionId || newestInactiveVersion) && (
+                <Alert>
+                  <AlertTitle>Inactive policy version saved</AlertTitle>
+                  <AlertDescription>
+                    {savedPolicyVersionId
+                      ? "The saved CustomerScope policy version is inactive. Activate it before evaluation."
+                      : "Latest saved version is inactive. Activate it before evaluation."}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Version</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {versions.map((version) => {
+                    const isActive = version.id === blueprint?.activeVersionId;
+                    const isSavedPolicyVersion = version.id === savedPolicyVersionId;
+                    const isNewestInactiveVersion = !isActive && version.id === newestInactiveVersion?.id;
+                    return (
+                      <TableRow
+                        key={version.id}
+                        className={isSavedPolicyVersion || isNewestInactiveVersion ? "bg-primary/5" : undefined}
+                      >
+                        <TableCell className="font-medium">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span>v{version.version}</span>
+                            {isSavedPolicyVersion && <Badge variant="secondary">New policy version</Badge>}
+                          </div>
+                        </TableCell>
+                        <TableCell>{formatDate(version.createdAt)}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {isActive ? <Badge>Active</Badge> : <Badge variant="outline">Inactive</Badge>}
+                            {!isActive && <Badge variant="secondary">Activate to use</Badge>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isActive || activateMutation.isPending}
+                            onClick={() => activateMutation.mutate(version.id)}
+                            title={isActive ? "This version is already active." : "Make this version the active evaluation policy."}
+                          >
+                            Activate
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -636,6 +693,7 @@ export default function GovernanceBlueprintDetail() {
         <>
           <CustomerScopePolicyCard
             activeVersion={activeVersion}
+            hasNewerInactiveVersion={Boolean(newestInactiveVersion)}
             onEdit={() => setPolicyDialogOpen(true)}
           />
           <RulesPreview rules={activeVersion.rules as GovernanceBlueprintRules} />
@@ -643,6 +701,7 @@ export default function GovernanceBlueprintDetail() {
       ) : (
         <CustomerScopePolicyCard
           activeVersion={activeVersion}
+          hasNewerInactiveVersion={Boolean(newestInactiveVersion)}
           onEdit={() => setPolicyDialogOpen(true)}
         />
       )}

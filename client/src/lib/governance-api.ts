@@ -5,6 +5,7 @@ import type {
   GovernanceEvaluationRun,
   GovernanceObjectEvaluation,
 } from "@shared/schema";
+import type { GovernanceBlueprintRules } from "@shared/governance";
 
 export interface CreateDefaultBlueprintResponse {
   blueprint: GovernanceBlueprint;
@@ -127,6 +128,10 @@ export function getGovernanceBlueprint(id: string) {
 
 export function listGovernanceBlueprintVersions(id: string) {
   return fetchJson<GovernanceBlueprintVersion[]>(`/api/governance/blueprints/${id}/versions`);
+}
+
+export function createGovernanceBlueprintVersion(blueprintId: string, rules: GovernanceBlueprintRules) {
+  return postJson<GovernanceBlueprintVersion>(`/api/governance/blueprints/${blueprintId}/versions`, { rules });
 }
 
 export function createDefaultNetboxVmBlueprint(netboxSourceId: string) {

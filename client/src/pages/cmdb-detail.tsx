@@ -109,6 +109,39 @@ interface CustomerScopeListItem {
   updatedAt: string;
 }
 
+interface CustomerScopeGovernanceFinding {
+  code: string;
+  count: number;
+  message: string;
+  severity?: string;
+}
+
+interface CustomerScopeGovernanceSummaryItem {
+  sourceId: string;
+  customerScopeId: string | null;
+  customerScopeName: string;
+  objectType: "netbox_vm";
+  objectCount: number;
+  assignedObjectCount: number;
+  unassignedObjectCount: number;
+  evaluatedObjectCount: number;
+  unevaluatedObjectCount: number;
+  latestEvaluationRunId: string | null;
+  latestEvaluatedAt: string | null;
+  averageGovernanceScore: number | null;
+  readyCount: number;
+  notReadyCount: number;
+  blockAutomationRecommendationCount: number;
+  findingCounts: Record<string, number>;
+  topFindings: CustomerScopeGovernanceFinding[];
+}
+
+interface CustomerScopeGovernanceSummariesResponse {
+  sourceId: string;
+  objectType: "netbox_vm";
+  summaries: CustomerScopeGovernanceSummaryItem[];
+}
+
 interface CustomerAssignment {
   id: string;
   objectType: string;
@@ -189,6 +222,13 @@ function relationshipVariant(relationship?: string): "default" | "secondary" | "
   }
 }
 
+function scoreVariant(score: number | null | undefined): "default" | "secondary" | "destructive" | "outline" {
+  if (score === null || score === undefined) return "outline";
+  if (score < 70) return "destructive";
+  if (score < 90) return "secondary";
+  return "default";
+}
+
 function formatDate(value?: string | null) {
   if (!value) return undefined;
   const date = new Date(value);
@@ -216,6 +256,73 @@ function CountBadges({ counts }: { counts?: Record<string, number> }) {
           {key}: {count}
         </Badge>
       ))}
+    </div>
+  );
+}
+
+function ScoreBadge({ summary }: { summary?: CustomerScopeGovernanceSummaryItem }) {
+  if (!summary) return <span className="text-muted-foreground/50">-</span>;
+  if (summary.objectCount === 0) return <span className="text-muted-foreground">No objects</span>;
+  if (summary.evaluatedObjectCount === 0 || summary.averageGovernanceScore === null) {
+    return <span className="text-muted-foreground">Not evaluated</span>;
+  }
+  return <Badge variant={scoreVariant(summary.averageGovernanceScore)}>{summary.averageGovernanceScore}</Badge>;
+}
+
+function EvaluationCount({ summary }: { summary?: CustomerScopeGovernanceSummaryItem }) {
+  if (!summary) return <span className="text-muted-foreground/50">-</span>;
+  if (summary.objectCount === 0) return <span className="text-muted-foreground">No objects</span>;
+  return (
+    <div className="space-y-1">
+      <div className="font-medium">{summary.evaluatedObjectCount} / {summary.objectCount}</div>
+      {summary.unevaluatedObjectCount > 0 && (
+        <div className="text-xs text-muted-foreground">{summary.unevaluatedObjectCount} not evaluated</div>
+      )}
+    </div>
+  );
+}
+
+function ReadinessCounts({ summary }: { summary?: CustomerScopeGovernanceSummaryItem }) {
+  if (!summary) return <span className="text-muted-foreground/50">-</span>;
+  if (summary.objectCount === 0) return <span className="text-muted-foreground">No objects</span>;
+  if (summary.evaluatedObjectCount === 0) return <span className="text-muted-foreground">Not evaluated</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      <Badge variant="default" className="text-[10px]">ready: {summary.readyCount}</Badge>
+      <Badge variant={summary.notReadyCount > 0 ? "destructive" : "outline"} className="text-[10px]">
+        not ready: {summary.notReadyCount}
+      </Badge>
+    </div>
+  );
+}
+
+function BlockRecommendationBadge({ summary }: { summary?: CustomerScopeGovernanceSummaryItem }) {
+  if (!summary) return <span className="text-muted-foreground/50">-</span>;
+  if (summary.objectCount === 0 || summary.evaluatedObjectCount === 0) {
+    return <span className="text-muted-foreground">Not evaluated</span>;
+  }
+  return (
+    <Badge variant={summary.blockAutomationRecommendationCount > 0 ? "destructive" : "outline"} className="text-[10px]">
+      {summary.blockAutomationRecommendationCount} recommendations
+    </Badge>
+  );
+}
+
+function TopFinding({ summary }: { summary?: CustomerScopeGovernanceSummaryItem }) {
+  if (!summary) return <span className="text-muted-foreground/50">-</span>;
+  if (summary.objectCount === 0 || summary.evaluatedObjectCount === 0) {
+    return <span className="text-muted-foreground">Not evaluated</span>;
+  }
+  const finding = summary.topFindings[0];
+  if (!finding) return <span className="text-muted-foreground">No findings</span>;
+  return (
+    <div className="space-y-1">
+      <Badge variant={finding.severity === "blocker" ? "destructive" : "outline"} className="text-[10px]">
+        {finding.count}x {finding.code}
+      </Badge>
+      <div className="max-w-56 truncate text-xs text-muted-foreground" title={finding.message}>
+        {finding.message}
+      </div>
     </div>
   );
 }
@@ -436,6 +543,11 @@ export default function CmdbDetail() {
     enabled: !!id,
   });
 
+  const customerScopeGovernanceSummariesQuery = useQuery<CustomerScopeGovernanceSummariesResponse>({
+    queryKey: ["/api/cmdbs", id, "customer-scope-governance-summaries"],
+    enabled: !!id,
+  });
+
   const objectDetailQuery = useQuery<CmdbObjectDetailResponse>({
     queryKey: ["/api/cmdbs", id, "objects", selectedObjectType, selectedObjectId],
     enabled: !!id && !!selectedObjectId,
@@ -461,6 +573,16 @@ export default function CmdbDetail() {
   }, [objects, search]);
 
   const selectedType = objectTypesQuery.data?.objectTypes.find((type) => type.objectType === selectedObjectType);
+  const governanceSummariesByScopeId = useMemo(() => {
+    const map = new Map<string, CustomerScopeGovernanceSummaryItem>();
+    for (const summary of customerScopeGovernanceSummariesQuery.data?.summaries ?? []) {
+      map.set(summary.customerScopeId ?? "unassigned", summary);
+    }
+    return map;
+  }, [customerScopeGovernanceSummariesQuery.data?.summaries]);
+  const unassignedGovernanceSummary = governanceSummariesByScopeId.get("unassigned");
+  const customerScopeRows = customerScopesQuery.data ?? [];
+  const showCustomerScopeTable = customerScopeRows.length > 0 || Boolean(unassignedGovernanceSummary);
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -549,7 +671,19 @@ export default function CmdbDetail() {
                 </div>
               </div>
 
-              {(customerScopesQuery.data?.length ?? 0) === 0 ? (
+              {customerScopeGovernanceSummariesQuery.isError && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+                  Governance summaries could not be loaded.
+                </div>
+              )}
+
+              {customerScopeGovernanceSummariesQuery.isLoading && (
+                <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                  Loading governance summaries...
+                </div>
+              )}
+
+              {!showCustomerScopeTable ? (
                 <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">
                   No CustomerScopes synced yet. Sync cached VMs to discover NetBox tenants.
                 </div>
@@ -563,31 +697,87 @@ export default function CmdbDetail() {
                         <th className="text-left px-4 py-3 font-medium">Isolation</th>
                         <th className="text-left px-4 py-3 font-medium">Assignments</th>
                         <th className="text-left px-4 py-3 font-medium">Relationships</th>
+                        <th className="text-left px-4 py-3 font-medium">Objects</th>
+                        <th className="text-left px-4 py-3 font-medium">Evaluated</th>
+                        <th className="text-left px-4 py-3 font-medium">Avg score</th>
+                        <th className="text-left px-4 py-3 font-medium">Ready / Not ready</th>
+                        <th className="text-left px-4 py-3 font-medium">Block recommendations</th>
+                        <th className="text-left px-4 py-3 font-medium">Top finding</th>
                         <th className="text-left px-4 py-3 font-medium">Last synced</th>
+                        <th className="text-left px-4 py-3 font-medium">Last evaluated</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {customerScopesQuery.data?.map((scope) => (
-                        <tr key={scope.id} className="border-b last:border-0">
+                      {customerScopeRows.map((scope) => {
+                        const governanceSummary = governanceSummariesByScopeId.get(scope.id);
+                        return (
+                          <tr key={scope.id} className="border-b last:border-0">
+                            <td className="px-4 py-3">
+                              <div className="font-medium">{scope.displayName ?? scope.name}</div>
+                              <div className="text-xs text-muted-foreground font-mono">{scope.externalId}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline">{scope.strategy}</Badge>
+                            </td>
+                            <td className="px-4 py-3">
+                              {scope.isolation ? <Badge variant="outline">{scope.isolation}</Badge> : <span className="text-muted-foreground/50">-</span>}
+                            </td>
+                            <td className="px-4 py-3 font-medium">{scope.assignmentCount}</td>
+                            <td className="px-4 py-3">
+                              <CountBadges counts={scope.relationshipCounts} />
+                            </td>
+                            <td className="px-4 py-3">
+                              {governanceSummary?.objectCount === 0 ? (
+                                <span className="text-muted-foreground">No objects</span>
+                              ) : (
+                                <span className="font-medium">{governanceSummary?.objectCount ?? "-"}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3"><EvaluationCount summary={governanceSummary} /></td>
+                            <td className="px-4 py-3"><ScoreBadge summary={governanceSummary} /></td>
+                            <td className="px-4 py-3"><ReadinessCounts summary={governanceSummary} /></td>
+                            <td className="px-4 py-3"><BlockRecommendationBadge summary={governanceSummary} /></td>
+                            <td className="px-4 py-3"><TopFinding summary={governanceSummary} /></td>
+                            <td className="px-4 py-3 text-muted-foreground">{formatDate(scope.lastSyncedAt) ?? "-"}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{formatDate(governanceSummary?.latestEvaluatedAt) ?? (governanceSummary?.objectCount ? "Not evaluated" : "-")}</td>
+                          </tr>
+                        );
+                      })}
+                      {unassignedGovernanceSummary && (
+                        <tr className="border-b last:border-0 border-destructive/20 bg-destructive/5">
                           <td className="px-4 py-3">
-                            <div className="font-medium">{scope.displayName ?? scope.name}</div>
-                            <div className="text-xs text-muted-foreground font-mono">{scope.externalId}</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium text-destructive">Unassigned</span>
+                              <Badge variant="destructive" className="gap-1">
+                                <TriangleAlert className="h-3 w-3" />
+                                Attention
+                              </Badge>
+                            </div>
+                            <div className="max-w-72 text-xs text-muted-foreground">
+                              Objects with no CustomerScope assignment.
+                            </div>
                           </td>
+                          <td className="px-4 py-3"><span className="text-muted-foreground/50">-</span></td>
+                          <td className="px-4 py-3"><span className="text-muted-foreground/50">-</span></td>
+                          <td className="px-4 py-3 font-medium">{unassignedGovernanceSummary.unassignedObjectCount}</td>
                           <td className="px-4 py-3">
-                            <Badge variant="outline">{scope.strategy}</Badge>
+                            <Badge variant="destructive" className="text-[10px]">unassigned: {unassignedGovernanceSummary.unassignedObjectCount}</Badge>
                           </td>
-                          <td className="px-4 py-3">
-                            {scope.isolation ? <Badge variant="outline">{scope.isolation}</Badge> : <span className="text-muted-foreground/50">-</span>}
-                          </td>
-                          <td className="px-4 py-3 font-medium">{scope.assignmentCount}</td>
-                          <td className="px-4 py-3">
-                            <CountBadges counts={scope.relationshipCounts} />
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">{formatDate(scope.lastSyncedAt) ?? "-"}</td>
+                          <td className="px-4 py-3 font-medium">{unassignedGovernanceSummary.objectCount}</td>
+                          <td className="px-4 py-3"><EvaluationCount summary={unassignedGovernanceSummary} /></td>
+                          <td className="px-4 py-3"><ScoreBadge summary={unassignedGovernanceSummary} /></td>
+                          <td className="px-4 py-3"><ReadinessCounts summary={unassignedGovernanceSummary} /></td>
+                          <td className="px-4 py-3"><BlockRecommendationBadge summary={unassignedGovernanceSummary} /></td>
+                          <td className="px-4 py-3"><TopFinding summary={unassignedGovernanceSummary} /></td>
+                          <td className="px-4 py-3 text-muted-foreground">{formatDate(customerScopeSummaryQuery.data?.latestLastSyncedAt) ?? "-"}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{formatDate(unassignedGovernanceSummary.latestEvaluatedAt) ?? (unassignedGovernanceSummary.objectCount ? "Not evaluated" : "-")}</td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
+                  <div className="border-t bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+                    Block recommendations are governance outputs. Actual blocking depends on Automation Inventory enforcement settings.
+                  </div>
                 </div>
               )}
             </>

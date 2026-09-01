@@ -405,6 +405,52 @@ function summarizeCustomerScopeGovernance(
   };
 }
 
+type CustomerScopeGovernanceSummaryInput = {
+  customerScopeId: string | null;
+  customerScopeName: string;
+  objectIds: string[];
+  unassigned: boolean;
+};
+
+function buildCustomerScopeGovernanceSummaryInputs(
+  scopes: CustomerScope[],
+  assignments: CustomerScopeObjectAssignment[],
+  cachedVms: Array<{ id: string }>,
+): CustomerScopeGovernanceSummaryInput[] {
+  const cachedVmIds = new Set(cachedVms.map((vm) => vm.id));
+  const sourceAssignments = assignments.filter((assignment) => (
+    assignment.objectType === "netbox_vm" &&
+    cachedVmIds.has(assignment.objectId)
+  ));
+  const inputs: CustomerScopeGovernanceSummaryInput[] = scopes.map((scope) => {
+    const currentAssignments = selectCurrentCustomerScopeAssignments(
+      sourceAssignments.filter((assignment) => assignment.customerScopeId === scope.id),
+    );
+    return {
+      customerScopeId: scope.id,
+      customerScopeName: scope.displayName ?? scope.name,
+      objectIds: Array.from(new Set(currentAssignments.map((assignment) => assignment.objectId))),
+      unassigned: false,
+    };
+  });
+  const unassignedAssignments = selectCurrentCustomerScopeAssignments(
+    sourceAssignments.filter((assignment) => (
+      assignment.customerScopeId === null &&
+      assignment.relationship === "unassigned"
+    )),
+  );
+  const unassignedObjectIds = Array.from(new Set(unassignedAssignments.map((assignment) => assignment.objectId)));
+  if (unassignedObjectIds.length > 0) {
+    inputs.push({
+      customerScopeId: null,
+      customerScopeName: "Unassigned",
+      objectIds: unassignedObjectIds,
+      unassigned: true,
+    });
+  }
+  return inputs;
+}
+
 async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   // Extract token from Authorization header or HttpOnly cookie
   let token: string | undefined;
@@ -1141,6 +1187,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
     } catch (error: any) {
       sendInternalError(res, error, "cmdbs.customer-scopes.list", "Failed to fetch CMDB customer scopes");
+    }
+  });
+
+  app.get("/api/cmdbs/:id/customer-scope-governance-summaries", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const cmdb = await storage.getCmdbAccount(req.params.id, req.orgId!);
+      if (!cmdb) {
+        return res.status(404).json({ message: "CMDB account not found" });
+      }
+      if (cmdb.kind !== "netbox") {
+        return sendClientError(res, 400, "CustomerScope governance summaries are only supported for NetBox CMDBs");
+      }
+
+      const sourceType = "netbox_inventory_source";
+      const sourceId = cmdb.id;
+      const [scopes, assignments, cachedVms] = await Promise.all([
+        storage.listCustomerScopes(req.orgId!, sourceType, sourceId),
+        storage.listCustomerScopeObjectAssignments(req.orgId!, sourceType, sourceId),
+        getCachedNetboxVmsForCmdb(sourceId, req.orgId!),
+      ]);
+      const summaryInputs = buildCustomerScopeGovernanceSummaryInputs(scopes, assignments, cachedVms);
+      const objectIds = Array.from(new Set(summaryInputs.flatMap((input) => input.objectIds)));
+      const latestEvaluations = await storage.listLatestGovernanceEvaluationsForSourceObjects(
+        req.orgId!,
+        sourceId,
+        "netbox_vm",
+        objectIds,
+      );
+      const evaluationsByObjectId = new Map<string, GovernanceObjectEvaluation>();
+      for (const { evaluation } of latestEvaluations) {
+        if (evaluation.objectId) evaluationsByObjectId.set(evaluation.objectId, evaluation);
+      }
+
+      res.json({
+        sourceId,
+        objectType: "netbox_vm",
+        summaries: summaryInputs.map((input) => summarizeCustomerScopeGovernance({
+          sourceId,
+          customerScopeId: input.customerScopeId,
+          customerScopeName: input.customerScopeName,
+          objectIds: input.objectIds,
+          evaluations: input.objectIds
+            .map((objectId) => evaluationsByObjectId.get(objectId))
+            .filter((evaluation): evaluation is GovernanceObjectEvaluation => Boolean(evaluation)),
+          unassigned: input.unassigned,
+        })),
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "cmdbs.customer-scope-governance-summaries", "Failed to fetch CustomerScope governance summaries");
     }
   });
 

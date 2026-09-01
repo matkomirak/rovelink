@@ -796,6 +796,269 @@ describe("CMDB object browser routes", () => {
     assert.equal(res.body.averageGovernanceScore, 88);
   });
 
+  test("bulk customer scope governance summaries reject cross-org CMDB access", async () => {
+    await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-governance-summaries`)
+      .set("Authorization", `Bearer ${makeToken(ORG_B)}`)
+      .expect(404);
+  });
+
+  test("bulk customer scope governance summaries return selected source scopes plus unassigned", async () => {
+    const supportScope: CustomerScope = {
+      ...customerScopesForTest[0],
+      id: "scope-alpha-support-empty",
+      externalId: "22",
+      name: "Support",
+      displayName: "Support Team",
+      metadata: { provider: "netbox", token: "support-token-must-not-leak" },
+    };
+    cachedVmsForTest = [cachedNetboxVms[0], cachedNetboxVm102, cachedNetboxVm103];
+    customerScopesInTest = [...customerScopesForTest, supportScope];
+    customerScopeAssignmentsInTest = [
+      customerScopeAssignmentsForTest[0],
+      {
+        ...customerScopeAssignmentsForTest[0],
+        id: "assignment-alpha-engineering-unevaluated",
+        objectId: "cached-alpha-vm-103",
+        updatedAt: new Date("2026-01-04T00:00:00.000Z"),
+      },
+      customerScopeAssignmentsForTest[1],
+      customerScopeAssignmentsForTest[2],
+      customerScopeAssignmentsForTest[3],
+      {
+        ...customerScopeAssignmentsForTest[0],
+        id: "assignment-alpha-engineering-netbox-id",
+        objectId: "101",
+        updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+      },
+    ];
+    governanceRunsInTest = [
+      makeGovernanceRun("run-bulk-old"),
+      makeGovernanceRun("run-bulk-new"),
+      makeGovernanceRun("run-bulk-secondary", "cmdb-alpha-secondary"),
+    ];
+    governanceObjectEvaluationsInTest = [
+      makeGovernanceEvaluation({
+        id: "eval-bulk-old",
+        runId: "run-bulk-old",
+        objectId: "cached-alpha-vm-101",
+        governanceScore: 10,
+        automationReady: false,
+        recommendedActions: ["block_automation"],
+        findings: [{ layer: "data_management", severity: "warning", code: "OLD_FINDING", message: "old", recommendedActions: ["report"] }],
+        evaluatedAt: new Date("2026-01-05T00:00:00.000Z"),
+      }),
+      makeGovernanceEvaluation({
+        id: "eval-bulk-engineering",
+        runId: "run-bulk-new",
+        objectId: "cached-alpha-vm-101",
+        governanceScore: 90,
+        automationReady: true,
+        recommendedActions: ["report"],
+        findings: [
+          { layer: "automation_readiness", severity: "blocker", code: "BLOCKER_FINDING", message: "blocker", recommendedActions: ["block_automation"] },
+          { layer: "data_management", severity: "warning", code: "CUSTOMER_SCOPE_MISSING", fieldKey: "customerAssignments", message: "missing", recommendedActions: ["report"] },
+        ],
+        evaluatedAt: new Date("2026-01-06T00:00:00.000Z"),
+      }),
+      makeGovernanceEvaluation({
+        id: "eval-bulk-unassigned",
+        runId: "run-bulk-new",
+        objectId: "cached-alpha-vm-102",
+        governanceScore: 60,
+        automationReady: false,
+        recommendedActions: ["block_automation", "validate"],
+        findings: [{ layer: "data_management", severity: "warning", code: "CUSTOMER_ASSIGNMENT_UNASSIGNED", fieldKey: "customerAssignments", message: "unassigned", recommendedActions: ["report"] }],
+        evaluatedAt: new Date("2026-01-07T00:00:00.000Z"),
+      }),
+      makeGovernanceEvaluation({
+        id: "eval-bulk-netbox-id",
+        runId: "run-bulk-new",
+        objectId: "101",
+        governanceScore: 1,
+        automationReady: false,
+        recommendedActions: ["block_automation"],
+        findings: [{ layer: "data_management", severity: "blocker", code: "WRONG_ID", message: "wrong id", recommendedActions: ["block_automation"] }],
+        evaluatedAt: new Date("2026-01-08T00:00:00.000Z"),
+      }),
+      makeGovernanceEvaluation({
+        id: "eval-bulk-secondary",
+        runId: "run-bulk-secondary",
+        objectId: "cached-alpha-vm-101",
+        governanceScore: 2,
+        automationReady: false,
+        recommendedActions: ["block_automation"],
+        findings: [{ layer: "data_management", severity: "blocker", code: "WRONG_SOURCE", message: "wrong source", recommendedActions: ["block_automation"] }],
+        evaluatedAt: new Date("2026-01-09T00:00:00.000Z"),
+      }),
+    ];
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-governance-summaries`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.sourceId, cmdbA.id);
+    assert.equal(res.body.objectType, "netbox_vm");
+    assert.deepEqual(
+      res.body.summaries.map((summary: any) => summary.customerScopeName).sort(),
+      ["Engineering Team", "Support Team", "Unassigned"],
+    );
+    assert.ok(!JSON.stringify(res.body).includes("scope-alpha-finance-secondary"));
+    assert.ok(!JSON.stringify(res.body).includes("scope-beta-engineering"));
+    assert.ok(!JSON.stringify(res.body).includes("super-secret-token"));
+    assert.ok(!JSON.stringify(res.body).includes("support-token-must-not-leak"));
+    assert.ok(!JSON.stringify(res.body).includes("cached-api-key-must-not-leak"));
+
+    const engineering = res.body.summaries.find((summary: any) => summary.customerScopeId === "scope-alpha-engineering");
+    assert.equal(engineering.objectCount, 2);
+    assert.equal(engineering.assignedObjectCount, 2);
+    assert.equal(engineering.unassignedObjectCount, 0);
+    assert.equal(engineering.evaluatedObjectCount, 1);
+    assert.equal(engineering.unevaluatedObjectCount, 1);
+    assert.equal(engineering.averageGovernanceScore, 90);
+    assert.equal(engineering.readyCount, 1);
+    assert.equal(engineering.notReadyCount, 0);
+    assert.equal(engineering.blockAutomationRecommendationCount, 0);
+    assert.equal(engineering.findingCounts.CUSTOMER_SCOPE_MISSING, 1);
+    assert.equal(engineering.findingCounts.WRONG_ID, undefined);
+    assert.equal(engineering.findingCounts.WRONG_SOURCE, undefined);
+    assert.equal(engineering.topFindings[0].code, "BLOCKER_FINDING");
+
+    const support = res.body.summaries.find((summary: any) => summary.customerScopeId === "scope-alpha-support-empty");
+    assert.equal(support.objectCount, 0);
+    assert.equal(support.evaluatedObjectCount, 0);
+    assert.equal(support.averageGovernanceScore, null);
+
+    const unassigned = res.body.summaries.find((summary: any) => summary.customerScopeId === null);
+    assert.equal(unassigned.customerScopeName, "Unassigned");
+    assert.equal(unassigned.objectCount, 1);
+    assert.equal(unassigned.assignedObjectCount, 0);
+    assert.equal(unassigned.unassignedObjectCount, 1);
+    assert.equal(unassigned.averageGovernanceScore, 60);
+    assert.equal(unassigned.readyCount, 0);
+    assert.equal(unassigned.notReadyCount, 1);
+    assert.equal(unassigned.blockAutomationRecommendationCount, 1);
+    assert.equal(unassigned.findingCounts.CUSTOMER_ASSIGNMENT_UNASSIGNED, 1);
+  });
+
+  test("bulk customer scope governance summaries omit unassigned when no unassigned objects exist", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = [customerScopeAssignmentsForTest[0]];
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-governance-summaries`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.equal(res.body.summaries.some((summary: any) => summary.customerScopeId === null), false);
+  });
+
+  test("bulk customer scope governance summaries return empty summaries when source has no scopes or unassigned assignments", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-governance-summaries`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    assert.deepEqual(res.body, {
+      sourceId: cmdbA.id,
+      objectType: "netbox_vm",
+      summaries: [],
+    });
+  });
+
+  test("bulk customer scope governance summaries count shared assignment under each scope", async () => {
+    const alphaScope = customerScopesForTest[0];
+    const sharedScope: CustomerScope = {
+      ...alphaScope,
+      id: "scope-alpha-shared",
+      externalId: "23",
+      name: "Shared Services",
+      displayName: "Shared Services",
+    };
+    cachedVmsForTest = cachedNetboxVms;
+    customerScopesInTest = [alphaScope, sharedScope];
+    customerScopeAssignmentsInTest = [
+      {
+        ...customerScopeAssignmentsForTest[0],
+        id: "assignment-alpha-engineering-shared",
+        relationship: "shared",
+        updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+      },
+      {
+        ...customerScopeAssignmentsForTest[0],
+        id: "assignment-alpha-shared-services",
+        customerScopeId: sharedScope.id,
+        relationship: "shared",
+        updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+      },
+    ];
+    governanceRunsInTest = [makeGovernanceRun("run-shared")];
+    governanceObjectEvaluationsInTest = [
+      makeGovernanceEvaluation({
+        id: "eval-shared",
+        runId: "run-shared",
+        objectId: "cached-alpha-vm-101",
+        governanceScore: 84,
+        evaluatedAt: new Date("2026-01-06T00:00:00.000Z"),
+      }),
+    ];
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-governance-summaries`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    const engineering = res.body.summaries.find((summary: any) => summary.customerScopeId === alphaScope.id);
+    const shared = res.body.summaries.find((summary: any) => summary.customerScopeId === sharedScope.id);
+    assert.equal(engineering.objectCount, 1);
+    assert.equal(shared.objectCount, 1);
+    assert.equal(engineering.averageGovernanceScore, 84);
+    assert.equal(shared.averageGovernanceScore, 84);
+  });
+
+  test("bulk customer scope governance summaries handle duplicate assignments deterministically", async () => {
+    cachedVmsForTest = cachedNetboxVms;
+    customerScopesInTest = customerScopesForTest;
+    customerScopeAssignmentsInTest = [
+      {
+        ...customerScopeAssignmentsForTest[0],
+        id: "assignment-alpha-engineering-bulk-stale",
+        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+        lastSyncedAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+      {
+        ...customerScopeAssignmentsForTest[0],
+        id: "assignment-alpha-engineering-bulk-current",
+        updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+        lastSyncedAt: new Date("2026-01-05T00:00:00.000Z"),
+      },
+    ];
+    governanceRunsInTest = [makeGovernanceRun("run-bulk-duplicates")];
+    governanceObjectEvaluationsInTest = [
+      makeGovernanceEvaluation({
+        id: "eval-bulk-duplicate",
+        runId: "run-bulk-duplicates",
+        objectId: "cached-alpha-vm-101",
+        governanceScore: 88,
+        evaluatedAt: new Date("2026-01-06T00:00:00.000Z"),
+      }),
+    ];
+
+    const res = await req
+      .get(`/api/cmdbs/${cmdbA.id}/customer-scope-governance-summaries`)
+      .set("Authorization", `Bearer ${makeToken(ORG_A)}`)
+      .expect(200);
+
+    const engineering = res.body.summaries.find((summary: any) => summary.customerScopeId === "scope-alpha-engineering");
+    assert.equal(engineering.objectCount, 1);
+    assert.equal(engineering.evaluatedObjectCount, 1);
+    assert.equal(engineering.averageGovernanceScore, 88);
+  });
+
   test("object customer assignment route returns dedicated assignment joined with scope name", async () => {
     cachedVmsForTest = cachedNetboxVms;
     customerScopesInTest = customerScopesForTest;

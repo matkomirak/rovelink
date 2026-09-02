@@ -2,6 +2,7 @@
 import { 
   users, projects, credentials, jobTemplates, jobRuns, settings, notifications,
   providerAccounts, syncRuns, externalObjects, groupCache, netboxVms, netboxInventorySources,
+  infrastructureObjects, infrastructureRelationships, providerCustomerScopeCandidates,
   cmdbAccounts, pipelines, pipelineMappings, pipelineRuns, organizations,
   governanceBlueprints, governanceBlueprintVersions, governanceEvaluationRuns, governanceObjectEvaluations,
   customerScopes, customerScopeObjectAssignments,
@@ -16,6 +17,9 @@ import {
   type ProviderAccount, type InsertProviderAccount,
   type SyncRun, type InsertSyncRun,
   type ExternalObject, type InsertExternalObject,
+  type InfrastructureObject, type InsertInfrastructureObject,
+  type InfrastructureRelationship, type InsertInfrastructureRelationship,
+  type ProviderCustomerScopeCandidate, type InsertProviderCustomerScopeCandidate,
   type GroupCache, type InsertGroupCache,
   type NetboxVm, type InsertNetboxVm,
   type NetboxInventorySource, type InsertNetboxInventorySource,
@@ -32,6 +36,46 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql, inArray, isNull } from "drizzle-orm";
+
+const SECRET_METADATA_KEYS = new Set([
+  "key",
+  "clientsecret",
+  "accesstoken",
+  "refreshtoken",
+]);
+
+export function sanitizeInfrastructureMetadata<T = unknown>(value: T): T {
+  return sanitizeMetadataValue(value) as T;
+}
+
+function sanitizeMetadataValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeMetadataValue(item));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+    if (isSecretMetadataKey(key)) {
+      sanitized[key] = "[REDACTED]";
+    } else {
+      sanitized[key] = sanitizeMetadataValue(nestedValue);
+    }
+  }
+  return sanitized;
+}
+
+function isSecretMetadataKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9]/g, "");
+  return lower.includes("token")
+    || lower.includes("password")
+    || lower.includes("secret")
+    || lower.includes("authorization")
+    || SECRET_METADATA_KEYS.has(normalized);
+}
 
 export interface IStorage {
   // Organization lookup (cross-tenant safe — used for existence checks in user creation)
@@ -102,6 +146,38 @@ export interface IStorage {
   addGroupCache(item: { kind: string; name: string }): Promise<GroupCache>;
   pruneStaleObjects(days: number): Promise<number>;
   getProviderStats(orgId: string): Promise<any[]>;
+
+  // Infrastructure inventory operations — orgId REQUIRED (provider-source-scoped, read-only observed state)
+  upsertInfrastructureObject(input: InsertInfrastructureObject): Promise<InfrastructureObject>;
+  listInfrastructureObjects(
+    orgId: string,
+    sourceId: string,
+    filters?: { providerType?: string; objectType?: string },
+  ): Promise<InfrastructureObject[]>;
+  getInfrastructureObject(id: string, orgId: string): Promise<InfrastructureObject | undefined>;
+  getInfrastructureObjectByExternalId(
+    orgId: string,
+    sourceId: string,
+    objectType: string,
+    externalId: string,
+  ): Promise<InfrastructureObject | undefined>;
+  upsertInfrastructureRelationship(input: InsertInfrastructureRelationship): Promise<InfrastructureRelationship>;
+  listInfrastructureRelationships(
+    orgId: string,
+    sourceId: string,
+    filters?: { fromObjectId?: string; toObjectId?: string; relationshipType?: string },
+  ): Promise<InfrastructureRelationship[]>;
+  upsertProviderCustomerScopeCandidate(input: InsertProviderCustomerScopeCandidate): Promise<ProviderCustomerScopeCandidate>;
+  listProviderCustomerScopeCandidates(
+    orgId: string,
+    sourceId: string,
+    filters?: { objectId?: string; derivedFrom?: string; confidence?: string },
+  ): Promise<ProviderCustomerScopeCandidate[]>;
+  listProviderCustomerScopeCandidatesForObject(
+    orgId: string,
+    sourceId: string,
+    objectId: string,
+  ): Promise<ProviderCustomerScopeCandidate[]>;
 
   // NetBox VM operations — orgId REQUIRED on org-scoped read
   getNetboxVms(orgId: string): Promise<NetboxVm[]>;
@@ -572,6 +648,210 @@ export class DatabaseStorage implements IStorage {
     }
 
     return stats;
+  }
+
+  async upsertInfrastructureObject(input: InsertInfrastructureObject): Promise<InfrastructureObject> {
+    await this.assertProviderSourceInOrg(input.sourceId, input.orgId);
+    const existing = await this.getInfrastructureObjectByExternalId(
+      input.orgId,
+      input.sourceId,
+      input.objectType,
+      input.externalId,
+    );
+    const sanitized = this.sanitizeInfrastructureObjectInput(input);
+
+    if (existing) {
+      const [updated] = await db
+        .update(infrastructureObjects)
+        .set({
+          ...sanitized,
+          updatedAt: new Date(),
+          lastSyncedAt: sanitized.lastSyncedAt ?? new Date(),
+        })
+        .where(and(
+          eq(infrastructureObjects.id, existing.id),
+          eq(infrastructureObjects.orgId, input.orgId),
+        ))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db
+      .insert(infrastructureObjects)
+      .values({
+        ...sanitized,
+        lastSyncedAt: sanitized.lastSyncedAt ?? new Date(),
+      })
+      .returning();
+    return created;
+  }
+
+  async listInfrastructureObjects(
+    orgId: string,
+    sourceId: string,
+    filters: { providerType?: string; objectType?: string } = {},
+  ): Promise<InfrastructureObject[]> {
+    await this.assertProviderSourceInOrg(sourceId, orgId);
+    const conditions = [
+      eq(infrastructureObjects.orgId, orgId),
+      eq(infrastructureObjects.sourceId, sourceId),
+    ];
+    if (filters.providerType) conditions.push(eq(infrastructureObjects.providerType, filters.providerType as any));
+    if (filters.objectType) conditions.push(eq(infrastructureObjects.objectType, filters.objectType));
+
+    return await db
+      .select()
+      .from(infrastructureObjects)
+      .where(and(...conditions))
+      .orderBy(desc(infrastructureObjects.updatedAt), desc(infrastructureObjects.createdAt));
+  }
+
+  async getInfrastructureObject(id: string, orgId: string): Promise<InfrastructureObject | undefined> {
+    const [object] = await db
+      .select()
+      .from(infrastructureObjects)
+      .where(and(eq(infrastructureObjects.id, id), eq(infrastructureObjects.orgId, orgId)));
+    return object ?? undefined;
+  }
+
+  async getInfrastructureObjectByExternalId(
+    orgId: string,
+    sourceId: string,
+    objectType: string,
+    externalId: string,
+  ): Promise<InfrastructureObject | undefined> {
+    await this.assertProviderSourceInOrg(sourceId, orgId);
+    const [object] = await db
+      .select()
+      .from(infrastructureObjects)
+      .where(and(
+        eq(infrastructureObjects.orgId, orgId),
+        eq(infrastructureObjects.sourceId, sourceId),
+        eq(infrastructureObjects.objectType, objectType),
+        eq(infrastructureObjects.externalId, externalId),
+      ));
+    return object ?? undefined;
+  }
+
+  async upsertInfrastructureRelationship(input: InsertInfrastructureRelationship): Promise<InfrastructureRelationship> {
+    await this.assertProviderSourceInOrg(input.sourceId, input.orgId);
+    await this.assertInfrastructureObjectInSource(input.fromObjectId, input.orgId, input.sourceId);
+    await this.assertInfrastructureObjectInSource(input.toObjectId, input.orgId, input.sourceId);
+
+    const metadata = sanitizeInfrastructureMetadata(input.metadata ?? {});
+    const existing = await this.findInfrastructureRelationship(input);
+    if (existing) {
+      const [updated] = await db
+        .update(infrastructureRelationships)
+        .set({
+          ...input,
+          metadata,
+          updatedAt: new Date(),
+          lastSyncedAt: input.lastSyncedAt ?? new Date(),
+        })
+        .where(and(
+          eq(infrastructureRelationships.id, existing.id),
+          eq(infrastructureRelationships.orgId, input.orgId),
+        ))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db
+      .insert(infrastructureRelationships)
+      .values({
+        ...input,
+        metadata,
+        lastSyncedAt: input.lastSyncedAt ?? new Date(),
+      })
+      .returning();
+    return created;
+  }
+
+  async listInfrastructureRelationships(
+    orgId: string,
+    sourceId: string,
+    filters: { fromObjectId?: string; toObjectId?: string; relationshipType?: string } = {},
+  ): Promise<InfrastructureRelationship[]> {
+    await this.assertProviderSourceInOrg(sourceId, orgId);
+    const conditions = [
+      eq(infrastructureRelationships.orgId, orgId),
+      eq(infrastructureRelationships.sourceId, sourceId),
+    ];
+    if (filters.fromObjectId) conditions.push(eq(infrastructureRelationships.fromObjectId, filters.fromObjectId));
+    if (filters.toObjectId) conditions.push(eq(infrastructureRelationships.toObjectId, filters.toObjectId));
+    if (filters.relationshipType) conditions.push(eq(infrastructureRelationships.relationshipType, filters.relationshipType));
+
+    return await db
+      .select()
+      .from(infrastructureRelationships)
+      .where(and(...conditions))
+      .orderBy(desc(infrastructureRelationships.updatedAt), desc(infrastructureRelationships.createdAt));
+  }
+
+  async upsertProviderCustomerScopeCandidate(
+    input: InsertProviderCustomerScopeCandidate,
+  ): Promise<ProviderCustomerScopeCandidate> {
+    await this.assertProviderSourceInOrg(input.sourceId, input.orgId);
+    await this.assertInfrastructureObjectInSource(input.objectId, input.orgId, input.sourceId);
+    const metadata = sanitizeInfrastructureMetadata(input.metadata ?? {});
+    const existing = await this.findProviderCustomerScopeCandidate(input);
+
+    if (existing) {
+      const [updated] = await db
+        .update(providerCustomerScopeCandidates)
+        .set({
+          ...input,
+          metadata,
+          updatedAt: new Date(),
+          lastSyncedAt: input.lastSyncedAt ?? new Date(),
+        })
+        .where(and(
+          eq(providerCustomerScopeCandidates.id, existing.id),
+          eq(providerCustomerScopeCandidates.orgId, input.orgId),
+        ))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db
+      .insert(providerCustomerScopeCandidates)
+      .values({
+        ...input,
+        metadata,
+        lastSyncedAt: input.lastSyncedAt ?? new Date(),
+      })
+      .returning();
+    return created;
+  }
+
+  async listProviderCustomerScopeCandidates(
+    orgId: string,
+    sourceId: string,
+    filters: { objectId?: string; derivedFrom?: string; confidence?: string } = {},
+  ): Promise<ProviderCustomerScopeCandidate[]> {
+    await this.assertProviderSourceInOrg(sourceId, orgId);
+    const conditions = [
+      eq(providerCustomerScopeCandidates.orgId, orgId),
+      eq(providerCustomerScopeCandidates.sourceId, sourceId),
+    ];
+    if (filters.objectId) conditions.push(eq(providerCustomerScopeCandidates.objectId, filters.objectId));
+    if (filters.derivedFrom) conditions.push(eq(providerCustomerScopeCandidates.derivedFrom, filters.derivedFrom as any));
+    if (filters.confidence) conditions.push(eq(providerCustomerScopeCandidates.confidence, filters.confidence as any));
+
+    return await db
+      .select()
+      .from(providerCustomerScopeCandidates)
+      .where(and(...conditions))
+      .orderBy(desc(providerCustomerScopeCandidates.updatedAt), desc(providerCustomerScopeCandidates.createdAt));
+  }
+
+  async listProviderCustomerScopeCandidatesForObject(
+    orgId: string,
+    sourceId: string,
+    objectId: string,
+  ): Promise<ProviderCustomerScopeCandidate[]> {
+    return this.listProviderCustomerScopeCandidates(orgId, sourceId, { objectId });
   }
 
   // NetBox VM operations
@@ -1272,6 +1552,67 @@ export class DatabaseStorage implements IStorage {
         eq(customerScopeObjectAssignments.objectId, assignment.objectId),
         customerScopeCondition,
         eq(customerScopeObjectAssignments.relationship, assignment.relationship),
+    ));
+    return existing ?? undefined;
+  }
+
+  private sanitizeInfrastructureObjectInput(input: InsertInfrastructureObject): InsertInfrastructureObject {
+    return {
+      ...input,
+      tags: sanitizeInfrastructureMetadata(input.tags ?? []),
+      labels: sanitizeInfrastructureMetadata(input.labels ?? {}),
+      metadata: sanitizeInfrastructureMetadata(input.metadata ?? {}),
+      raw: input.raw == null ? null : sanitizeInfrastructureMetadata(input.raw),
+    };
+  }
+
+  private async assertProviderSourceInOrg(sourceId: string, orgId: string): Promise<void> {
+    const source = await this.getProvider(sourceId, orgId);
+    if (!source) {
+      throw new Error("Infrastructure source not found in organization");
+    }
+  }
+
+  private async assertInfrastructureObjectInSource(
+    objectId: string,
+    orgId: string,
+    sourceId: string,
+  ): Promise<InfrastructureObject> {
+    const object = await this.getInfrastructureObject(objectId, orgId);
+    if (!object || object.sourceId !== sourceId) {
+      throw new Error("Infrastructure object must belong to the same organization and source");
+    }
+    return object;
+  }
+
+  private async findInfrastructureRelationship(
+    relationship: InsertInfrastructureRelationship,
+  ): Promise<InfrastructureRelationship | undefined> {
+    const [existing] = await db
+      .select()
+      .from(infrastructureRelationships)
+      .where(and(
+        eq(infrastructureRelationships.orgId, relationship.orgId),
+        eq(infrastructureRelationships.sourceId, relationship.sourceId),
+        eq(infrastructureRelationships.fromObjectId, relationship.fromObjectId),
+        eq(infrastructureRelationships.toObjectId, relationship.toObjectId),
+        eq(infrastructureRelationships.relationshipType, relationship.relationshipType),
+      ));
+    return existing ?? undefined;
+  }
+
+  private async findProviderCustomerScopeCandidate(
+    candidate: InsertProviderCustomerScopeCandidate,
+  ): Promise<ProviderCustomerScopeCandidate | undefined> {
+    const [existing] = await db
+      .select()
+      .from(providerCustomerScopeCandidates)
+      .where(and(
+        eq(providerCustomerScopeCandidates.orgId, candidate.orgId),
+        eq(providerCustomerScopeCandidates.sourceId, candidate.sourceId),
+        eq(providerCustomerScopeCandidates.objectId, candidate.objectId),
+        eq(providerCustomerScopeCandidates.derivedFrom, candidate.derivedFrom),
+        eq(providerCustomerScopeCandidates.candidateValue, candidate.candidateValue),
       ));
     return existing ?? undefined;
   }

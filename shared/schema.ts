@@ -61,17 +61,80 @@ export const customerScopeAssignmentConfidenceValues = [
   "manual",
 ] as const;
 
+export const infrastructureProviderTypeValues = [
+  "azure",
+  "proxmox",
+  "vmware",
+  "aws",
+  "gcp",
+  "fake",
+] as const;
+
+export const infrastructureObjectTypeValues = [
+  "subscription",
+  "resource_group",
+  "vm",
+  "network_interface",
+  "vnet",
+  "subnet",
+  "disk",
+  "public_ip",
+  "cluster",
+  "node",
+  "template",
+  "storage",
+  "network_bridge",
+  "pool",
+  "tag",
+  "vcenter",
+  "datacenter",
+  "host",
+  "datastore",
+  "network",
+  "folder",
+] as const;
+
+export const providerCustomerScopeCandidateDerivedFromValues = [
+  "tag",
+  "label",
+  "resource_group",
+  "subscription",
+  "folder",
+  "pool",
+  "project",
+  "manual",
+  "name_convention",
+  "notes",
+  "unknown",
+] as const;
+
+export const providerCustomerScopeCandidateConfidenceValues = [
+  "authoritative",
+  "high",
+  "medium",
+  "low",
+  "unknown",
+] as const;
+
 export const customerScopeStrategySchema = z.enum(customerScopeStrategyValues);
 export const customerScopeIsolationSchema = z.enum(customerScopeIsolationValues);
 export const ciCustomerRelationshipSchema = z.enum(ciCustomerRelationshipValues);
 export const customerScopeAssignmentDerivedFromSchema = z.enum(customerScopeAssignmentDerivedFromValues);
 export const customerScopeAssignmentConfidenceSchema = z.enum(customerScopeAssignmentConfidenceValues);
+export const infrastructureProviderTypeSchema = z.enum(infrastructureProviderTypeValues);
+export const infrastructureObjectTypeSchema = z.enum(infrastructureObjectTypeValues);
+export const providerCustomerScopeCandidateDerivedFromSchema = z.enum(providerCustomerScopeCandidateDerivedFromValues);
+export const providerCustomerScopeCandidateConfidenceSchema = z.enum(providerCustomerScopeCandidateConfidenceValues);
 
 export type CustomerScopeStrategy = z.infer<typeof customerScopeStrategySchema>;
 export type CustomerScopeIsolation = z.infer<typeof customerScopeIsolationSchema>;
 export type CiCustomerRelationship = z.infer<typeof ciCustomerRelationshipSchema>;
 export type CustomerScopeAssignmentDerivedFrom = z.infer<typeof customerScopeAssignmentDerivedFromSchema>;
 export type CustomerScopeAssignmentConfidence = z.infer<typeof customerScopeAssignmentConfidenceSchema>;
+export type InfrastructureProviderType = z.infer<typeof infrastructureProviderTypeSchema>;
+export type InfrastructureObjectType = z.infer<typeof infrastructureObjectTypeSchema>;
+export type ProviderCustomerScopeCandidateDerivedFrom = z.infer<typeof providerCustomerScopeCandidateDerivedFromSchema>;
+export type ProviderCustomerScopeCandidateConfidence = z.infer<typeof providerCustomerScopeCandidateConfidenceSchema>;
 
 // Organizations table for multi-tenancy
 export const organizations = pgTable("organizations", {
@@ -289,6 +352,149 @@ export const externalObjectsRelations = relations(externalObjects, ({ one }) => 
   providerAccount: one(providerAccounts, {
     fields: [externalObjects.providerAccountId],
     references: [providerAccounts.id],
+  }),
+}));
+
+// Infrastructure Objects represent observed runtime inventory from provider sources.
+// They are separate from CMDB/reference objects and must not be used as GATE authority.
+export const infrastructureObjects = pgTable("infrastructure_objects", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  sourceId: varchar("source_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  providerType: text("provider_type").$type<InfrastructureProviderType>().notNull(),
+  objectType: text("object_type").notNull(),
+  externalId: text("external_id").notNull(),
+  providerNativeId: text("provider_native_id"),
+  name: text("name"),
+  displayName: text("display_name"),
+  region: text("region"),
+  zone: text("zone"),
+  cluster: text("cluster"),
+  node: text("node"),
+  lifecycleState: text("lifecycle_state"),
+  powerState: text("power_state"),
+  tags: jsonb("tags").$type<unknown[] | Record<string, unknown>>().notNull().default([]),
+  labels: jsonb("labels").$type<Record<string, unknown>>().notNull().default({}),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  raw: jsonb("raw").$type<Record<string, unknown> | null>().default(null),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqueInfrastructureObjectExternal: uniqueIndex("unique_infrastructure_object_external").on(
+    table.orgId,
+    table.sourceId,
+    table.objectType,
+    table.externalId,
+  ),
+  idxInfrastructureObjectsOrg: index("idx_infrastructure_objects_org").on(table.orgId),
+  idxInfrastructureObjectsSource: index("idx_infrastructure_objects_source").on(table.sourceId),
+  idxInfrastructureObjectsProviderType: index("idx_infrastructure_objects_provider_type").on(table.providerType),
+  idxInfrastructureObjectsObjectType: index("idx_infrastructure_objects_object_type").on(table.objectType),
+  idxInfrastructureObjectsExternalId: index("idx_infrastructure_objects_external_id").on(table.externalId),
+  idxInfrastructureObjectsOrgSourceType: index("idx_infrastructure_objects_org_source_type").on(table.orgId, table.sourceId, table.objectType),
+}));
+
+export const infrastructureRelationships = pgTable("infrastructure_relationships", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  sourceId: varchar("source_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  fromObjectId: varchar("from_object_id").notNull().references(() => infrastructureObjects.id, { onDelete: "cascade" }),
+  toObjectId: varchar("to_object_id").notNull().references(() => infrastructureObjects.id, { onDelete: "cascade" }),
+  relationshipType: text("relationship_type").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqueInfrastructureRelationship: uniqueIndex("unique_infrastructure_relationship").on(
+    table.orgId,
+    table.sourceId,
+    table.fromObjectId,
+    table.toObjectId,
+    table.relationshipType,
+  ),
+  idxInfrastructureRelationshipsOrg: index("idx_infrastructure_relationships_org").on(table.orgId),
+  idxInfrastructureRelationshipsSource: index("idx_infrastructure_relationships_source").on(table.sourceId),
+  idxInfrastructureRelationshipsFrom: index("idx_infrastructure_relationships_from").on(table.fromObjectId),
+  idxInfrastructureRelationshipsTo: index("idx_infrastructure_relationships_to").on(table.toObjectId),
+  idxInfrastructureRelationshipsType: index("idx_infrastructure_relationships_type").on(table.relationshipType),
+}));
+
+export const providerCustomerScopeCandidates = pgTable("provider_customer_scope_candidates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  sourceId: varchar("source_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  objectId: varchar("object_id").notNull().references(() => infrastructureObjects.id, { onDelete: "cascade" }),
+  derivedFrom: text("derived_from").$type<ProviderCustomerScopeCandidateDerivedFrom>().notNull(),
+  candidateValue: text("candidate_value").notNull(),
+  confidence: text("confidence").$type<ProviderCustomerScopeCandidateConfidence>().notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqueProviderCustomerScopeCandidate: uniqueIndex("unique_provider_customer_scope_candidate").on(
+    table.orgId,
+    table.sourceId,
+    table.objectId,
+    table.derivedFrom,
+    table.candidateValue,
+  ),
+  idxProviderCustomerScopeCandidatesOrg: index("idx_provider_customer_scope_candidates_org").on(table.orgId),
+  idxProviderCustomerScopeCandidatesSource: index("idx_provider_customer_scope_candidates_source").on(table.sourceId),
+  idxProviderCustomerScopeCandidatesObject: index("idx_provider_customer_scope_candidates_object").on(table.objectId),
+  idxProviderCustomerScopeCandidatesDerivedFrom: index("idx_provider_customer_scope_candidates_derived_from").on(table.derivedFrom),
+  idxProviderCustomerScopeCandidatesConfidence: index("idx_provider_customer_scope_candidates_confidence").on(table.confidence),
+}));
+
+export const infrastructureObjectsRelations = relations(infrastructureObjects, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [infrastructureObjects.orgId],
+    references: [organizations.id],
+  }),
+  source: one(providerAccounts, {
+    fields: [infrastructureObjects.sourceId],
+    references: [providerAccounts.id],
+  }),
+  outgoingRelationships: many(infrastructureRelationships, { relationName: "fromInfrastructureObject" }),
+  incomingRelationships: many(infrastructureRelationships, { relationName: "toInfrastructureObject" }),
+  customerScopeCandidates: many(providerCustomerScopeCandidates),
+}));
+
+export const infrastructureRelationshipsRelations = relations(infrastructureRelationships, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [infrastructureRelationships.orgId],
+    references: [organizations.id],
+  }),
+  source: one(providerAccounts, {
+    fields: [infrastructureRelationships.sourceId],
+    references: [providerAccounts.id],
+  }),
+  fromObject: one(infrastructureObjects, {
+    fields: [infrastructureRelationships.fromObjectId],
+    references: [infrastructureObjects.id],
+    relationName: "fromInfrastructureObject",
+  }),
+  toObject: one(infrastructureObjects, {
+    fields: [infrastructureRelationships.toObjectId],
+    references: [infrastructureObjects.id],
+    relationName: "toInfrastructureObject",
+  }),
+}));
+
+export const providerCustomerScopeCandidatesRelations = relations(providerCustomerScopeCandidates, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [providerCustomerScopeCandidates.orgId],
+    references: [organizations.id],
+  }),
+  source: one(providerAccounts, {
+    fields: [providerCustomerScopeCandidates.sourceId],
+    references: [providerAccounts.id],
+  }),
+  object: one(infrastructureObjects, {
+    fields: [providerCustomerScopeCandidates.objectId],
+    references: [infrastructureObjects.id],
   }),
 }));
 
@@ -774,6 +980,29 @@ export const insertExternalObjectSchema = createInsertSchema(externalObjects).om
   lastSyncedAt: true,
 });
 
+export const insertInfrastructureObjectSchema = createInsertSchema(infrastructureObjects).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  providerType: infrastructureProviderTypeSchema,
+});
+
+export const insertInfrastructureRelationshipSchema = createInsertSchema(infrastructureRelationships).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertProviderCustomerScopeCandidateSchema = createInsertSchema(providerCustomerScopeCandidates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  derivedFrom: providerCustomerScopeCandidateDerivedFromSchema,
+  confidence: providerCustomerScopeCandidateConfidenceSchema,
+});
+
 export const insertGroupCacheSchema = createInsertSchema(groupCache).omit({
   refreshedAt: true,
 });
@@ -894,6 +1123,15 @@ export type SyncRun = typeof syncRuns.$inferSelect;
 
 export type InsertExternalObject = z.infer<typeof insertExternalObjectSchema>;
 export type ExternalObject = typeof externalObjects.$inferSelect;
+
+export type InsertInfrastructureObject = typeof infrastructureObjects.$inferInsert;
+export type InfrastructureObject = typeof infrastructureObjects.$inferSelect;
+
+export type InsertInfrastructureRelationship = typeof infrastructureRelationships.$inferInsert;
+export type InfrastructureRelationship = typeof infrastructureRelationships.$inferSelect;
+
+export type InsertProviderCustomerScopeCandidate = typeof providerCustomerScopeCandidates.$inferInsert;
+export type ProviderCustomerScopeCandidate = typeof providerCustomerScopeCandidates.$inferSelect;
 
 export type InsertGroupCache = z.infer<typeof insertGroupCacheSchema>;
 export type GroupCache = typeof groupCache.$inferSelect;

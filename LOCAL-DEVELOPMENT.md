@@ -87,6 +87,38 @@ npm.cmd run netbox:seed:demo
 
 The seed script is optional and never runs automatically.
 
+## Seed CustomerScope Demo Data
+
+After Rovelink has cached VM data for the local NetBox CMDB, you can seed
+CustomerScope demo records for UI smoke validation:
+
+```powershell
+$env:ROVELINK_DEMO_DATA="true"
+npm.cmd run db:seed:demo-customer-scopes
+```
+
+To target a specific local CMDB source, set:
+
+```powershell
+$env:ROVELINK_DEMO_CMDB_ID="<cmdb-id>"
+```
+
+The script is demo-only, opt-in, and idempotent. It uses local cached
+`netbox_vms.id` values for assignments and does not write to NetBox, credentials,
+tokens, or CMDB configuration. It creates or updates:
+
+- `ACME GmbH`, with an evaluated ready VM and good score.
+- `Customer B`, with an evaluated not-ready VM and a governance finding.
+- `Customer C`, with an evaluated VM that has a `block_automation`
+  recommendation.
+- An explicit Unassigned pseudo-scope assignment.
+- `Customer D`, with assigned VM data but no demo evaluation, so the UI can show
+  `Not evaluated`.
+
+Open the printed CMDB URL and check the Customer Scopes card. It should show
+populated governance summary columns for objects, evaluation coverage, average
+score, readiness, block recommendations, top finding, and last evaluated time.
+
 ## Configure Rovelink CMDB
 
 When Rovelink runs in Docker, configure the NetBox CMDB URL as:

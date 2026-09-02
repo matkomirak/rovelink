@@ -13,6 +13,7 @@ import { notificationService } from "./services/notificationService";
 import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
+import { syncFakeProviderInfrastructure } from "./services/fake-infrastructure-sync";
 import { sanitizeGitSyncError, syncGitProject } from "./services/git-project-sync";
 import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema, type CustomerScope, type CustomerScopeObjectAssignment, type GovernanceObjectEvaluation } from "@shared/schema";
 import { db } from "./db";
@@ -1068,6 +1069,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ runId });
     } catch (error: any) {
       sendInternalError(res, error, "providers.sync", "Failed to start sync");
+    }
+  });
+
+  app.post("/api/providers/:id/inventory/sync", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      if (provider.kind !== "fake") {
+        return res.status(501).json({
+          message: "Normalized infrastructure inventory sync is currently implemented only for fake providers",
+          sourceId: provider.id,
+          providerType: provider.kind,
+          objectsUpserted: 0,
+          relationshipsUpserted: 0,
+          customerScopeCandidatesUpserted: 0,
+          skipped: [{ reason: `Provider kind '${provider.kind}' is not implemented for normalized infrastructure sync yet` }],
+          errors: [],
+        });
+      }
+
+      const decryptedConfig = decryptProviderConfig(provider.config as Record<string, any>);
+      const result = await syncFakeProviderInfrastructure(provider, req.orgId!, decryptedConfig);
+      res.json(result);
+    } catch (error: any) {
+      sendInternalError(res, error, "providers.inventory.sync", "Failed to sync provider infrastructure inventory");
     }
   });
 

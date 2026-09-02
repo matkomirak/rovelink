@@ -1,0 +1,336 @@
+import { after, before, beforeEach, describe, test } from "node:test";
+import assert from "node:assert/strict";
+import express from "express";
+import cookieParser from "cookie-parser";
+import jwt from "jsonwebtoken";
+import supertest from "supertest";
+import type { Server } from "node:http";
+import { registerRoutes } from "../server/routes";
+import { sanitizeInfrastructureMetadata, storage } from "../server/storage";
+import type {
+  InfrastructureObject,
+  InsertInfrastructureObject,
+  InsertProviderCustomerScopeCandidate,
+  ProviderAccount,
+  ProviderCustomerScopeCandidate,
+} from "../shared/schema";
+
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
+const ORG_A = "org-a";
+const ORG_B = "org-b";
+
+function makeToken(role = "operator", orgId = ORG_A): string {
+  return jwt.sign(
+    { userId: `${orgId}-${role}`, username: role, role, orgId },
+    JWT_SECRET,
+    { expiresIn: "1h" },
+  );
+}
+
+function makeProvider(overrides: Partial<ProviderAccount>): ProviderAccount {
+  const now = new Date();
+  return {
+    id: "fake-provider-a",
+    orgId: ORG_A,
+    kind: "fake",
+    name: "Fake Provider A",
+    enabled: true,
+    scheduleCron: null,
+    config: {
+      variant: "azure",
+      seed: 42,
+      vms: 3,
+      tags: {
+        customer: ["ACME GmbH", "Beta"],
+        wave: ["Wave1"],
+        role: ["web"],
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+class ProviderInfrastructureMemoryStore {
+  providers = new Map<string, ProviderAccount>();
+  objects: InfrastructureObject[] = [];
+  candidates: ProviderCustomerScopeCandidate[] = [];
+  customerScopes: unknown[] = [];
+  customerScopeAssignments: unknown[] = [];
+  private nextObjectId = 1;
+  private nextCandidateId = 1;
+
+  async getUser(id: string) {
+    return {
+      id,
+      username: id,
+      password: "",
+      role: id.includes("viewer") ? "viewer" : "operator",
+      orgId: id.startsWith(ORG_B) ? ORG_B : ORG_A,
+      createdAt: new Date(),
+    };
+  }
+
+  async getProvider(id: string, orgId: string) {
+    const provider = this.providers.get(id);
+    return provider && provider.orgId === orgId ? provider : undefined;
+  }
+
+  async upsertInfrastructureObject(input: InsertInfrastructureObject): Promise<InfrastructureObject> {
+    const provider = this.providers.get(input.sourceId);
+    if (!provider || provider.orgId !== input.orgId) {
+      throw new Error("source must belong to organization");
+    }
+
+    const existing = this.objects.find((object) => (
+      object.orgId === input.orgId &&
+      object.sourceId === input.sourceId &&
+      object.objectType === input.objectType &&
+      object.externalId === input.externalId
+    ));
+    const now = new Date();
+    const sanitized = {
+      ...input,
+      tags: sanitizeInfrastructureMetadata(input.tags ?? []),
+      labels: sanitizeInfrastructureMetadata(input.labels ?? {}),
+      metadata: sanitizeInfrastructureMetadata(input.metadata ?? {}),
+      raw: input.raw == null ? null : sanitizeInfrastructureMetadata(input.raw),
+    };
+
+    if (existing) {
+      const updated: InfrastructureObject = {
+        ...existing,
+        ...sanitized,
+        id: existing.id,
+        createdAt: existing.createdAt,
+        updatedAt: now,
+        lastSyncedAt: sanitized.lastSyncedAt ?? now,
+      };
+      this.objects = this.objects.map((object) => object.id === existing.id ? updated : object);
+      return updated;
+    }
+
+    const created: InfrastructureObject = {
+      id: `infra-object-${this.nextObjectId++}`,
+      providerNativeId: null,
+      name: null,
+      displayName: null,
+      region: null,
+      zone: null,
+      cluster: null,
+      node: null,
+      lifecycleState: null,
+      powerState: null,
+      tags: [],
+      labels: {},
+      metadata: {},
+      raw: null,
+      lastSyncedAt: now,
+      ...sanitized,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.objects.push(created);
+    return created;
+  }
+
+  async upsertProviderCustomerScopeCandidate(
+    input: InsertProviderCustomerScopeCandidate,
+  ): Promise<ProviderCustomerScopeCandidate> {
+    const object = this.objects.find((candidateObject) => (
+      candidateObject.id === input.objectId &&
+      candidateObject.orgId === input.orgId &&
+      candidateObject.sourceId === input.sourceId
+    ));
+    if (!object) {
+      throw new Error("object must belong to the same organization and source");
+    }
+
+    const existing = this.candidates.find((candidate) => (
+      candidate.orgId === input.orgId &&
+      candidate.sourceId === input.sourceId &&
+      candidate.objectId === input.objectId &&
+      candidate.derivedFrom === input.derivedFrom &&
+      candidate.candidateValue === input.candidateValue
+    ));
+    const now = new Date();
+
+    if (existing) {
+      const updated: ProviderCustomerScopeCandidate = {
+        ...existing,
+        ...input,
+        id: existing.id,
+        createdAt: existing.createdAt,
+        metadata: sanitizeInfrastructureMetadata(input.metadata ?? {}),
+        lastSyncedAt: input.lastSyncedAt ?? now,
+        updatedAt: now,
+      };
+      this.candidates = this.candidates.map((candidate) => candidate.id === existing.id ? updated : candidate);
+      return updated;
+    }
+
+    const created: ProviderCustomerScopeCandidate = {
+      id: `infra-candidate-${this.nextCandidateId++}`,
+      lastSyncedAt: now,
+      ...input,
+      metadata: sanitizeInfrastructureMetadata(input.metadata ?? {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.candidates.push(created);
+    return created;
+  }
+}
+
+let server: Server;
+let req: ReturnType<typeof supertest>;
+let store: ProviderInfrastructureMemoryStore;
+const originals = {
+  getUser: storage.getUser,
+  getProvider: storage.getProvider,
+  upsertInfrastructureObject: storage.upsertInfrastructureObject,
+  upsertProviderCustomerScopeCandidate: storage.upsertProviderCustomerScopeCandidate,
+};
+
+before(async () => {
+  const app = express();
+  app.use(cookieParser());
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ extended: false }));
+  server = await registerRoutes(app);
+  req = supertest(server);
+});
+
+beforeEach(() => {
+  store = new ProviderInfrastructureMemoryStore();
+  store.providers.set("fake-provider-a", makeProvider({ id: "fake-provider-a", orgId: ORG_A }));
+  store.providers.set("fake-provider-b", makeProvider({ id: "fake-provider-b", orgId: ORG_A, name: "Fake Provider B" }));
+  store.providers.set("fake-provider-other-org", makeProvider({ id: "fake-provider-other-org", orgId: ORG_B }));
+  store.providers.set("azure-provider-a", makeProvider({ id: "azure-provider-a", orgId: ORG_A, kind: "azure", name: "Azure Provider" }));
+
+  storage.getUser = store.getUser.bind(store) as any;
+  storage.getProvider = store.getProvider.bind(store) as any;
+  storage.upsertInfrastructureObject = store.upsertInfrastructureObject.bind(store) as any;
+  storage.upsertProviderCustomerScopeCandidate = store.upsertProviderCustomerScopeCandidate.bind(store) as any;
+});
+
+after(async () => {
+  storage.getUser = originals.getUser;
+  storage.getProvider = originals.getProvider;
+  storage.upsertInfrastructureObject = originals.upsertInfrastructureObject;
+  storage.upsertProviderCustomerScopeCandidate = originals.upsertProviderCustomerScopeCandidate;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+describe("fake provider normalized infrastructure sync", () => {
+  test("creates infrastructure objects and customer scope candidates without exposing provider config", async () => {
+    const res = await req
+      .post("/api/providers/fake-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+
+    assert.equal(res.body.sourceId, "fake-provider-a");
+    assert.equal(res.body.providerType, "fake");
+    assert.equal(res.body.objectsUpserted, 3);
+    assert.equal(res.body.relationshipsUpserted, 0);
+    assert.ok(res.body.customerScopeCandidatesUpserted > 0);
+    assert.equal(res.body.config, undefined);
+    assert.equal(JSON.stringify(res.body).includes("api_key"), false);
+    assert.equal(store.objects.length, 3);
+    assert.ok(store.objects.every((object) => object.providerType === "fake"));
+    assert.ok(store.objects.every((object) => object.objectType === "vm"));
+    assert.ok(store.candidates.length > 0);
+  });
+
+  test("repeated fake sync is idempotent", async () => {
+    await req
+      .post("/api/providers/fake-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+    await req
+      .post("/api/providers/fake-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+
+    assert.equal(store.objects.length, 3);
+    assert.equal(new Set(store.objects.map((object) => object.externalId)).size, 3);
+    assert.equal(
+      store.candidates.length,
+      new Set(store.candidates.map((candidate) => `${candidate.sourceId}:${candidate.objectId}:${candidate.derivedFrom}:${candidate.candidateValue}`)).size,
+    );
+  });
+
+  test("same fake externalId in another provider source creates separate objects", async () => {
+    await req
+      .post("/api/providers/fake-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+    await req
+      .post("/api/providers/fake-provider-b/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+
+    assert.equal(store.objects.length, 6);
+    assert.equal(store.objects.filter((object) => object.sourceId === "fake-provider-a").length, 3);
+    assert.equal(store.objects.filter((object) => object.sourceId === "fake-provider-b").length, 3);
+  });
+
+  test("object identity uses externalId instead of display name", async () => {
+    const provider = store.providers.get("fake-provider-a")!;
+    store.providers.set("fake-provider-a", {
+      ...provider,
+      config: {
+        ...provider.config as Record<string, unknown>,
+        vms: 2,
+        tags: { customer: ["ACME"], wave: ["Wave1"], role: ["web"] },
+      },
+    });
+
+    await req
+      .post("/api/providers/fake-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+
+    store.objects[0].displayName = store.objects[1].displayName;
+    await req
+      .post("/api/providers/fake-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+
+    assert.equal(store.objects.length, 2);
+  });
+
+  test("provider customer scope candidates remain hints only", async () => {
+    await req
+      .post("/api/providers/fake-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(200);
+
+    assert.ok(store.candidates.length > 0);
+    assert.equal(store.customerScopes.length, 0);
+    assert.equal(store.customerScopeAssignments.length, 0);
+    assert.ok(store.candidates.every((candidate) => candidate.confidence !== "authoritative"));
+  });
+
+  test("non-fake provider returns not implemented for normalized infrastructure sync", async () => {
+    const res = await req
+      .post("/api/providers/azure-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(501);
+
+    assert.equal(res.body.providerType, "azure");
+    assert.equal(res.body.objectsUpserted, 0);
+    assert.match(res.body.message, /only for fake providers/);
+    assert.equal(store.objects.length, 0);
+  });
+
+  test("cross-org provider access is rejected", async () => {
+    await req
+      .post("/api/providers/fake-provider-other-org/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken("operator", ORG_A)}`)
+      .expect(404);
+
+    assert.equal(store.objects.length, 0);
+  });
+});

@@ -209,6 +209,27 @@ Use this short flow for a CustomerScope MSP pilot walkthrough:
 9. Explain the next roadmap: Azure provider, Proxmox provider, and
    provider-vs-CMDB governance comparison.
 
+### Fake Infrastructure Inventory Sync
+
+The fake/demo provider can populate Rovelink's normalized infrastructure
+inventory tables without contacting NetBox, Azure, Proxmox, or any other real
+provider. This is an opt-in, read-only validation path for the provider
+inventory model.
+
+After creating a fake provider account, run:
+
+```bash
+curl -X POST http://localhost:5000/api/providers/<provider-id>/inventory/sync \
+  -H "Cookie: auth_token=<your-login-cookie>"
+```
+
+The sync writes observed fake VMs into `infrastructure_objects`. It may also
+write provider CustomerScope candidates into
+`provider_customer_scope_candidates` when fake tags, labels, or naming hints
+contain customer-like values. These candidates are hints only: they do not
+create CustomerScopes, do not create authoritative assignments, do not write to
+NetBox, and do not affect Governance or Automation GATE behavior.
+
 ### MSP Pilot Roadmap
 
 Current MSP pilot scope:

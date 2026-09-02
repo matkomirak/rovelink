@@ -89,12 +89,29 @@ The seed script is optional and never runs automatically.
 
 ## Seed CustomerScope Demo Data
 
-After Rovelink has cached VM data for the local NetBox CMDB, you can seed
-CustomerScope demo records for UI smoke validation:
+The CustomerScope demo seed creates a local MSP pilot dataset for the CMDB
+Customer Scopes table, VM customer assignment sheet, and governance reporting
+columns. It is intended for local development, smoke validation, and screenshots.
+
+Start Rovelink and verify the app and database containers are healthy:
+
+```powershell
+docker compose up -d --build
+docker compose ps
+```
+
+After Rovelink has cached VM data for the local NetBox CMDB, run the opt-in demo
+seed:
 
 ```powershell
 $env:ROVELINK_DEMO_DATA="true"
 npm.cmd run db:seed:demo-customer-scopes
+```
+
+When running inside Docker, use the container command:
+
+```powershell
+docker compose exec -e ROVELINK_DEMO_DATA=true app npm run db:seed:demo-customer-scopes
 ```
 
 To target a specific local CMDB source, set:
@@ -103,21 +120,117 @@ To target a specific local CMDB source, set:
 $env:ROVELINK_DEMO_CMDB_ID="<cmdb-id>"
 ```
 
+To target a specific local organization, set:
+
+```powershell
+$env:ROVELINK_DEMO_ORG_ID="<org-id>"
+```
+
 The script is demo-only, opt-in, and idempotent. It uses local cached
 `netbox_vms.id` values for assignments and does not write to NetBox, credentials,
-tokens, or CMDB configuration. It creates or updates:
+tokens, or CMDB configuration. Local databases may retain extra demo blueprint
+versions or seeded CustomerScope records after smoke tests.
+
+Open the printed CMDB URL, or navigate from the app:
+
+```text
+http://localhost:5000
+```
+
+Then open `CMDBs`, select the local NetBox CMDB, and check the `Customer Scopes`
+card. It should show populated governance summary columns for objects, evaluation
+coverage, average score, readiness, block recommendations, top finding, and last
+evaluated time.
+
+### CustomerScope Demo Scenarios
+
+The seed creates or updates these local demo scenarios:
 
 - `ACME GmbH`, with an evaluated ready VM and good score.
 - `Customer B`, with an evaluated not-ready VM and a governance finding.
 - `Customer C`, with an evaluated VM that has a `block_automation`
   recommendation.
-- An explicit Unassigned pseudo-scope assignment.
 - `Customer D`, with assigned VM data but no demo evaluation, so the UI can show
   `Not evaluated`.
+- An explicit Unassigned pseudo-scope assignment.
 
-Open the printed CMDB URL and check the Customer Scopes card. It should show
-populated governance summary columns for objects, evaluation coverage, average
-score, readiness, block recommendations, top finding, and last evaluated time.
+`ACME GmbH` represents a healthy customer: the VM is evaluated, has a high
+governance score, and is automation ready.
+
+`Customer B` represents a customer with a governance issue: the VM is evaluated
+but not automation ready.
+
+`Customer C` represents a policy escalation: the evaluation recommends
+`block_automation`. Actual blocking still depends on Automation Inventory
+governance enforcement settings.
+
+`Customer D` represents assigned inventory without an evaluation yet. The
+Customer Scopes table should show `Not evaluated`.
+
+`Unassigned` represents objects with no CustomerScope assignment. This should be
+shown as a warning or attention state and must not be treated as internal.
+
+### CustomerScope Screenshot Checklist
+
+Capture screenshots manually after the demo seed if you need MSP pilot material:
+
+- Governance Blueprint detail page showing the `CustomerScope Policy` card.
+- CustomerScope policy edit dialog.
+- Versions table showing an inactive policy version.
+- CMDB detail page showing the Customer Scopes card with populated governance
+  columns.
+- Unassigned row warning or attention state.
+- VM detail sheet showing the Customer Assignment section.
+- Governance evaluation findings showing a CustomerScope finding.
+- Automation Inventory governance controls showing observe, warn, and enforce
+  modes.
+
+The repository does not currently keep generated screenshot assets. Prefer this
+checklist over committing binary screenshots.
+
+### MSP Pilot Demo Script
+
+Use this short flow for a CustomerScope MSP pilot walkthrough:
+
+1. Show NetBox/CMDB cached VMs in the CMDB object browser.
+2. Show CustomerScopes discovered or seeded for the selected CMDB.
+3. Show customer-level governance summary columns in the Customer Scopes card.
+4. Open a VM detail sheet and show the Customer Assignment section.
+5. Open the Governance Blueprint detail page and show the CustomerScope Policy.
+6. Explain policy modes:
+   - `visibility_only`: reports CustomerScope issues only.
+   - `score_only`: may affect governance/data-management score.
+   - `readiness`: may mark an object not automation ready.
+   - `enforce`: recommends `block_automation`.
+7. Show evaluation findings and automation readiness.
+8. Explain the enforcement distinction:
+   - Blueprint `enforce` recommends blocking.
+   - Automation Inventory `enforce` decides whether automation actually blocks.
+9. Explain the next roadmap: Azure provider, Proxmox provider, and
+   provider-vs-CMDB governance comparison.
+
+### MSP Pilot Roadmap
+
+Current MSP pilot scope:
+
+- NetBox as the reference CMDB and governance source.
+- CustomerScope as the customer/environment boundary.
+- Azure as a planned provider source.
+- Proxmox as a planned provider source, initially with fake/demo or read-only
+  data.
+
+Deferred:
+
+- i-doit integration. Useful API access requires licensed/paid access, so i-doit
+  is not suitable for the open MSP pilot.
+
+Future work:
+
+- Provider inventory abstraction.
+- Azure read-only inventory.
+- Proxmox read-only or fake-data provider.
+- Provider-to-CMDB drift and comparison.
+- Customer-level dashboard and reporting detail pages.
 
 ## Configure Rovelink CMDB
 

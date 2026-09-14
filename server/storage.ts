@@ -154,6 +154,15 @@ export interface IStorage {
     sourceId: string,
     filters?: { providerType?: string; objectType?: string },
   ): Promise<InfrastructureObject[]>;
+  listInfrastructureObjectTypes(
+    orgId: string,
+    sourceId: string,
+  ): Promise<Array<{ objectType: string; count: number; lastSyncedAt: Date | null }>>;
+  listInfrastructureObjectsWithCandidateCounts(
+    orgId: string,
+    sourceId: string,
+    filters?: { providerType?: string; objectType?: string },
+  ): Promise<Array<InfrastructureObject & { customerScopeCandidateCount: number }>>;
   getInfrastructureObject(id: string, orgId: string): Promise<InfrastructureObject | undefined>;
   getInfrastructureObjectByExternalId(
     orgId: string,
@@ -161,6 +170,11 @@ export interface IStorage {
     objectType: string,
     externalId: string,
   ): Promise<InfrastructureObject | undefined>;
+  getInfrastructureObjectWithCandidates(
+    orgId: string,
+    sourceId: string,
+    objectId: string,
+  ): Promise<(InfrastructureObject & { customerScopeCandidates: ProviderCustomerScopeCandidate[] }) | undefined>;
   upsertInfrastructureRelationship(input: InsertInfrastructureRelationship): Promise<InfrastructureRelationship>;
   listInfrastructureRelationships(
     orgId: string,
@@ -706,6 +720,46 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(infrastructureObjects.updatedAt), desc(infrastructureObjects.createdAt));
   }
 
+  async listInfrastructureObjectTypes(
+    orgId: string,
+    sourceId: string,
+  ): Promise<Array<{ objectType: string; count: number; lastSyncedAt: Date | null }>> {
+    await this.assertProviderSourceInOrg(sourceId, orgId);
+    const rows = await db
+      .select({
+        objectType: infrastructureObjects.objectType,
+        count: sql<number>`count(*)::int`,
+        lastSyncedAt: sql<Date | null>`max(${infrastructureObjects.lastSyncedAt})`,
+      })
+      .from(infrastructureObjects)
+      .where(and(
+        eq(infrastructureObjects.orgId, orgId),
+        eq(infrastructureObjects.sourceId, sourceId),
+      ))
+      .groupBy(infrastructureObjects.objectType)
+      .orderBy(infrastructureObjects.objectType);
+    return rows;
+  }
+
+  async listInfrastructureObjectsWithCandidateCounts(
+    orgId: string,
+    sourceId: string,
+    filters: { providerType?: string; objectType?: string } = {},
+  ): Promise<Array<InfrastructureObject & { customerScopeCandidateCount: number }>> {
+    const objects = await this.listInfrastructureObjects(orgId, sourceId, filters);
+    if (objects.length === 0) return [];
+
+    const candidates = await this.listProviderCustomerScopeCandidates(orgId, sourceId);
+    const counts = new Map<string, number>();
+    for (const candidate of candidates) {
+      counts.set(candidate.objectId, (counts.get(candidate.objectId) ?? 0) + 1);
+    }
+    return objects.map((object) => ({
+      ...object,
+      customerScopeCandidateCount: counts.get(object.id) ?? 0,
+    }));
+  }
+
   async getInfrastructureObject(id: string, orgId: string): Promise<InfrastructureObject | undefined> {
     const [object] = await db
       .select()
@@ -731,6 +785,18 @@ export class DatabaseStorage implements IStorage {
         eq(infrastructureObjects.externalId, externalId),
       ));
     return object ?? undefined;
+  }
+
+  async getInfrastructureObjectWithCandidates(
+    orgId: string,
+    sourceId: string,
+    objectId: string,
+  ): Promise<(InfrastructureObject & { customerScopeCandidates: ProviderCustomerScopeCandidate[] }) | undefined> {
+    await this.assertProviderSourceInOrg(sourceId, orgId);
+    const object = await this.getInfrastructureObject(objectId, orgId);
+    if (!object || object.sourceId !== sourceId) return undefined;
+    const customerScopeCandidates = await this.listProviderCustomerScopeCandidatesForObject(orgId, sourceId, objectId);
+    return { ...object, customerScopeCandidates };
   }
 
   async upsertInfrastructureRelationship(input: InsertInfrastructureRelationship): Promise<InfrastructureRelationship> {

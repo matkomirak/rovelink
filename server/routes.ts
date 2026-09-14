@@ -82,6 +82,84 @@ export function buildRunFailureLog(error: unknown): string {
   return `[rovelink] Run failed: ${message}\n`;
 }
 
+function infrastructureObjectTypeLabel(objectType: string): string {
+  const labels: Record<string, string> = {
+    vm: "Virtual Machines",
+    subscription: "Subscriptions",
+    resource_group: "Resource Groups",
+    network_interface: "Network Interfaces",
+    vnet: "Virtual Networks",
+    subnet: "Subnets",
+    disk: "Disks",
+    public_ip: "Public IPs",
+    cluster: "Clusters",
+    node: "Nodes",
+    template: "Templates",
+    storage: "Storage",
+    network_bridge: "Network Bridges",
+    pool: "Pools",
+    tag: "Tags",
+  };
+  return labels[objectType] ?? objectType;
+}
+
+function serializeInfrastructureObjectForList(object: any) {
+  return {
+    id: object.id,
+    objectType: object.objectType,
+    externalId: object.externalId,
+    providerNativeId: object.providerNativeId ?? null,
+    name: object.name ?? null,
+    displayName: object.displayName ?? null,
+    region: object.region ?? null,
+    zone: object.zone ?? null,
+    cluster: object.cluster ?? null,
+    node: object.node ?? null,
+    lifecycleState: object.lifecycleState ?? null,
+    powerState: object.powerState ?? null,
+    tags: object.tags ?? [],
+    labels: object.labels ?? {},
+    lastSyncedAt: object.lastSyncedAt ?? null,
+    customerScopeCandidateCount: object.customerScopeCandidateCount ?? 0,
+  };
+}
+
+function serializeProviderCustomerScopeCandidate(candidate: any) {
+  return {
+    id: candidate.id,
+    derivedFrom: candidate.derivedFrom,
+    candidateValue: candidate.candidateValue,
+    confidence: candidate.confidence,
+    metadata: candidate.metadata ?? {},
+    lastSyncedAt: candidate.lastSyncedAt ?? null,
+  };
+}
+
+function serializeInfrastructureObjectDetail(object: any) {
+  return {
+    id: object.id,
+    sourceId: object.sourceId,
+    providerType: object.providerType,
+    objectType: object.objectType,
+    externalId: object.externalId,
+    providerNativeId: object.providerNativeId ?? null,
+    name: object.name ?? null,
+    displayName: object.displayName ?? null,
+    region: object.region ?? null,
+    zone: object.zone ?? null,
+    cluster: object.cluster ?? null,
+    node: object.node ?? null,
+    lifecycleState: object.lifecycleState ?? null,
+    powerState: object.powerState ?? null,
+    tags: object.tags ?? [],
+    labels: object.labels ?? {},
+    metadata: object.metadata ?? {},
+    lastSyncedAt: object.lastSyncedAt ?? null,
+    customerScopeCandidates: (object.customerScopeCandidates ?? []).map(serializeProviderCustomerScopeCandidate),
+    relationships: [],
+  };
+}
+
 // ─── Rate limiter for login ───────────────────────────────────────────────────
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -1069,6 +1147,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ runId });
     } catch (error: any) {
       sendInternalError(res, error, "providers.sync", "Failed to start sync");
+    }
+  });
+
+  app.get("/api/providers/:id/inventory/object-types", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      const objectTypes = await storage.listInfrastructureObjectTypes(req.orgId!, provider.id);
+      res.json({
+        sourceId: provider.id,
+        providerType: provider.kind,
+        objectTypes: objectTypes.map((type) => ({
+          objectType: type.objectType,
+          label: infrastructureObjectTypeLabel(type.objectType),
+          count: type.count,
+          lastSyncedAt: type.lastSyncedAt ?? null,
+        })),
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "providers.inventory.object-types", "Failed to get provider inventory object types");
+    }
+  });
+
+  app.get("/api/providers/:id/inventory/objects", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      const objectType = typeof req.query.objectType === "string" && req.query.objectType.trim()
+        ? req.query.objectType.trim()
+        : undefined;
+      const objects = await storage.listInfrastructureObjectsWithCandidateCounts(
+        req.orgId!,
+        provider.id,
+        objectType ? { objectType } : {},
+      );
+
+      res.json({
+        sourceId: provider.id,
+        providerType: provider.kind,
+        objectType: objectType ?? null,
+        objects: objects.map(serializeInfrastructureObjectForList),
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "providers.inventory.objects", "Failed to get provider inventory objects");
+    }
+  });
+
+  app.get("/api/providers/:id/inventory/objects/:objectId/customer-scope-candidates", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      const object = await storage.getInfrastructureObject(req.params.objectId, req.orgId!);
+      if (!object || object.sourceId !== provider.id) {
+        return res.status(404).json({ message: "Infrastructure object not found" });
+      }
+
+      const candidates = await storage.listProviderCustomerScopeCandidatesForObject(req.orgId!, provider.id, object.id);
+      res.json({
+        sourceId: provider.id,
+        objectId: object.id,
+        candidates: candidates.map(serializeProviderCustomerScopeCandidate),
+      });
+    } catch (error: any) {
+      sendInternalError(res, error, "providers.inventory.object-candidates", "Failed to get provider customer scope candidates");
+    }
+  });
+
+  app.get("/api/providers/:id/inventory/objects/:objectId", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const provider = await storage.getProvider(req.params.id, req.orgId!);
+      if (!provider) {
+        return res.status(404).json({ message: "Provider not found" });
+      }
+
+      const object = await storage.getInfrastructureObjectWithCandidates(req.orgId!, provider.id, req.params.objectId);
+      if (!object) {
+        return res.status(404).json({ message: "Infrastructure object not found" });
+      }
+
+      res.json(serializeInfrastructureObjectDetail(object));
+    } catch (error: any) {
+      sendInternalError(res, error, "providers.inventory.object-detail", "Failed to get provider inventory object");
     }
   });
 

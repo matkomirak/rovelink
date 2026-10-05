@@ -19,8 +19,9 @@ import {
   ProviderInfrastructureSyncNotSupportedError,
   syncProviderInfrastructureInventory,
 } from "./services/provider-infrastructure-sync";
+import { runVmDriftComparison } from "./services/drift/drift-comparison-service";
 import { sanitizeGitSyncError, syncGitProject } from "./services/git-project-sync";
-import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema, type CustomerScope, type CustomerScopeObjectAssignment, type GovernanceObjectEvaluation } from "@shared/schema";
+import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema, type CustomerScope, type CustomerScopeObjectAssignment, type DriftMatchStatus, type DriftRunStatus, type DriftSeverity, type DriftStatus, type GovernanceObjectEvaluation } from "@shared/schema";
 import { db } from "./db";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -138,6 +139,94 @@ function serializeProviderCustomerScopeCandidate(candidate: any) {
     metadata: candidate.metadata ?? {},
     lastSyncedAt: candidate.lastSyncedAt ?? null,
   };
+}
+
+class DriftQueryValidationError extends Error {}
+
+const DRIFT_RUN_STATUSES = new Set<DriftRunStatus>(["pending", "running", "completed", "failed"]);
+const DRIFT_MATCH_STATUSES = new Set<DriftMatchStatus>(["matched", "unmatched_reference", "unmatched_provider", "ambiguous"]);
+const DRIFT_STATUSES = new Set<DriftStatus>(["no_drift", "drift", "unknown", "not_compared"]);
+const DRIFT_SEVERITIES = new Set<DriftSeverity>(["info", "warning", "critical"]);
+
+function queryStringValue(value: unknown): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
+function parseOptionalPositiveInteger(value: unknown, field: string): number | undefined {
+  const raw = queryStringValue(value);
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new DriftQueryValidationError(`${field} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
+function parseDriftRunFilters(query: Record<string, unknown>) {
+  const filters: {
+    cmdbSourceId?: string;
+    providerSourceId?: string;
+    objectType?: string;
+    status?: DriftRunStatus;
+    limit?: number;
+    offset?: number;
+  } = {};
+  const cmdbSourceId = queryStringValue(query.cmdbSourceId);
+  const providerSourceId = queryStringValue(query.providerSourceId);
+  const objectType = queryStringValue(query.objectType);
+  const status = queryStringValue(query.status);
+  if (cmdbSourceId) filters.cmdbSourceId = cmdbSourceId;
+  if (providerSourceId) filters.providerSourceId = providerSourceId;
+  if (objectType) filters.objectType = objectType;
+  if (status) {
+    if (!DRIFT_RUN_STATUSES.has(status as DriftRunStatus)) {
+      throw new DriftQueryValidationError("Unsupported drift run status filter");
+    }
+    filters.status = status as DriftRunStatus;
+  }
+  filters.limit = parseOptionalPositiveInteger(query.limit, "limit");
+  filters.offset = parseOptionalPositiveInteger(query.offset, "offset");
+  return filters;
+}
+
+function parseDriftItemFilters(query: Record<string, unknown>) {
+  const filters: {
+    matchStatus?: DriftMatchStatus;
+    driftStatus?: DriftStatus;
+    driftSeverity?: DriftSeverity;
+    limit?: number;
+    offset?: number;
+  } = {};
+  const matchStatus = queryStringValue(query.matchStatus);
+  const driftStatus = queryStringValue(query.driftStatus);
+  const driftSeverity = queryStringValue(query.driftSeverity);
+  if (matchStatus) {
+    if (!DRIFT_MATCH_STATUSES.has(matchStatus as DriftMatchStatus)) {
+      throw new DriftQueryValidationError("Unsupported drift match status filter");
+    }
+    filters.matchStatus = matchStatus as DriftMatchStatus;
+  }
+  if (driftStatus) {
+    if (!DRIFT_STATUSES.has(driftStatus as DriftStatus)) {
+      throw new DriftQueryValidationError("Unsupported drift status filter");
+    }
+    filters.driftStatus = driftStatus as DriftStatus;
+  }
+  if (driftSeverity) {
+    if (!DRIFT_SEVERITIES.has(driftSeverity as DriftSeverity)) {
+      throw new DriftQueryValidationError("Unsupported drift severity filter");
+    }
+    filters.driftSeverity = driftSeverity as DriftSeverity;
+  }
+  filters.limit = parseOptionalPositiveInteger(query.limit, "limit");
+  filters.offset = parseOptionalPositiveInteger(query.offset, "offset");
+  return filters;
+}
+
+function isDriftSourceValidationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /source.*(organization|org)|not found in organization|must belong to organization/i.test(error.message);
 }
 
 function serializeInfrastructureObjectDetail(object: any) {
@@ -679,7 +768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Inline route handlers below also call authMiddleware (idempotent).
   for (const prefix of [
     "/api/inventory", "/api/reports", "/api/projects",
-    "/api/credentials", "/api/providers", "/api/cmdbs", "/api/cmdb", "/api/stats",
+    "/api/credentials", "/api/providers", "/api/cmdbs", "/api/cmdb", "/api/drift-runs", "/api/stats",
   ] as const) {
     app.use(prefix, authMiddleware, requireOrgContext);
   }
@@ -1031,6 +1120,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ total, withIP, withUser, coverage });
     } catch (error: any) {
       sendInternalError(res, error, "reports.inventory-health", "Failed to fetch inventory health");
+    }
+  });
+
+  app.post("/api/drift-runs", authMiddleware, requireRole("admin", "operator"), async (req: AuthRequest, res) => {
+    try {
+      const objectType = req.body?.objectType ?? "vm";
+      if (objectType !== "vm") {
+        return sendClientError(res, 400, "Drift comparison only supports objectType 'vm'");
+      }
+      if (typeof req.body?.cmdbSourceId !== "string" || !req.body.cmdbSourceId.trim()) {
+        return sendClientError(res, 400, "cmdbSourceId is required");
+      }
+      if (typeof req.body?.providerSourceId !== "string" || !req.body.providerSourceId.trim()) {
+        return sendClientError(res, 400, "providerSourceId is required");
+      }
+
+      const result = await runVmDriftComparison({
+        orgId: req.orgId!,
+        cmdbSourceId: req.body.cmdbSourceId.trim(),
+        providerSourceId: req.body.providerSourceId.trim(),
+        objectType,
+      });
+      res.status(201).json(result);
+    } catch (error: any) {
+      if (isDriftSourceValidationError(error)) {
+        return sendClientError(res, 404, "Drift comparison source not found");
+      }
+      sendInternalError(res, error, "drift-runs.create", "Failed to run drift comparison");
+    }
+  });
+
+  app.get("/api/drift-runs", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const filters = parseDriftRunFilters(req.query);
+      const runs = await storage.listDriftComparisonRuns(req.orgId!, filters);
+      res.json({ runs, total: runs.length });
+    } catch (error: any) {
+      if (error instanceof DriftQueryValidationError) {
+        return sendClientError(res, 400, error.message);
+      }
+      sendInternalError(res, error, "drift-runs.list", "Failed to fetch drift runs");
+    }
+  });
+
+  app.get("/api/drift-runs/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const run = await storage.getDriftComparisonRun(req.params.id, req.orgId!);
+      if (!run) return sendClientError(res, 404, "Drift comparison run not found");
+      res.json(run);
+    } catch (error: any) {
+      sendInternalError(res, error, "drift-runs.get", "Failed to fetch drift run");
+    }
+  });
+
+  app.get("/api/drift-runs/:id/items", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const run = await storage.getDriftComparisonRun(req.params.id, req.orgId!);
+      if (!run) return sendClientError(res, 404, "Drift comparison run not found");
+
+      const filters = parseDriftItemFilters(req.query);
+      const items = await storage.listDriftComparisonItems(run.id, req.orgId!, filters);
+      res.json({ runId: run.id, items, total: items.length });
+    } catch (error: any) {
+      if (error instanceof DriftQueryValidationError) {
+        return sendClientError(res, 400, error.message);
+      }
+      sendInternalError(res, error, "drift-runs.items", "Failed to fetch drift run items");
     }
   });
 

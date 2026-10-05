@@ -33,6 +33,7 @@ const AZURE_NIC_ID = `/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/rg-
 const AZURE_VNET_ID = `/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/rg-acme-prod/providers/Microsoft.Network/virtualNetworks/acme-vnet`;
 const AZURE_SUBNET_ID = `${AZURE_VNET_ID}/subnets/web`;
 const AZURE_PUBLIC_IP_ID = `/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/rg-acme-prod/providers/Microsoft.Network/publicIPAddresses/acme-web-01-pip`;
+const PROXMOX_CLUSTER_ID = "pve-cluster-a";
 
 function makeToken(role = "operator", orgId = ORG_A): string {
   return jwt.sign(
@@ -177,6 +178,67 @@ function makeAzureCollector(discovery: AzureDiscoveryResult) {
       throw new Error("Azure normalized sync must use discoverAll");
     },
     discoverAll: async () => discovery,
+  };
+}
+
+function makeProxmoxConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    base_url: "https://pve.example.test:8006",
+    auth_method: "api_token",
+    username: "root@pam",
+    token_id: "rovelink",
+    token_secret: "super-secret-proxmox-token",
+    cluster_id: PROXMOX_CLUSTER_ID,
+    ...overrides,
+  };
+}
+
+function makeProxmoxVms(vmName = "acme-web-01"): NormalizedVm[] {
+  return [
+    {
+      externalId: "pve1-101",
+      name: vmName,
+      provider: "proxmox",
+      status: "running",
+      primaryIp4: "10.20.30.40",
+      vcpus: 4,
+      memory: 8192,
+      disk: 128,
+      tags: ["customer=ACME", "tenant:legacy-tenant", "environment/prod"],
+      raw: {
+        vmid: 101,
+        node: "pve1",
+        status: "running",
+        tags: "customer=ACME;tenant:legacy-tenant;environment/prod",
+        pool: "customer-ACME",
+        notes: "customer: ACME Notes",
+        nested: {
+          token_secret: "raw-proxmox-token",
+          authorization: "Bearer raw-auth",
+          harmless: "kept",
+        },
+      },
+    },
+    {
+      externalId: "pve2-202",
+      name: "beta-db-01",
+      provider: "proxmox",
+      status: "stopped",
+      tags: ["customer/Beta"],
+      raw: {
+        vmid: 202,
+        node: "pve2",
+        status: "stopped",
+        pool: "tenant-Beta",
+      },
+    },
+  ];
+}
+
+function makeProxmoxCollector(vms: NormalizedVm[]) {
+  return {
+    testConnection: async () => ({ ok: true }),
+    listVms: async () => vms,
   };
 }
 
@@ -349,6 +411,20 @@ beforeEach(() => {
     name: "Azure Other Org",
     config: makeAzureConfig(),
   }));
+  store.providers.set("proxmox-provider-a", makeProvider({
+    id: "proxmox-provider-a",
+    orgId: ORG_A,
+    kind: "proxmox",
+    name: "Proxmox Provider",
+    config: makeProxmoxConfig(),
+  }));
+  store.providers.set("proxmox-provider-other-org", makeProvider({
+    id: "proxmox-provider-other-org",
+    orgId: ORG_B,
+    kind: "proxmox",
+    name: "Proxmox Other Org",
+    config: makeProxmoxConfig(),
+  }));
 
   storage.getUser = store.getUser.bind(store) as any;
   storage.getProvider = store.getProvider.bind(store) as any;
@@ -432,11 +508,11 @@ describe("fake provider normalized infrastructure sync", () => {
     assert.equal(store.customerScopeAssignments.length, 0);
   });
 
-  test("generic sync service rejects proxmox in this slice", async () => {
-    const proxmoxProvider = makeProvider({ id: "proxmox-provider-a", kind: "proxmox", name: "Proxmox Provider" });
+  test("generic sync service rejects unsupported providers in this slice", async () => {
+    const vmwareProvider = makeProvider({ id: "vmware-provider-a", kind: "vmware", name: "VMware Provider" });
 
     await assert.rejects(
-      syncProviderInfrastructureInventory(proxmoxProvider, ORG_A, {}, store as any),
+      syncProviderInfrastructureInventory(vmwareProvider, ORG_A, {}, store as any),
       ProviderInfrastructureSyncNotSupportedError,
     );
   });
@@ -656,22 +732,154 @@ describe("fake provider normalized infrastructure sync", () => {
     );
   });
 
-  test("Proxmox provider returns not implemented for normalized infrastructure sync", async () => {
-    store.providers.set("proxmox-provider-a", makeProvider({
-      id: "proxmox-provider-a",
+  test("Proxmox sync creates normalized VM infrastructure objects and candidate hints", async () => {
+    const provider = store.providers.get("proxmox-provider-a")!;
+
+    const res = await syncProviderInfrastructureInventory(
+      provider,
+      ORG_A,
+      provider.config as Record<string, unknown>,
+      store as any,
+      { collectorFactory: () => makeProxmoxCollector(makeProxmoxVms()) as any },
+    );
+
+    assert.equal(res.sourceId, "proxmox-provider-a");
+    assert.equal(res.providerType, "proxmox");
+    assert.equal(res.objectsUpserted, 2);
+    assert.equal(res.relationshipsUpserted, 0);
+    assert.ok(res.customerScopeCandidatesUpserted > 0);
+    assert.equal(res.errors.length, 0);
+    assert.equal(store.objects.length, 2);
+    assert.ok(store.objects.every((object) => object.providerType === "proxmox"));
+
+    const vm = store.objects.find((object) => object.externalId.endsWith(":vm:101"))!;
+    assert.equal(vm.objectType, "vm");
+    assert.equal(vm.externalId, `proxmox:${PROXMOX_CLUSTER_ID}:node:pve1:vm:101`);
+    assert.equal(vm.providerNativeId, "101");
+    assert.equal(vm.displayName, "acme-web-01");
+    assert.equal((vm.metadata as any).raw.nested.token_secret, "[REDACTED]");
+    assert.equal((vm.metadata as any).raw.nested.authorization, "[REDACTED]");
+    assert.equal((vm.metadata as any).raw.nested.harmless, "kept");
+
+    assert.ok(store.candidates.some((candidate) => (
+      candidate.objectId === vm.id &&
+      candidate.derivedFrom === "tag" &&
+      candidate.candidateValue === "ACME"
+    )));
+    assert.ok(store.candidates.some((candidate) => (
+      candidate.objectId === vm.id &&
+      candidate.derivedFrom === "pool" &&
+      candidate.candidateValue === "ACME"
+    )));
+    assert.ok(store.candidates.some((candidate) => (
+      candidate.objectId === vm.id &&
+      candidate.derivedFrom === "notes" &&
+      candidate.candidateValue === "ACME Notes"
+    )));
+    assert.ok(store.candidates.some((candidate) => (
+      candidate.objectId === vm.id &&
+      candidate.derivedFrom === "name_convention" &&
+      candidate.candidateValue === "acme"
+    )));
+    assert.equal(store.customerScopes.length, 0);
+    assert.equal(store.customerScopeAssignments.length, 0);
+    assert.ok(store.candidates.every((candidate) => candidate.confidence !== "authoritative"));
+  });
+
+  test("repeated Proxmox sync is idempotent and VM rename updates mutable fields", async () => {
+    const provider = store.providers.get("proxmox-provider-a")!;
+
+    await syncProviderInfrastructureInventory(
+      provider,
+      ORG_A,
+      provider.config as Record<string, unknown>,
+      store as any,
+      { collectorFactory: () => makeProxmoxCollector(makeProxmoxVms()) as any },
+    );
+    await syncProviderInfrastructureInventory(
+      provider,
+      ORG_A,
+      provider.config as Record<string, unknown>,
+      store as any,
+      { collectorFactory: () => makeProxmoxCollector(makeProxmoxVms("renamed-web")) as any },
+    );
+
+    assert.equal(store.objects.length, 2);
+    assert.equal(new Set(store.objects.map((object) => `${object.objectType}:${object.externalId}`)).size, 2);
+    const vm = store.objects.find((object) => object.externalId.endsWith(":vm:101"))!;
+    assert.equal(vm.displayName, "renamed-web");
+    assert.equal(
+      store.candidates.length,
+      new Set(store.candidates.map((candidate) => `${candidate.sourceId}:${candidate.objectId}:${candidate.derivedFrom}:${candidate.candidateValue}`)).size,
+    );
+  });
+
+  test("Proxmox sync validates required config without exposing secrets", async () => {
+    const provider = {
+      ...store.providers.get("proxmox-provider-a")!,
+      config: makeProxmoxConfig({ token_secret: "" }),
+    };
+
+    await assert.rejects(
+      syncProviderInfrastructureInventory(
+        provider,
+        ORG_A,
+        provider.config as Record<string, unknown>,
+        store as any,
+        { collectorFactory: () => makeProxmoxCollector(makeProxmoxVms()) as any },
+      ),
+      (error: any) => {
+        assert.ok(error instanceof ProviderInfrastructureSyncConfigError);
+        assert.match(error.message, /token_secret/);
+        assert.equal(JSON.stringify(error.result).includes("super-secret-proxmox-token"), false);
+        return true;
+      },
+    );
+  });
+
+  test("Proxmox collector failures return sanitized errors", async () => {
+    const provider = store.providers.get("proxmox-provider-a")!;
+
+    await assert.rejects(
+      syncProviderInfrastructureInventory(
+        provider,
+        ORG_A,
+        provider.config as Record<string, unknown>,
+        store as any,
+        {
+          collectorFactory: () => ({
+            testConnection: async () => ({ ok: false }),
+            listVms: async () => {
+              throw new Error("token_secret=super-secret-proxmox-token");
+            },
+          }),
+        },
+      ),
+      (error: any) => {
+        assert.ok(error instanceof ProviderInfrastructureSyncDiscoveryError);
+        assert.equal(error.message, "proxmox infrastructure discovery failed");
+        assert.equal(JSON.stringify(error.result).includes("super-secret-proxmox-token"), false);
+        return true;
+      },
+    );
+  });
+
+  test("unsupported provider returns not implemented for normalized infrastructure sync", async () => {
+    store.providers.set("vmware-provider-a", makeProvider({
+      id: "vmware-provider-a",
       orgId: ORG_A,
-      kind: "proxmox",
-      name: "Proxmox Provider",
+      kind: "vmware",
+      name: "VMware Provider",
     }));
 
     const res = await req
-      .post("/api/providers/proxmox-provider-a/inventory/sync")
+      .post("/api/providers/vmware-provider-a/inventory/sync")
       .set("Authorization", `Bearer ${makeToken()}`)
       .expect(501);
 
-    assert.equal(res.body.providerType, "proxmox");
+    assert.equal(res.body.providerType, "vmware");
     assert.equal(res.body.objectsUpserted, 0);
-    assert.match(res.body.message, /only for fake and Azure providers/);
+    assert.match(res.body.message, /only for fake, Azure, and Proxmox providers/);
     assert.equal(store.objects.length, 0);
   });
 
@@ -693,9 +901,36 @@ describe("fake provider normalized infrastructure sync", () => {
     assert.equal(store.objects.length, 0);
   });
 
+  test("Proxmox provider route rejects missing config with controlled response", async () => {
+    const provider = store.providers.get("proxmox-provider-a")!;
+    store.providers.set("proxmox-provider-a", {
+      ...provider,
+      config: makeProxmoxConfig({ token_secret: "" }),
+    });
+
+    const res = await req
+      .post("/api/providers/proxmox-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(400);
+
+    assert.equal(res.body.providerType, "proxmox");
+    assert.match(res.body.message, /missing required fields/);
+    assert.equal(JSON.stringify(res.body).includes("super-secret-proxmox-token"), false);
+    assert.equal(store.objects.length, 0);
+  });
+
   test("cross-org Azure provider access is rejected", async () => {
     await req
       .post("/api/providers/azure-provider-other-org/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken("operator", ORG_A)}`)
+      .expect(404);
+
+    assert.equal(store.objects.length, 0);
+  });
+
+  test("cross-org Proxmox provider access is rejected", async () => {
+    await req
+      .post("/api/providers/proxmox-provider-other-org/inventory/sync")
       .set("Authorization", `Bearer ${makeToken("operator", ORG_A)}`)
       .expect(404);
 

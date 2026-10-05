@@ -14,6 +14,7 @@ import { getProviderCollector } from "./providers/registry";
 import type { AzureConfig } from "./providers/azure";
 import { fakeInfrastructureNormalizer } from "./infrastructure-normalizers/fake";
 import { azureInfrastructureNormalizer } from "./infrastructure-normalizers/azure";
+import { proxmoxInfrastructureNormalizer } from "./infrastructure-normalizers/proxmox";
 import type {
   InfrastructureNormalizationResult,
   InfrastructureProviderNormalizer,
@@ -35,7 +36,7 @@ export class ProviderInfrastructureSyncNotSupportedError extends Error {
   result: ProviderInfrastructureSyncResult;
 
   constructor(provider: ProviderAccount) {
-    super("Normalized infrastructure inventory sync is currently implemented only for fake and Azure providers");
+    super("Normalized infrastructure inventory sync is currently implemented only for fake, Azure, and Proxmox providers");
     this.name = "ProviderInfrastructureSyncNotSupportedError";
     this.result = {
       sourceId: provider.id,
@@ -86,6 +87,7 @@ interface SyncOptions {
 const normalizers: Partial<Record<InfrastructureProviderType, InfrastructureProviderNormalizer<any>>> = {
   fake: fakeInfrastructureNormalizer,
   azure: azureInfrastructureNormalizer,
+  proxmox: proxmoxInfrastructureNormalizer,
 };
 
 export async function syncProviderInfrastructureInventory(
@@ -208,6 +210,8 @@ async function collectProviderItems(
 ): Promise<unknown[]> {
   if (provider.kind === "azure") {
     validateAzureConfig(provider, config);
+  } else if (provider.kind === "proxmox") {
+    validateProxmoxConfig(provider, config);
   }
 
   const collector = collectorFactory(provider.kind, config);
@@ -227,7 +231,7 @@ async function collectProviderItems(
   try {
     return await collector.listVms();
   } catch {
-    throw new ProviderInfrastructureSyncDiscoveryError(provider, "Provider infrastructure discovery failed");
+    throw new ProviderInfrastructureSyncDiscoveryError(provider, `${provider.kind} infrastructure discovery failed`);
   }
 }
 
@@ -241,6 +245,37 @@ function validateAzureConfig(
     throw new ProviderInfrastructureSyncConfigError(
       provider,
       `Azure provider config is missing required fields: ${missing.join(", ")}`,
+    );
+  }
+}
+
+function validateProxmoxConfig(provider: ProviderAccount, config: Record<string, unknown>): void {
+  const missing: string[] = [];
+  if (typeof config.base_url !== "string" || config.base_url.trim().length === 0) {
+    missing.push("base_url");
+  }
+
+  const authMethod = typeof config.auth_method === "string" ? config.auth_method : "";
+  if (authMethod !== "api_token" && authMethod !== "password") {
+    missing.push("auth_method");
+  } else if (authMethod === "api_token") {
+    for (const field of ["username", "token_id", "token_secret"]) {
+      if (typeof config[field] !== "string" || String(config[field]).trim().length === 0) {
+        missing.push(field);
+      }
+    }
+  } else if (authMethod === "password") {
+    for (const field of ["username", "password"]) {
+      if (typeof config[field] !== "string" || String(config[field]).trim().length === 0) {
+        missing.push(field);
+      }
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new ProviderInfrastructureSyncConfigError(
+      provider,
+      `Proxmox provider config is missing required fields: ${missing.join(", ")}`,
     );
   }
 }

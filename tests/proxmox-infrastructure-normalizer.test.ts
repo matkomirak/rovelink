@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { proxmoxInfrastructureNormalizer } from "../server/services/infrastructure-normalizers/proxmox";
 import {
-  ProviderInfrastructureSyncNotSupportedError,
+  ProviderInfrastructureSyncConfigError,
   syncProviderInfrastructureInventory,
 } from "../server/services/provider-infrastructure-sync";
 import type { NormalizedVm } from "../server/services/providers/types";
@@ -201,10 +201,10 @@ describe("Proxmox infrastructure normalizer", () => {
     assert.equal(result.skipped.length, 1);
   });
 
-  test("Proxmox remains disabled in generic sync service", async () => {
+  test("Proxmox generic sync requires complete provider config", async () => {
     await assert.rejects(
       syncProviderInfrastructureInventory(makeProvider(), ORG_ID, {}, {} as any),
-      ProviderInfrastructureSyncNotSupportedError,
+      ProviderInfrastructureSyncConfigError,
     );
   });
 });

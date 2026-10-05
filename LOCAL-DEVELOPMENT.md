@@ -211,12 +211,12 @@ Use this short flow for a CustomerScope MSP pilot walkthrough:
 
 ### Provider Infrastructure Inventory Sync
 
-The fake/demo provider and Azure provider can populate Rovelink's normalized
+The fake/demo, Azure, and Proxmox providers can populate Rovelink's normalized
 infrastructure inventory tables without contacting NetBox or changing CMDB
 data. This is an opt-in, read-only validation path for the provider inventory
 model.
 
-After creating a fake or Azure provider account, run:
+After creating a fake, Azure, or Proxmox provider account, run:
 
 ```bash
 curl -X POST http://localhost:5000/api/providers/<provider-id>/inventory/sync \
@@ -228,10 +228,15 @@ For Azure, the sync calls the read-only discovery APIs and caches normalized
 VM, network interface, VNet, subnet, and public IP objects. It does not write to
 Azure and does not write to NetBox.
 
+For Proxmox, the current normalized sync is VM-only. It calls the read-only VM
+listing path and caches normalized VM objects. It does not write to Proxmox and
+does not write to NetBox.
+
 The sync may also write provider CustomerScope candidates into
 `provider_customer_scope_candidates` when fake tags, labels, or naming hints
 contain customer-like values, or when Azure tags/resource groups/subscriptions
-look customer-like. These candidates are hints only: they do not create
+look customer-like, or when Proxmox tags, pools, notes, or VM names look
+customer-like. These candidates are hints only: they do not create
 CustomerScopes, do not create authoritative assignments, do not write to NetBox,
 and do not affect Governance or Automation GATE behavior.
 

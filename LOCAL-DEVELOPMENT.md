@@ -1,5 +1,8 @@
 # Local Development
 
+For a focused first-run story, follow the [alpha demo quickstart](docs/demo-quickstart.md)
+and [smoke checklist](docs/smoke-test.md). This page retains the detailed workflows.
+
 This workflow starts Rovelink, optional local NetBox, demo VM data, public HTTPS
 Git project sync, and local Ansible execution for both localhost playbooks and
 reachable remote Linux SSH targets.
@@ -104,8 +107,7 @@ After Rovelink has cached VM data for the local NetBox CMDB, run the opt-in demo
 seed:
 
 ```powershell
-$env:ROVELINK_DEMO_DATA="true"
-npm.cmd run db:seed:demo-customer-scopes
+npx --no-install cross-env ROVELINK_DEMO_DATA=true node --env-file=.env --import=tsx server/scripts/seed-customer-scope-demo.ts
 ```
 
 When running inside Docker, use the container command:

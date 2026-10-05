@@ -164,6 +164,9 @@ replace a fresh-database integration test or a browser smoke test.
 
 ## Demo Walkthrough
 
+Use the [alpha demo quickstart](docs/demo-quickstart.md) for exact setup/seed
+commands and the [smoke checklist](docs/smoke-test.md) to record verification.
+
 Allow **5-10 minutes after setup**, excluding image downloads, builds, and local
 NetBox provisioning. Use a disposable database and synthetic data throughout.
 

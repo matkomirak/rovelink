@@ -54,7 +54,23 @@ secret, revoke/rotate it, block release, and plan removal from all published
 history. Also verify the private security-reporting channel and complete the
 fresh-database demo smoke test in the public alpha checklist.
 
-## Validation
+## Maintainer Review Update
+
+The maintainer accepted the historical screenshot identifier exposure as
+non-blocking for v0.1.0-alpha, identifying the Azure screenshot as a test account.
+No history rewrite or historical screenshot removal is requested. The maintainer
+also approved publication of the Rovelink logos/artwork and their derivatives.
+Legacy product branding in the current tree was cleaned in commit `02d5f52`;
+remaining bridge terminology is technical or compatibility-related.
+
+The isolated database demo and browser flow were subsequently completed; see
+the [verification record](alpha-readiness-verification.md) for results and limits.
+The maintainer also accepted the completed manual full-history scan as sufficient
+for this alpha, with automated scanning deferred as non-blocking. Private GitHub
+vulnerability reporting must still be enabled and verified before publication.
+These decisions do not constitute a guarantee that every historical blob is safe.
+
+## Original Task 17D Validation
 
 Typecheck, all 500 default tests, build, and production dependency audit passed
 after this cleanup; the audit reported zero vulnerabilities. Build retained the

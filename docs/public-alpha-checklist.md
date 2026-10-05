@@ -1,26 +1,33 @@
 # Public Alpha Checklist
 
-Maintainer release gate for v0.1.0-alpha:
+Maintainer release gate for v0.1.0-alpha. Updated after the isolated demo recheck;
+see the [verification record](alpha-readiness-verification.md).
 
-- [ ] Confirm LICENSE attribution and contributor/asset rights.
-- [ ] Enable and verify GitHub private vulnerability reporting, or add a monitored
+- [x] Confirm LICENSE matches README (MIT); maintainer approved Rovelink artwork.
+  Contributors remain responsible for permissions on any future contributions.
+- [ ] Before public visibility, enable and verify GitHub private vulnerability
+  reporting, or add a monitored
   private contact in SECURITY.md.
-- [ ] Harden ignore rules for private env files, bootstrap credentials, runtime
+- [x] Harden ignore rules for private env files, bootstrap credentials, runtime
   state, logs, and local databases; inspect staged files.
-- [ ] Review tracked screenshots and archived assets for internal data.
+- [x] Review tracked screenshots and archived assets for internal data.
   Check historical copies too; deleting a current file does not erase history.
-- [ ] Run a full-history secret scanner such as Gitleaks or TruffleHog against
-  all refs intended for publication, and investigate results. Rotate any exposed
-  credentials. Review binaries separately.
-- [ ] Restrict local demo port exposure and confirm defaults cannot be mistaken
+  Maintainer accepted historical screenshot exposure as non-blocking.
+- [x] Complete manual full-history scanning; no confirmed real secret found.
+  Maintainer accepted this fallback for alpha. Gitleaks/TruffleHog scanning is
+  deferred, not completed. Investigate future findings and rotate exposed secrets.
+- [x] Restrict local demo port exposure and confirm defaults cannot be mistaken
   for production configuration.
-- [ ] Run the validation commands below.
-- [ ] Run the README demo on a fresh disposable database: login, seed, fake cached
+- [x] Run the validation commands below: check/build passed, 500 tests passed,
+  production audit reported zero vulnerabilities.
+- [x] Run the README demo on a fresh disposable database: login, seed, fake cached
   sync, CMDB/CustomerScopes, governance, and Drift Reports.
-- [ ] Confirm drift stays analysis-only and provider customer candidates remain hints.
-- [ ] Reconcile older setup/support docs and publish known alpha limitations.
-- [ ] After these checks pass, explicitly create/push the v0.1.0-alpha tag and
-  publish release notes with limitations. Do not tag a failing revision.
+- [x] Confirm drift stays analysis-only and provider customer candidates remain hints.
+- [x] Document alpha limitations, including retained CustomerScope assignment
+  overlap in summaries; no pruning or lifecycle fix is included in this release.
+- [ ] In a separately authorized task, create/push the v0.1.0-alpha tag after
+  validation and accepted release checks. Publish with limitations only after
+  the private reporting channel is verified. Do not tag a failing revision.
 
 ```powershell
 npm.cmd run check

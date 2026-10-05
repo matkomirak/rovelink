@@ -146,6 +146,9 @@ It creates a draft demo blueprint/version but does not activate it.
 
 - Fake provider objects and hint candidates are visible after cached sync.
 - CustomerScopes/assignments and sample governance summaries appear after seed.
+- Older unassigned rows may remain beside newer dedicated demo assignments.
+  CustomerScope summary rows can overlap; do not sum them as an authoritative
+  customer partition. Assignment lifecycle/reporting cleanup is future work.
 - A completed drift run and item rows appear. Independently seeded reference
   and fake datasets may be unmatched; matching or a particular drift count is
   not guaranteed. Unmatched/ambiguous results are valid report outcomes.

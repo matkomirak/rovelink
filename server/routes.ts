@@ -13,7 +13,12 @@ import { notificationService } from "./services/notificationService";
 import { ProxmoxCollector } from "./services/proxmox-collector";
 import { NetBoxAdapter } from "./services/netbox-adapter";
 import { runProviderSyncWithWorker } from "./services/syncWorker";
-import { ProviderInfrastructureSyncNotSupportedError, syncProviderInfrastructureInventory } from "./services/provider-infrastructure-sync";
+import {
+  ProviderInfrastructureSyncConfigError,
+  ProviderInfrastructureSyncDiscoveryError,
+  ProviderInfrastructureSyncNotSupportedError,
+  syncProviderInfrastructureInventory,
+} from "./services/provider-infrastructure-sync";
 import { sanitizeGitSyncError, syncGitProject } from "./services/git-project-sync";
 import { insertUserSchema, insertProjectSchema, insertJobTemplateSchema, insertJobRunSchema, insertNetboxInventorySourceSchema, insertProviderAccountSchema, insertCmdbAccountSchema, netboxVms, organizations, insertOrganizationSchema, type CustomerScope, type CustomerScopeObjectAssignment, type GovernanceObjectEvaluation } from "@shared/schema";
 import { db } from "./db";
@@ -1254,6 +1259,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       if (error instanceof ProviderInfrastructureSyncNotSupportedError) {
         return res.status(501).json({
+          message: error.message,
+          ...error.result,
+        });
+      }
+      if (error instanceof ProviderInfrastructureSyncConfigError) {
+        return res.status(400).json({
+          message: error.message,
+          ...error.result,
+        });
+      }
+      if (error instanceof ProviderInfrastructureSyncDiscoveryError) {
+        return res.status(502).json({
           message: error.message,
           ...error.result,
         });

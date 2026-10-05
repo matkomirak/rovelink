@@ -11,12 +11,15 @@ import type {
   ProviderCustomerScopeCandidate,
 } from "@shared/schema";
 import { getProviderCollector } from "./providers/registry";
+import type { AzureConfig } from "./providers/azure";
 import { fakeInfrastructureNormalizer } from "./infrastructure-normalizers/fake";
+import { azureInfrastructureNormalizer } from "./infrastructure-normalizers/azure";
 import type {
   InfrastructureNormalizationResult,
   InfrastructureProviderNormalizer,
   NormalizedInfrastructureRelationshipInput,
 } from "./infrastructure-normalizers/types";
+import type { IProviderCollector } from "./providers/types";
 
 export interface ProviderInfrastructureSyncResult {
   sourceId: string;
@@ -32,7 +35,7 @@ export class ProviderInfrastructureSyncNotSupportedError extends Error {
   result: ProviderInfrastructureSyncResult;
 
   constructor(provider: ProviderAccount) {
-    super("Normalized infrastructure inventory sync is currently implemented only for fake providers");
+    super("Normalized infrastructure inventory sync is currently implemented only for fake and Azure providers");
     this.name = "ProviderInfrastructureSyncNotSupportedError";
     this.result = {
       sourceId: provider.id,
@@ -46,14 +49,43 @@ export class ProviderInfrastructureSyncNotSupportedError extends Error {
   }
 }
 
+export class ProviderInfrastructureSyncConfigError extends Error {
+  result: ProviderInfrastructureSyncResult;
+
+  constructor(provider: ProviderAccount, message: string) {
+    super(message);
+    this.name = "ProviderInfrastructureSyncConfigError";
+    this.result = emptyResult(provider, [{ message }]);
+  }
+}
+
+export class ProviderInfrastructureSyncDiscoveryError extends Error {
+  result: ProviderInfrastructureSyncResult;
+
+  constructor(provider: ProviderAccount, message = "Provider infrastructure discovery failed") {
+    super(message);
+    this.name = "ProviderInfrastructureSyncDiscoveryError";
+    this.result = emptyResult(provider, [{ message }]);
+  }
+}
+
 interface InfrastructureStorage {
   upsertInfrastructureObject(input: InsertInfrastructureObject): Promise<InfrastructureObject>;
   upsertInfrastructureRelationship?(input: InsertInfrastructureRelationship): Promise<InfrastructureRelationship>;
   upsertProviderCustomerScopeCandidate(input: InsertProviderCustomerScopeCandidate): Promise<ProviderCustomerScopeCandidate>;
 }
 
+interface InfrastructureCollector extends IProviderCollector {
+  discoverAll?: () => Promise<unknown>;
+}
+
+interface SyncOptions {
+  collectorFactory?: (kind: string, config: Record<string, unknown>) => InfrastructureCollector;
+}
+
 const normalizers: Partial<Record<InfrastructureProviderType, InfrastructureProviderNormalizer<any>>> = {
   fake: fakeInfrastructureNormalizer,
+  azure: azureInfrastructureNormalizer,
 };
 
 export async function syncProviderInfrastructureInventory(
@@ -61,6 +93,7 @@ export async function syncProviderInfrastructureInventory(
   orgId: string,
   config: Record<string, unknown>,
   store: InfrastructureStorage = defaultStorage as IStorage,
+  options: SyncOptions = {},
 ): Promise<ProviderInfrastructureSyncResult> {
   const normalizer = normalizers[provider.kind as InfrastructureProviderType];
   if (!normalizer) {
@@ -78,8 +111,7 @@ export async function syncProviderInfrastructureInventory(
     errors: [],
   };
 
-  const collector = getProviderCollector(provider.kind, config);
-  const items = await collector.listVms();
+  const items = await collectProviderItems(provider, config, options.collectorFactory ?? getProviderCollector);
   const normalized = await normalizer.normalize({ provider, orgId, items, config, now });
   result.skipped.push(...toSkipped(normalized));
   result.errors.push(...toErrors(normalized));
@@ -169,6 +201,50 @@ export async function syncProviderInfrastructureInventory(
   return result;
 }
 
+async function collectProviderItems(
+  provider: ProviderAccount,
+  config: Record<string, unknown>,
+  collectorFactory: (kind: string, config: Record<string, unknown>) => InfrastructureCollector,
+): Promise<unknown[]> {
+  if (provider.kind === "azure") {
+    validateAzureConfig(provider, config);
+  }
+
+  const collector = collectorFactory(provider.kind, config);
+
+  if (provider.kind === "azure") {
+    if (typeof collector.discoverAll !== "function") {
+      throw new ProviderInfrastructureSyncConfigError(provider, "Azure collector does not support normalized infrastructure discovery");
+    }
+
+    try {
+      return [await collector.discoverAll()];
+    } catch {
+      throw new ProviderInfrastructureSyncDiscoveryError(provider, "Azure infrastructure discovery failed");
+    }
+  }
+
+  try {
+    return await collector.listVms();
+  } catch {
+    throw new ProviderInfrastructureSyncDiscoveryError(provider, "Provider infrastructure discovery failed");
+  }
+}
+
+function validateAzureConfig(
+  provider: ProviderAccount,
+  config: Record<string, unknown>,
+): asserts config is Record<string, unknown> & AzureConfig {
+  const requiredFields = ["subscription_id", "tenant_id", "client_id", "client_secret"] as const;
+  const missing = requiredFields.filter((field) => typeof config[field] !== "string" || String(config[field]).trim().length === 0);
+  if (missing.length > 0) {
+    throw new ProviderInfrastructureSyncConfigError(
+      provider,
+      `Azure provider config is missing required fields: ${missing.join(", ")}`,
+    );
+  }
+}
+
 function buildRelationshipInput(
   relationship: NormalizedInfrastructureRelationshipInput,
   objectIdByRef: Map<string, string>,
@@ -191,6 +267,21 @@ function buildRelationshipInput(
 
 function objectRefKey(objectType: string, externalId: string) {
   return `${objectType}:${externalId}`;
+}
+
+function emptyResult(
+  provider: ProviderAccount,
+  errors: ProviderInfrastructureSyncResult["errors"] = [],
+): ProviderInfrastructureSyncResult {
+  return {
+    sourceId: provider.id,
+    providerType: provider.kind,
+    objectsUpserted: 0,
+    relationshipsUpserted: 0,
+    customerScopeCandidatesUpserted: 0,
+    skipped: [],
+    errors,
+  };
 }
 
 function toSkipped(normalized: InfrastructureNormalizationResult): ProviderInfrastructureSyncResult["skipped"] {

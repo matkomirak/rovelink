@@ -9,9 +9,12 @@ import { registerRoutes } from "../server/routes";
 import { sanitizeInfrastructureMetadata, storage } from "../server/storage";
 import { fakeInfrastructureNormalizer } from "../server/services/infrastructure-normalizers/fake";
 import {
+  ProviderInfrastructureSyncConfigError,
+  ProviderInfrastructureSyncDiscoveryError,
   ProviderInfrastructureSyncNotSupportedError,
   syncProviderInfrastructureInventory,
 } from "../server/services/provider-infrastructure-sync";
+import type { AzureDiscoveryResult } from "../server/services/providers/azure";
 import type { NormalizedVm } from "../server/services/providers/types";
 import type {
   InfrastructureObject,
@@ -24,6 +27,12 @@ import type {
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 const ORG_A = "org-a";
 const ORG_B = "org-b";
+const AZURE_SUBSCRIPTION_ID = "sub-123";
+const AZURE_VM_ID = `/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/rg-acme-prod/providers/Microsoft.Compute/virtualMachines/acme-web-01`;
+const AZURE_NIC_ID = `/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/rg-acme-prod/providers/Microsoft.Network/networkInterfaces/acme-web-01-nic`;
+const AZURE_VNET_ID = `/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/rg-acme-prod/providers/Microsoft.Network/virtualNetworks/acme-vnet`;
+const AZURE_SUBNET_ID = `${AZURE_VNET_ID}/subnets/web`;
+const AZURE_PUBLIC_IP_ID = `/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/rg-acme-prod/providers/Microsoft.Network/publicIPAddresses/acme-web-01-pip`;
 
 function makeToken(role = "operator", orgId = ORG_A): string {
   return jwt.sign(
@@ -55,6 +64,119 @@ function makeProvider(overrides: Partial<ProviderAccount>): ProviderAccount {
     createdAt: now,
     updatedAt: now,
     ...overrides,
+  };
+}
+
+function makeAzureConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    subscription_id: AZURE_SUBSCRIPTION_ID,
+    tenant_id: "tenant-123",
+    client_id: "client-123",
+    client_secret: "super-secret-client-secret",
+    ...overrides,
+  };
+}
+
+function makeAzureDiscovery(vmName = "acme-web-01"): AzureDiscoveryResult {
+  return {
+    subscriptionId: AZURE_SUBSCRIPTION_ID,
+    vms: [
+      {
+        id: AZURE_VM_ID,
+        name: vmName,
+        location: "westeurope",
+        resourceGroup: "rg-acme-prod",
+        subscriptionId: AZURE_SUBSCRIPTION_ID,
+        status: "running",
+        platform: "linux",
+        computerName: vmName,
+        vmSize: "Standard_D2s_v5",
+        vcpus: 2,
+        ramGiB: 8,
+        disk: 128,
+        primaryIp4: "10.42.0.4",
+        nics: [
+          {
+            id: AZURE_NIC_ID,
+            name: "acme-web-01-nic",
+            resourceGroup: "rg-acme-prod",
+            privateIps: ["10.42.0.4"],
+            publicIps: ["20.50.60.70"],
+            subnetName: "web",
+            virtualNetworkName: "acme-vnet",
+            primary: true,
+          },
+        ],
+        availabilityZone: "1",
+        tags: {
+          customer: "ACME",
+          tenant: "legacy-tenant-hint",
+          environment: "prod",
+        },
+        raw: {
+          clientSecret: "secret-from-raw",
+          nested: { accessToken: "raw-token", harmless: "kept" },
+        },
+      },
+    ],
+    nics: [
+      {
+        id: AZURE_NIC_ID,
+        name: "acme-web-01-nic",
+        resourceGroup: "rg-acme-prod",
+        privateIps: ["10.42.0.4"],
+        publicIps: ["20.50.60.70"],
+        subnetName: "web",
+        virtualNetworkName: "acme-vnet",
+        primary: true,
+        location: "westeurope",
+        tags: { customerScope: "ACME Managed" },
+        subnetId: AZURE_SUBNET_ID,
+        publicIpId: AZURE_PUBLIC_IP_ID,
+      } as any,
+    ],
+    vnets: [
+      {
+        id: AZURE_VNET_ID,
+        name: "acme-vnet",
+        resourceGroup: "rg-acme-prod",
+        location: "westeurope",
+        addressSpaces: ["10.42.0.0/16"],
+        tags: { customer_scope: "ACME Network" },
+        subnets: [
+          {
+            id: AZURE_SUBNET_ID,
+            name: "web",
+            resourceGroup: "rg-acme-prod",
+            virtualNetworkName: "acme-vnet",
+            addressPrefix: "10.42.0.0/24",
+          },
+        ],
+      },
+    ],
+    publicIps: [
+      {
+        id: AZURE_PUBLIC_IP_ID,
+        name: "acme-web-01-pip",
+        resourceGroup: "rg-acme-prod",
+        location: "westeurope",
+        ipAddress: "20.50.60.70",
+        ipVersion: "IPv4",
+        fqdn: "acme-web-01.westeurope.cloudapp.azure.com",
+        associatedNicId: AZURE_NIC_ID,
+        tags: { environment: "prod" },
+      },
+    ],
+  };
+}
+
+function makeAzureCollector(discovery: AzureDiscoveryResult) {
+  return {
+    testConnection: async () => ({ ok: true }),
+    listVms: async () => {
+      throw new Error("Azure normalized sync must use discoverAll");
+    },
+    discoverAll: async () => discovery,
   };
 }
 
@@ -213,7 +335,20 @@ beforeEach(() => {
   store.providers.set("fake-provider-a", makeProvider({ id: "fake-provider-a", orgId: ORG_A }));
   store.providers.set("fake-provider-b", makeProvider({ id: "fake-provider-b", orgId: ORG_A, name: "Fake Provider B" }));
   store.providers.set("fake-provider-other-org", makeProvider({ id: "fake-provider-other-org", orgId: ORG_B }));
-  store.providers.set("azure-provider-a", makeProvider({ id: "azure-provider-a", orgId: ORG_A, kind: "azure", name: "Azure Provider" }));
+  store.providers.set("azure-provider-a", makeProvider({
+    id: "azure-provider-a",
+    orgId: ORG_A,
+    kind: "azure",
+    name: "Azure Provider",
+    config: makeAzureConfig(),
+  }));
+  store.providers.set("azure-provider-other-org", makeProvider({
+    id: "azure-provider-other-org",
+    orgId: ORG_B,
+    kind: "azure",
+    name: "Azure Other Org",
+    config: makeAzureConfig(),
+  }));
 
   storage.getUser = store.getUser.bind(store) as any;
   storage.getProvider = store.getProvider.bind(store) as any;
@@ -297,14 +432,9 @@ describe("fake provider normalized infrastructure sync", () => {
     assert.equal(store.customerScopeAssignments.length, 0);
   });
 
-  test("generic sync service rejects azure and proxmox in this slice", async () => {
-    const azureProvider = makeProvider({ id: "azure-provider-a", kind: "azure", name: "Azure Provider" });
+  test("generic sync service rejects proxmox in this slice", async () => {
     const proxmoxProvider = makeProvider({ id: "proxmox-provider-a", kind: "proxmox", name: "Proxmox Provider" });
 
-    await assert.rejects(
-      syncProviderInfrastructureInventory(azureProvider, ORG_A, {}, store as any),
-      ProviderInfrastructureSyncNotSupportedError,
-    );
     await assert.rejects(
       syncProviderInfrastructureInventory(proxmoxProvider, ORG_A, {}, store as any),
       ProviderInfrastructureSyncNotSupportedError,
@@ -400,15 +530,175 @@ describe("fake provider normalized infrastructure sync", () => {
     assert.ok(store.candidates.every((candidate) => candidate.confidence !== "authoritative"));
   });
 
-  test("non-fake provider returns not implemented for normalized infrastructure sync", async () => {
+  test("Azure sync creates normalized infrastructure objects and candidate hints", async () => {
+    const provider = store.providers.get("azure-provider-a")!;
+
+    const res = await syncProviderInfrastructureInventory(
+      provider,
+      ORG_A,
+      provider.config as Record<string, unknown>,
+      store as any,
+      { collectorFactory: () => makeAzureCollector(makeAzureDiscovery()) as any },
+    );
+
+    assert.equal(res.sourceId, "azure-provider-a");
+    assert.equal(res.providerType, "azure");
+    assert.equal(res.objectsUpserted, 5);
+    assert.equal(res.relationshipsUpserted, 0);
+    assert.ok(res.customerScopeCandidatesUpserted > 0);
+    assert.equal(res.errors.length, 0);
+    assert.equal(store.objects.length, 5);
+    assert.ok(store.objects.every((object) => object.providerType === "azure"));
+
+    const vm = store.objects.find((object) => object.objectType === "vm")!;
+    assert.equal(vm.externalId, AZURE_VM_ID);
+    assert.equal(vm.providerNativeId, AZURE_VM_ID);
+    assert.equal(vm.displayName, "acme-web-01");
+    assert.equal((vm.metadata as any).raw.clientSecret, "[REDACTED]");
+    assert.equal((vm.metadata as any).raw.nested.accessToken, "[REDACTED]");
+
+    assert.ok(store.candidates.some((candidate) => (
+      candidate.objectId === vm.id &&
+      candidate.derivedFrom === "tag" &&
+      candidate.candidateValue === "ACME"
+    )));
+    assert.ok(store.candidates.some((candidate) => (
+      candidate.derivedFrom === "resource_group" &&
+      candidate.candidateValue === "acme" &&
+      candidate.confidence === "low"
+    )));
+    assert.ok(store.candidates.some((candidate) => (
+      candidate.derivedFrom === "subscription" &&
+      candidate.candidateValue === AZURE_SUBSCRIPTION_ID &&
+      candidate.confidence === "low"
+    )));
+    assert.equal(store.customerScopes.length, 0);
+    assert.equal(store.customerScopeAssignments.length, 0);
+  });
+
+  test("repeated Azure sync is idempotent and VM rename updates mutable fields", async () => {
+    const provider = store.providers.get("azure-provider-a")!;
+
+    await syncProviderInfrastructureInventory(
+      provider,
+      ORG_A,
+      provider.config as Record<string, unknown>,
+      store as any,
+      { collectorFactory: () => makeAzureCollector(makeAzureDiscovery()) as any },
+    );
+    await syncProviderInfrastructureInventory(
+      provider,
+      ORG_A,
+      provider.config as Record<string, unknown>,
+      store as any,
+      { collectorFactory: () => makeAzureCollector(makeAzureDiscovery("renamed-web")) as any },
+    );
+
+    assert.equal(store.objects.length, 5);
+    assert.equal(new Set(store.objects.map((object) => `${object.objectType}:${object.externalId}`)).size, 5);
+    const vm = store.objects.find((object) => object.objectType === "vm")!;
+    assert.equal(vm.externalId, AZURE_VM_ID);
+    assert.equal(vm.displayName, "renamed-web");
+    assert.equal(
+      store.candidates.length,
+      new Set(store.candidates.map((candidate) => `${candidate.sourceId}:${candidate.objectId}:${candidate.derivedFrom}:${candidate.candidateValue}`)).size,
+    );
+  });
+
+  test("Azure sync validates required config without exposing secrets", async () => {
+    const provider = {
+      ...store.providers.get("azure-provider-a")!,
+      config: makeAzureConfig({ client_secret: "" }),
+    };
+
+    await assert.rejects(
+      syncProviderInfrastructureInventory(
+        provider,
+        ORG_A,
+        provider.config as Record<string, unknown>,
+        store as any,
+        { collectorFactory: () => makeAzureCollector(makeAzureDiscovery()) as any },
+      ),
+      (error: any) => {
+        assert.ok(error instanceof ProviderInfrastructureSyncConfigError);
+        assert.match(error.message, /client_secret/);
+        assert.equal(JSON.stringify(error.result).includes("super-secret-client-secret"), false);
+        return true;
+      },
+    );
+  });
+
+  test("Azure collector failures return sanitized errors", async () => {
+    const provider = store.providers.get("azure-provider-a")!;
+
+    await assert.rejects(
+      syncProviderInfrastructureInventory(
+        provider,
+        ORG_A,
+        provider.config as Record<string, unknown>,
+        store as any,
+        {
+          collectorFactory: () => ({
+            testConnection: async () => ({ ok: false }),
+            listVms: async () => [],
+            discoverAll: async () => {
+              throw new Error("client_secret=super-secret-client-secret");
+            },
+          }),
+        },
+      ),
+      (error: any) => {
+        assert.ok(error instanceof ProviderInfrastructureSyncDiscoveryError);
+        assert.equal(error.message, "Azure infrastructure discovery failed");
+        assert.equal(JSON.stringify(error.result).includes("super-secret-client-secret"), false);
+        return true;
+      },
+    );
+  });
+
+  test("Proxmox provider returns not implemented for normalized infrastructure sync", async () => {
+    store.providers.set("proxmox-provider-a", makeProvider({
+      id: "proxmox-provider-a",
+      orgId: ORG_A,
+      kind: "proxmox",
+      name: "Proxmox Provider",
+    }));
+
     const res = await req
-      .post("/api/providers/azure-provider-a/inventory/sync")
+      .post("/api/providers/proxmox-provider-a/inventory/sync")
       .set("Authorization", `Bearer ${makeToken()}`)
       .expect(501);
 
-    assert.equal(res.body.providerType, "azure");
+    assert.equal(res.body.providerType, "proxmox");
     assert.equal(res.body.objectsUpserted, 0);
-    assert.match(res.body.message, /only for fake providers/);
+    assert.match(res.body.message, /only for fake and Azure providers/);
+    assert.equal(store.objects.length, 0);
+  });
+
+  test("Azure provider route rejects missing config with controlled response", async () => {
+    const provider = store.providers.get("azure-provider-a")!;
+    store.providers.set("azure-provider-a", {
+      ...provider,
+      config: makeAzureConfig({ client_secret: "" }),
+    });
+
+    const res = await req
+      .post("/api/providers/azure-provider-a/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken()}`)
+      .expect(400);
+
+    assert.equal(res.body.providerType, "azure");
+    assert.match(res.body.message, /missing required fields/);
+    assert.equal(JSON.stringify(res.body).includes("super-secret-client-secret"), false);
+    assert.equal(store.objects.length, 0);
+  });
+
+  test("cross-org Azure provider access is rejected", async () => {
+    await req
+      .post("/api/providers/azure-provider-other-org/inventory/sync")
+      .set("Authorization", `Bearer ${makeToken("operator", ORG_A)}`)
+      .expect(404);
+
     assert.equal(store.objects.length, 0);
   });
 

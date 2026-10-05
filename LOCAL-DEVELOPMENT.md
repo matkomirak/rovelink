@@ -209,26 +209,31 @@ Use this short flow for a CustomerScope MSP pilot walkthrough:
 9. Explain the next roadmap: Azure provider, Proxmox provider, and
    provider-vs-CMDB governance comparison.
 
-### Fake Infrastructure Inventory Sync
+### Provider Infrastructure Inventory Sync
 
-The fake/demo provider can populate Rovelink's normalized infrastructure
-inventory tables without contacting NetBox, Azure, Proxmox, or any other real
-provider. This is an opt-in, read-only validation path for the provider
-inventory model.
+The fake/demo provider and Azure provider can populate Rovelink's normalized
+infrastructure inventory tables without contacting NetBox or changing CMDB
+data. This is an opt-in, read-only validation path for the provider inventory
+model.
 
-After creating a fake provider account, run:
+After creating a fake or Azure provider account, run:
 
 ```bash
 curl -X POST http://localhost:5000/api/providers/<provider-id>/inventory/sync \
   -H "Cookie: auth_token=<your-login-cookie>"
 ```
 
-The sync writes observed fake VMs into `infrastructure_objects`. It may also
-write provider CustomerScope candidates into
+The sync writes observed provider runtime objects into `infrastructure_objects`.
+For Azure, the sync calls the read-only discovery APIs and caches normalized
+VM, network interface, VNet, subnet, and public IP objects. It does not write to
+Azure and does not write to NetBox.
+
+The sync may also write provider CustomerScope candidates into
 `provider_customer_scope_candidates` when fake tags, labels, or naming hints
-contain customer-like values. These candidates are hints only: they do not
-create CustomerScopes, do not create authoritative assignments, do not write to
-NetBox, and do not affect Governance or Automation GATE behavior.
+contain customer-like values, or when Azure tags/resource groups/subscriptions
+look customer-like. These candidates are hints only: they do not create
+CustomerScopes, do not create authoritative assignments, do not write to NetBox,
+and do not affect Governance or Automation GATE behavior.
 
 ### MSP Pilot Roadmap
 

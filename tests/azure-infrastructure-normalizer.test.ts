@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { azureInfrastructureNormalizer } from "../server/services/infrastructure-normalizers/azure";
 import {
-  ProviderInfrastructureSyncNotSupportedError,
+  ProviderInfrastructureSyncConfigError,
   syncProviderInfrastructureInventory,
 } from "../server/services/provider-infrastructure-sync";
 import type { AzureDiscoveryResult } from "../server/services/providers/azure";
@@ -260,10 +260,10 @@ describe("Azure infrastructure normalizer", () => {
     assert.ok(result.customerScopeCandidates.length > 0);
   });
 
-  test("Azure remains disabled in generic sync service", async () => {
+  test("Azure generic sync requires complete provider config", async () => {
     await assert.rejects(
       syncProviderInfrastructureInventory(makeProvider(), ORG_ID, {}, {} as any),
-      ProviderInfrastructureSyncNotSupportedError,
+      ProviderInfrastructureSyncConfigError,
     );
   });
 });

@@ -5,7 +5,7 @@ import {
   infrastructureObjects, infrastructureRelationships, providerCustomerScopeCandidates,
   cmdbAccounts, pipelines, pipelineMappings, pipelineRuns, organizations,
   governanceBlueprints, governanceBlueprintVersions, governanceEvaluationRuns, governanceObjectEvaluations,
-  customerScopes, customerScopeObjectAssignments,
+  customerScopes, customerScopeObjectAssignments, driftComparisonRuns, driftComparisonItems,
   type User, type InsertUser,
   type Organization,
   type Project, type InsertProject,
@@ -33,6 +33,9 @@ import {
   type GovernanceObjectEvaluation, type InsertGovernanceObjectEvaluation,
   type CustomerScope, type InsertCustomerScope,
   type CustomerScopeObjectAssignment, type InsertCustomerScopeObjectAssignment,
+  type DriftComparisonRun, type InsertDriftComparisonRun,
+  type DriftComparisonItem, type InsertDriftComparisonItem,
+  type DriftRunStatus, type DriftMatchStatus, type DriftStatus, type DriftSeverity,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lte, and, lt, sql, inArray, isNull } from "drizzle-orm";
@@ -75,6 +78,23 @@ function isSecretMetadataKey(key: string): boolean {
     || lower.includes("secret")
     || lower.includes("authorization")
     || SECRET_METADATA_KEYS.has(normalized);
+}
+
+export interface DriftComparisonRunFilters {
+  cmdbSourceId?: string;
+  providerSourceId?: string;
+  objectType?: string;
+  status?: DriftRunStatus;
+  limit?: number;
+  offset?: number;
+}
+
+export interface DriftComparisonItemFilters {
+  matchStatus?: DriftMatchStatus;
+  driftStatus?: DriftStatus;
+  driftSeverity?: DriftSeverity;
+  limit?: number;
+  offset?: number;
 }
 
 export interface IStorage {
@@ -279,6 +299,19 @@ export interface IStorage {
   listCustomerScopeObjectAssignments(orgId: string, sourceType?: string, sourceId?: string): Promise<CustomerScopeObjectAssignment[]>;
   listAssignmentsForObject(orgId: string, sourceType: string, sourceId: string, objectType: string, objectId: string): Promise<CustomerScopeObjectAssignment[]>;
   listAssignmentsForCustomerScope(orgId: string, customerScopeId: string): Promise<CustomerScopeObjectAssignment[]>;
+
+  // Drift comparison operations — orgId REQUIRED (analytical reporting only, no CMDB/provider/GATE side effects)
+  createDriftComparisonRun(input: InsertDriftComparisonRun): Promise<DriftComparisonRun>;
+  updateDriftComparisonRun(
+    id: string,
+    orgId: string,
+    patch: Partial<Pick<DriftComparisonRun, "status" | "counts" | "error" | "startedAt" | "completedAt">>,
+  ): Promise<DriftComparisonRun | undefined>;
+  getDriftComparisonRun(id: string, orgId: string): Promise<DriftComparisonRun | undefined>;
+  listDriftComparisonRuns(orgId: string, filters?: DriftComparisonRunFilters): Promise<DriftComparisonRun[]>;
+  createDriftComparisonItems(items: InsertDriftComparisonItem[]): Promise<DriftComparisonItem[]>;
+  listDriftComparisonItems(runId: string, orgId: string, filters?: DriftComparisonItemFilters): Promise<DriftComparisonItem[]>;
+  getDriftComparisonItem(id: string, orgId: string): Promise<DriftComparisonItem | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1590,6 +1623,124 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(customerScopeObjectAssignments.updatedAt), desc(customerScopeObjectAssignments.createdAt));
   }
 
+  async createDriftComparisonRun(input: InsertDriftComparisonRun): Promise<DriftComparisonRun> {
+    await this.assertCmdbSourceInOrg(input.cmdbSourceId, input.orgId);
+    await this.assertProviderSourceInOrg(input.providerSourceId, input.orgId);
+    const [created] = await db
+      .insert(driftComparisonRuns)
+      .values({
+        ...input,
+        status: input.status ?? "pending",
+        counts: sanitizeInfrastructureMetadata(input.counts ?? {}),
+      })
+      .returning();
+    return created;
+  }
+
+  async updateDriftComparisonRun(
+    id: string,
+    orgId: string,
+    patch: Partial<Pick<DriftComparisonRun, "status" | "counts" | "error" | "startedAt" | "completedAt">>,
+  ): Promise<DriftComparisonRun | undefined> {
+    const existing = await this.getDriftComparisonRun(id, orgId);
+    if (!existing) return undefined;
+
+    const updates = {
+      ...patch,
+      counts: patch.counts === undefined ? undefined : sanitizeInfrastructureMetadata(patch.counts ?? {}),
+      updatedAt: new Date(),
+    };
+    const [updated] = await db
+      .update(driftComparisonRuns)
+      .set(updates)
+      .where(and(eq(driftComparisonRuns.id, id), eq(driftComparisonRuns.orgId, orgId)))
+      .returning();
+    return updated ?? undefined;
+  }
+
+  async getDriftComparisonRun(id: string, orgId: string): Promise<DriftComparisonRun | undefined> {
+    const [run] = await db
+      .select()
+      .from(driftComparisonRuns)
+      .where(and(eq(driftComparisonRuns.id, id), eq(driftComparisonRuns.orgId, orgId)));
+    return run ?? undefined;
+  }
+
+  async listDriftComparisonRuns(
+    orgId: string,
+    filters: DriftComparisonRunFilters = {},
+  ): Promise<DriftComparisonRun[]> {
+    const conditions = [eq(driftComparisonRuns.orgId, orgId)];
+    if (filters.cmdbSourceId) conditions.push(eq(driftComparisonRuns.cmdbSourceId, filters.cmdbSourceId));
+    if (filters.providerSourceId) conditions.push(eq(driftComparisonRuns.providerSourceId, filters.providerSourceId));
+    if (filters.objectType) conditions.push(eq(driftComparisonRuns.objectType, filters.objectType));
+    if (filters.status) conditions.push(eq(driftComparisonRuns.status, filters.status));
+
+    let query = db
+      .select()
+      .from(driftComparisonRuns)
+      .where(and(...conditions))
+      .orderBy(desc(driftComparisonRuns.createdAt), desc(driftComparisonRuns.updatedAt))
+      .$dynamic();
+
+    if (filters.limit !== undefined) query = query.limit(filters.limit);
+    if (filters.offset !== undefined) query = query.offset(filters.offset);
+
+    return await query;
+  }
+
+  async createDriftComparisonItems(items: InsertDriftComparisonItem[]): Promise<DriftComparisonItem[]> {
+    if (items.length === 0) return [];
+
+    const sanitizedItems: InsertDriftComparisonItem[] = [];
+    for (const item of items) {
+      await this.assertDriftItemMatchesRun(item);
+      sanitizedItems.push(this.sanitizeDriftComparisonItemInput(item));
+    }
+
+    return await db
+      .insert(driftComparisonItems)
+      .values(sanitizedItems)
+      .returning();
+  }
+
+  async listDriftComparisonItems(
+    runId: string,
+    orgId: string,
+    filters: DriftComparisonItemFilters = {},
+  ): Promise<DriftComparisonItem[]> {
+    const run = await this.getDriftComparisonRun(runId, orgId);
+    if (!run) return [];
+
+    const conditions = [
+      eq(driftComparisonItems.orgId, orgId),
+      eq(driftComparisonItems.runId, runId),
+    ];
+    if (filters.matchStatus) conditions.push(eq(driftComparisonItems.matchStatus, filters.matchStatus));
+    if (filters.driftStatus) conditions.push(eq(driftComparisonItems.driftStatus, filters.driftStatus));
+    if (filters.driftSeverity) conditions.push(eq(driftComparisonItems.driftSeverity, filters.driftSeverity));
+
+    let query = db
+      .select()
+      .from(driftComparisonItems)
+      .where(and(...conditions))
+      .orderBy(desc(driftComparisonItems.createdAt), desc(driftComparisonItems.updatedAt))
+      .$dynamic();
+
+    if (filters.limit !== undefined) query = query.limit(filters.limit);
+    if (filters.offset !== undefined) query = query.offset(filters.offset);
+
+    return await query;
+  }
+
+  async getDriftComparisonItem(id: string, orgId: string): Promise<DriftComparisonItem | undefined> {
+    const [item] = await db
+      .select()
+      .from(driftComparisonItems)
+      .where(and(eq(driftComparisonItems.id, id), eq(driftComparisonItems.orgId, orgId)));
+    return item ?? undefined;
+  }
+
   private async assertCustomerScopeAssignmentIsOrgScoped(
     assignment: InsertCustomerScopeObjectAssignment,
   ): Promise<void> {
@@ -1632,10 +1783,40 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  private sanitizeDriftComparisonItemInput(input: InsertDriftComparisonItem): InsertDriftComparisonItem {
+    return {
+      ...input,
+      fieldDiffs: sanitizeInfrastructureMetadata(input.fieldDiffs ?? []),
+      findings: sanitizeInfrastructureMetadata(input.findings ?? []),
+      metadata: sanitizeInfrastructureMetadata(input.metadata ?? {}),
+    };
+  }
+
+  private async assertCmdbSourceInOrg(sourceId: string, orgId: string): Promise<void> {
+    const source = await this.getCmdbAccount(sourceId, orgId);
+    if (!source) {
+      throw new Error("CMDB source not found in organization");
+    }
+  }
+
   private async assertProviderSourceInOrg(sourceId: string, orgId: string): Promise<void> {
     const source = await this.getProvider(sourceId, orgId);
     if (!source) {
       throw new Error("Infrastructure source not found in organization");
+    }
+  }
+
+  private async assertDriftItemMatchesRun(item: InsertDriftComparisonItem): Promise<void> {
+    const run = await this.getDriftComparisonRun(item.runId, item.orgId);
+    if (!run) {
+      throw new Error("Drift comparison item must reference a run in the same organization");
+    }
+    if (
+      run.cmdbSourceId !== item.cmdbSourceId ||
+      run.providerSourceId !== item.providerSourceId ||
+      run.objectType !== item.objectType
+    ) {
+      throw new Error("Drift comparison item must match its run source pair and object type");
     }
   }
 

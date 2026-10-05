@@ -116,6 +116,35 @@ export const providerCustomerScopeCandidateConfidenceValues = [
   "unknown",
 ] as const;
 
+export const driftRunStatusValues = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+] as const;
+
+export const driftMatchStatusValues = [
+  "matched",
+  "unmatched_reference",
+  "unmatched_provider",
+  "ambiguous",
+  "skipped",
+  "error",
+] as const;
+
+export const driftStatusValues = [
+  "no_drift",
+  "drift",
+  "unknown",
+  "not_compared",
+] as const;
+
+export const driftSeverityValues = [
+  "info",
+  "warning",
+  "critical",
+] as const;
+
 export const customerScopeStrategySchema = z.enum(customerScopeStrategyValues);
 export const customerScopeIsolationSchema = z.enum(customerScopeIsolationValues);
 export const ciCustomerRelationshipSchema = z.enum(ciCustomerRelationshipValues);
@@ -125,6 +154,10 @@ export const infrastructureProviderTypeSchema = z.enum(infrastructureProviderTyp
 export const infrastructureObjectTypeSchema = z.enum(infrastructureObjectTypeValues);
 export const providerCustomerScopeCandidateDerivedFromSchema = z.enum(providerCustomerScopeCandidateDerivedFromValues);
 export const providerCustomerScopeCandidateConfidenceSchema = z.enum(providerCustomerScopeCandidateConfidenceValues);
+export const driftRunStatusSchema = z.enum(driftRunStatusValues);
+export const driftMatchStatusSchema = z.enum(driftMatchStatusValues);
+export const driftStatusSchema = z.enum(driftStatusValues);
+export const driftSeveritySchema = z.enum(driftSeverityValues);
 
 export type CustomerScopeStrategy = z.infer<typeof customerScopeStrategySchema>;
 export type CustomerScopeIsolation = z.infer<typeof customerScopeIsolationSchema>;
@@ -135,6 +168,10 @@ export type InfrastructureProviderType = z.infer<typeof infrastructureProviderTy
 export type InfrastructureObjectType = z.infer<typeof infrastructureObjectTypeSchema>;
 export type ProviderCustomerScopeCandidateDerivedFrom = z.infer<typeof providerCustomerScopeCandidateDerivedFromSchema>;
 export type ProviderCustomerScopeCandidateConfidence = z.infer<typeof providerCustomerScopeCandidateConfidenceSchema>;
+export type DriftRunStatus = z.infer<typeof driftRunStatusSchema>;
+export type DriftMatchStatus = z.infer<typeof driftMatchStatusSchema>;
+export type DriftStatus = z.infer<typeof driftStatusSchema>;
+export type DriftSeverity = z.infer<typeof driftSeveritySchema>;
 
 // Organizations table for multi-tenancy
 export const organizations = pgTable("organizations", {
@@ -782,6 +819,120 @@ export const customerScopeObjectAssignmentsRelations = relations(customerScopeOb
   }),
 }));
 
+// Drift Comparison Runs compare documented CMDB/reference state with observed provider/runtime state.
+// They are analytical/reporting records only and must not modify CMDB, providers, CustomerScopes, Governance, or GATE behavior.
+export const driftComparisonRuns = pgTable("drift_comparison_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  cmdbSourceId: varchar("cmdb_source_id").notNull().references(() => cmdbAccounts.id, { onDelete: "cascade" }),
+  providerSourceId: varchar("provider_source_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  objectType: text("object_type").notNull(),
+  status: text("status").$type<DriftRunStatus>().notNull().default("pending"),
+  counts: jsonb("counts").$type<Record<string, unknown>>().notNull().default({}),
+  error: text("error"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  idxDriftRunsOrg: index("idx_drift_runs_org").on(table.orgId),
+  idxDriftRunsCmdbSource: index("idx_drift_runs_cmdb_source").on(table.cmdbSourceId),
+  idxDriftRunsProviderSource: index("idx_drift_runs_provider_source").on(table.providerSourceId),
+  idxDriftRunsObjectType: index("idx_drift_runs_object_type").on(table.objectType),
+  idxDriftRunsStatus: index("idx_drift_runs_status").on(table.status),
+  idxDriftRunsCreatedAt: index("idx_drift_runs_created_at").on(table.createdAt),
+  idxDriftRunsOrgSourceObjectCreated: index("idx_drift_runs_org_source_object_created").on(
+    table.orgId,
+    table.cmdbSourceId,
+    table.providerSourceId,
+    table.objectType,
+    table.createdAt,
+  ),
+}));
+
+export const driftComparisonItems = pgTable("drift_comparison_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: varchar("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  runId: varchar("run_id").notNull().references(() => driftComparisonRuns.id, { onDelete: "cascade" }),
+  cmdbSourceId: varchar("cmdb_source_id").notNull().references(() => cmdbAccounts.id, { onDelete: "cascade" }),
+  providerSourceId: varchar("provider_source_id").notNull().references(() => providerAccounts.id, { onDelete: "cascade" }),
+  objectType: text("object_type").notNull(),
+  referenceObjectId: varchar("reference_object_id"),
+  providerObjectId: varchar("provider_object_id"),
+  matchStatus: text("match_status").$type<DriftMatchStatus>().notNull(),
+  matchConfidence: text("match_confidence"),
+  matchReason: text("match_reason"),
+  driftStatus: text("drift_status").$type<DriftStatus>().notNull(),
+  driftSeverity: text("drift_severity").$type<DriftSeverity>().notNull(),
+  fieldDiffs: jsonb("field_diffs").$type<unknown[]>().notNull().default([]),
+  findings: jsonb("findings").$type<unknown[]>().notNull().default([]),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  ignoredAt: timestamp("ignored_at"),
+  acceptedAt: timestamp("accepted_at"),
+  acceptedBy: varchar("accepted_by").references(() => users.id, { onDelete: "set null" }),
+  resolutionNote: text("resolution_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  idxDriftItemsOrg: index("idx_drift_items_org").on(table.orgId),
+  idxDriftItemsRun: index("idx_drift_items_run").on(table.runId),
+  idxDriftItemsCmdbSource: index("idx_drift_items_cmdb_source").on(table.cmdbSourceId),
+  idxDriftItemsProviderSource: index("idx_drift_items_provider_source").on(table.providerSourceId),
+  idxDriftItemsObjectType: index("idx_drift_items_object_type").on(table.objectType),
+  idxDriftItemsReferenceObject: index("idx_drift_items_reference_object").on(table.referenceObjectId),
+  idxDriftItemsProviderObject: index("idx_drift_items_provider_object").on(table.providerObjectId),
+  idxDriftItemsMatchStatus: index("idx_drift_items_match_status").on(table.matchStatus),
+  idxDriftItemsDriftStatus: index("idx_drift_items_drift_status").on(table.driftStatus),
+  idxDriftItemsDriftSeverity: index("idx_drift_items_drift_severity").on(table.driftSeverity),
+  idxDriftItemsRunMatchStatus: index("idx_drift_items_run_match_status").on(table.runId, table.matchStatus),
+  idxDriftItemsRunDriftStatus: index("idx_drift_items_run_drift_status").on(table.runId, table.driftStatus),
+  idxDriftItemsOrgSourceObject: index("idx_drift_items_org_source_object").on(
+    table.orgId,
+    table.cmdbSourceId,
+    table.providerSourceId,
+    table.objectType,
+  ),
+}));
+
+export const driftComparisonRunsRelations = relations(driftComparisonRuns, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [driftComparisonRuns.orgId],
+    references: [organizations.id],
+  }),
+  cmdbSource: one(cmdbAccounts, {
+    fields: [driftComparisonRuns.cmdbSourceId],
+    references: [cmdbAccounts.id],
+  }),
+  providerSource: one(providerAccounts, {
+    fields: [driftComparisonRuns.providerSourceId],
+    references: [providerAccounts.id],
+  }),
+  items: many(driftComparisonItems),
+}));
+
+export const driftComparisonItemsRelations = relations(driftComparisonItems, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [driftComparisonItems.orgId],
+    references: [organizations.id],
+  }),
+  run: one(driftComparisonRuns, {
+    fields: [driftComparisonItems.runId],
+    references: [driftComparisonRuns.id],
+  }),
+  cmdbSource: one(cmdbAccounts, {
+    fields: [driftComparisonItems.cmdbSourceId],
+    references: [cmdbAccounts.id],
+  }),
+  providerSource: one(providerAccounts, {
+    fields: [driftComparisonItems.providerSourceId],
+    references: [providerAccounts.id],
+  }),
+  accepter: one(users, {
+    fields: [driftComparisonItems.acceptedBy],
+    references: [users.id],
+  }),
+}));
+
 // Governance Blueprints - versioned CMDB governance policy definitions.
 export const governanceBlueprints = pgTable("governance_blueprints", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1093,6 +1244,24 @@ export const insertCustomerScopeObjectAssignmentSchema = createInsertSchema(cust
   confidence: customerScopeAssignmentConfidenceSchema,
 });
 
+export const insertDriftComparisonRunSchema = createInsertSchema(driftComparisonRuns).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  status: driftRunStatusSchema.optional(),
+});
+
+export const insertDriftComparisonItemSchema = createInsertSchema(driftComparisonItems).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  matchStatus: driftMatchStatusSchema,
+  driftStatus: driftStatusSchema,
+  driftSeverity: driftSeveritySchema,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -1174,6 +1343,12 @@ export type CustomerScope = typeof customerScopes.$inferSelect;
 
 export type InsertCustomerScopeObjectAssignment = typeof customerScopeObjectAssignments.$inferInsert;
 export type CustomerScopeObjectAssignment = typeof customerScopeObjectAssignments.$inferSelect;
+
+export type InsertDriftComparisonRun = typeof driftComparisonRuns.$inferInsert;
+export type DriftComparisonRun = typeof driftComparisonRuns.$inferSelect;
+
+export type InsertDriftComparisonItem = typeof driftComparisonItems.$inferInsert;
+export type DriftComparisonItem = typeof driftComparisonItems.$inferSelect;
 
 export const governanceEnforcementModeSchema = z.enum(["observe_only", "warn_only", "enforce"]);
 export const governanceReadinessStateSchema = z.enum(["ready", "not_ready"]);

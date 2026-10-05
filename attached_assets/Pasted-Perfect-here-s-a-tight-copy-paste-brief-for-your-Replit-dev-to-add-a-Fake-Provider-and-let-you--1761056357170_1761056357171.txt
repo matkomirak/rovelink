@@ -2,7 +2,7 @@ Perfect—here’s a tight, copy-paste brief for your Replit dev to add a **Fake
 
 ---
 
-# Bridge: Fake Provider (generator) — Dev Brief
+# Rovelink: Fake Provider (generator) — Dev Brief
 
 ## 1) New provider kind
 

@@ -1,4 +1,4 @@
-NetBoxBridge / Rovelink — v18 Remaining Tasks
+Rovelink — v18 Remaining Tasks
 =============================================
 
 Current validation:

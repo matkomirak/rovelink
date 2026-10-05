@@ -1,4 +1,4 @@
-Bridge App — Replit Work Package (Web MVP)
+Rovelink — Replit Work Package (Web MVP)
 
 Goal: Tower-lite UI that reads NetBox inventory, manages projects/credentials/templates, runs jobs via FakeRunner (simulated ansible-playbook) with live logs + scheduling.
 Constraints: No real Ansible/SSH/provider collectors on Replit. Use GoodJob (Postgres). Read-only NetBox.

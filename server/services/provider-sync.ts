@@ -151,7 +151,7 @@ export class ProviderSyncWorker {
               ext_id: extId,
               ext_provider: provider.kind,
             },
-            comments: `Synced from ${provider.kind} by Bridge`,
+            comments: `Synced from ${provider.kind} by Rovelink`,
           };
 
           // Upsert to NetBox

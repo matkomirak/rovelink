@@ -1,4 +1,4 @@
-NetBoxBridge / Rovelink — v23 To-Do Tasks
+Rovelink — v23 To-Do Tasks
 =========================================
 
 Current validation:
@@ -69,7 +69,7 @@ Files:
 
 Problem:
 
-Uploaded package is NetBoxBridge (23), but docs currently say v22.
+Uploaded package is Rovelink (23), but docs currently say v22.
 
 Required changes:
 

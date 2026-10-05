@@ -137,7 +137,7 @@ export class FakeCollector implements IProviderCollector {
     const memory = rng.pick([512, 1024, 2048, 4096, 8192, 16384]);
     const disk = rng.pick([20, 40, 80, 100, 200, 500]);
     const platform = isLinux ? "linux" : "windows";
-    const description = `${customer} ${role} server - ${wave} - Managed by Bridge`;
+    const description = `${customer} ${role} server - ${wave} - Managed by Rovelink`;
 
     return {
       externalId: `${node}-${vmid}`,

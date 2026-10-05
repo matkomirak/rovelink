@@ -2,7 +2,7 @@ Yes. We’ve gone too deep into environment weirdness. Here’s a single copy-pa
 
 ---
 
-# 📩 Message to Replit: “Make the Bridge app run OOTB on Ubuntu 22.04”
+# 📩 Message to Replit: “Make the Rovelink app run OOTB on Ubuntu 22.04”
 
 **Goal:** I need a production build that runs on a fresh Ubuntu 22.04 VM with just Node 20+ and Postgres. No global tools. No Vite at runtime. One command to build, one to start.
 
@@ -54,7 +54,7 @@ Yes. We’ve gone too deep into environment weirdness. Here’s a single copy-pa
 * Provide `.env.example`:
 
   ```
-  DATABASE_URL=postgres://bridge:bridgepass@localhost:5432/bridge_db
+  DATABASE_URL=postgres://rovelink:example_password@localhost:5432/rovelink_db
   PORT=5000
   AUTH_DISABLE=true
   JWT_SECRET=change-me
@@ -99,13 +99,13 @@ sudo apt-get install -y nodejs
 
 # DB
 sudo -u postgres psql <<'SQL'
-CREATE ROLE bridge WITH LOGIN PASSWORD 'bridgepass';
-CREATE DATABASE bridge_db OWNER bridge;
-GRANT ALL PRIVILEGES ON DATABASE bridge_db TO bridge;
+CREATE ROLE rovelink WITH LOGIN PASSWORD 'example_password';
+CREATE DATABASE rovelink_db OWNER rovelink;
+GRANT ALL PRIVILEGES ON DATABASE rovelink_db TO rovelink;
 SQL
 
 # app
-git clone <my repo> /opt/bridge && cd /opt/bridge
+git clone <my repo> /opt/rovelink && cd /opt/rovelink
 cp .env.example .env    # and tweak if needed
 npm ci
 npm run db:push

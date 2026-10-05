@@ -21,7 +21,7 @@ A unified list of inventories the runner can use:
 2. **File-based**
 
    * Formats: YAML / JSON / INI
-   * Stored in Bridge; editable with a small editor & schema hints
+   * Stored in Rovelink; editable with a small editor & schema hints
    * Created via: “New → Upload/Author file…”
    * Example name: `BlueTeam-static.yml`
 

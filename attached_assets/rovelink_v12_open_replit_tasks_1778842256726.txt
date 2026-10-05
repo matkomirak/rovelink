@@ -1,8 +1,8 @@
-NetBoxBridge / Rovelink — Open Tasks for Replit After Review of Version 12
+Rovelink — Open Tasks for Replit After Review of Version 12
 ================================================================================
 
 Review date: 2026-05-15
-Reviewed package: NetBoxBridge (12).zip
+Reviewed package: Rovelink (12).zip
 
 Summary
 -------
@@ -1020,7 +1020,7 @@ Product recommendation:
 
 Position the MVP as:
 
-    "A governance-first automation bridge that only executes against CMDB-approved assets."
+    "A governance-first automation control plane that only executes against CMDB-approved assets."
 
 Do not position it as a full AWX replacement.
 

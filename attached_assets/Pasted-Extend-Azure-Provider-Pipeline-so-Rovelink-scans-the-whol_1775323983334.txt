@@ -1,8 +1,8 @@
-Extend Azure Provider + Pipeline so Bridge scans the whole Azure subscription and imports not only VMs, but also Azure networking/infrastructure into NetBox
+Extend Azure Provider + Pipeline so Rovelink scans the whole Azure subscription and imports not only VMs, but also Azure networking/infrastructure into NetBox
 Goal
 
 I want Azure discovery to go beyond just virtual machines.
-Bridge must scan the whole Azure subscription and import:
+Rovelink must scan the whole Azure subscription and import:
 
 Virtual Machines
 Virtual Networks
@@ -159,7 +159,7 @@ Auto-shutdown → azure_vm_auto_shutdown
 Scheduled shutdown → azure_vm_scheduled_shutdown
 5) NetBox custom field creation rules
 
-When Azure provider sync runs, Bridge must ensure required NetBox custom fields exist.
+When Azure provider sync runs, Rovelink must ensure required NetBox custom fields exist.
 
 Naming convention
 

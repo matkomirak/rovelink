@@ -2,7 +2,7 @@ Goal: Implement an automation GATE that blocks inventory unless CMDB governance 
 
 CONTEXT (READ ONLY)
 
-Existing bridge app codebase (TypeScript)
+Existing Rovelink codebase (TypeScript)
 
 Providers:
 

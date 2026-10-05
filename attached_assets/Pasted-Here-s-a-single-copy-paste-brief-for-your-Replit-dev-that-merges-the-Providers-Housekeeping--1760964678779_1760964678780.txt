@@ -1,8 +1,8 @@
-Here’s a single, **copy-paste brief** for your Replit dev that merges the **Providers/Housekeeping**, **NetBox inventory (keyed_groups)**, the **Bridge Data Pipelines (BDP) UI/engine**, and the **RTC mapping rules** for **Proxmox/vCenter/Azure → NetBox** and **→ i-doit**.
+Here’s a single, **copy-paste brief** for your Replit dev that merges the **Providers/Housekeeping**, **NetBox inventory (keyed_groups)**, the **Rovelink Data Pipelines (BDP) UI/engine**, and the **RTC mapping rules** for **Proxmox/vCenter/Azure → NetBox** and **→ i-doit**.
 
 ---
 
-# Bridge App – Final Combined Brief (Providers, BDP, Inventory, RTC Rules)
+# Rovelink – Final Combined Brief (Providers, BDP, Inventory, RTC Rules)
 
 ## Stack & Env
 
@@ -17,7 +17,7 @@ Here’s a single, **copy-paste brief** for your Replit dev that merges the **Pr
 * **Dashboard**
 * **Providers** (sources: Proxmox, vCenter, Azure, …)
 * **CMDBs** (targets: NetBox, i-doit, ServiceNow—implement NetBox + i-doit first)
-* **Bridge Data Pipelines (BDP)** (mapping & sync flows)
+* **Rovelink Data Pipelines (BDP)** (mapping & sync flows)
 * **Runs** (filters: `provider-sync | bdp-sync | playbook-run`)
 * **Settings → Housekeeping**
 
@@ -169,7 +169,7 @@ Housekeeping → **Rebuild Group Cache** should parse inventory graph and store 
 
 ---
 
-## Bridge Data Pipelines (BDP)
+## Rovelink Data Pipelines (BDP)
 
 **UI**
 

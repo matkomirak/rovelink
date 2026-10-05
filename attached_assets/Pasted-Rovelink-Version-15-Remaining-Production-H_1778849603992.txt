@@ -1,10 +1,10 @@
-NetBoxBridge / Rovelink — Version 15 Remaining Production-Hardening Tasks
+Rovelink — Version 15 Remaining Production-Hardening Tasks
 =========================================================================
 
 Goal
 ----
 
-Bring NetBoxBridge / Rovelink closer to production MVP readiness.
+Bring Rovelink closer to production MVP readiness.
 
 Current status from latest review:
 

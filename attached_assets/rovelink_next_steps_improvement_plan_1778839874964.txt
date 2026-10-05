@@ -1,10 +1,10 @@
-NetBoxBridge / Rovelink — Next Steps Improvement Plan
+Rovelink — Next Steps Improvement Plan
 =====================================================
 
 Purpose
 -------
 
-This document describes the remaining technical improvements needed before NetBoxBridge / Rovelink should be considered production-ready.
+This document describes the remaining technical improvements needed before Rovelink should be considered production-ready.
 
 The focus is on the issues still missing after the latest update:
 

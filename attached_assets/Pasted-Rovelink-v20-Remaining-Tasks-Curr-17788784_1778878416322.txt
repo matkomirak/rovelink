@@ -1,4 +1,4 @@
-NetBoxBridge / Rovelink — v20 Remaining Tasks
+Rovelink — v20 Remaining Tasks
 =============================================
 
 Current review results:
@@ -187,7 +187,7 @@ Files:
 
 Problem:
 
-Uploaded package is NetBoxBridge (20), but docs still say v19.
+Uploaded package is Rovelink (20), but docs still say v19.
 
 Required changes:
 

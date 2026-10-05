@@ -2,7 +2,7 @@ Below is a technical implementation brief you can give to Replit. It covers all 
 
 ---
 
-# Technical Implementation Brief: NetBoxBridge / Rovelink Hardening
+# Technical Implementation Brief: Rovelink Hardening
 
 Implement the following backend, security, testing, and operational improvements.
 

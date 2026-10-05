@@ -246,7 +246,7 @@ export class AzureNetBoxSyncService {
           provider_state: "active",
           ...azureFields,
         },
-        comments: `Synced from Azure (${vm.resourceGroup}) by Bridge`,
+        comments: `Synced from Azure (${vm.resourceGroup}) by Rovelink`,
       };
 
       const result = await this.netbox.upsertVm(vmData, extId);

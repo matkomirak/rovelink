@@ -1,4 +1,4 @@
-NetBoxBridge / Rovelink — v22 Future Tasks
+Rovelink — v22 Future Tasks
 ==========================================
 
 Current validation:
@@ -69,7 +69,7 @@ Files:
 
 Problem:
 
-Uploaded package is NetBoxBridge (22), but docs currently say v21.
+Uploaded package is Rovelink (22), but docs currently say v21.
 
 Required changes:
 

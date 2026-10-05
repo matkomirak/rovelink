@@ -28,17 +28,17 @@
 ## 1. Project rename
 
 ### Current state
-The codebase contains the name "LegacyProject" and "Bridge" throughout:
+The codebase contains the name "LegacyProject" and "Rovelink" throughout:
 - `replit.md` title: `# LegacyProject - Infrastructure Automation Platform`
 - Page titles, navbar, footer, README references
-- Internal comments referencing "Bridge App" and "BDP" (Bridge Data Pipelines)
+- Internal comments referencing "Rovelink" and "BDP" (Rovelink Data Pipelines)
 
 ### Required changes
 
 **File: `replit.md`**
 - Replace `# LegacyProject - Infrastructure Automation Platform` with `# Rovelink - Infrastructure Automation Platform`
 - Replace every instance of "LegacyProject" with "Rovelink"
-- Replace "Bridge Data Pipelines" / "BDP" with "Rovelink Data Pipelines" / "RDP"
+- Replace "Rovelink Data Pipelines" / "BDP" with "Rovelink Data Pipelines" / "RDP"
 
 **File: `client/index.html`**
 - Replace `<title>` content with `Rovelink`
@@ -57,8 +57,8 @@ The codebase contains the name "LegacyProject" and "Bridge" throughout:
 **Search and replace globally** (all `.ts`, `.tsx`, `.md` files):
 - `LegacyProject` → `Rovelink`
 - `LegacyProject` → `rovelink`
-- `Bridge App` → `Rovelink`
-- `bridge app` → `rovelink`
+- `Rovelink` → `Rovelink`
+- `Rovelink` → `rovelink`
 
 Do **not** rename any database table names, column names, or API route paths — these are internal and breaking them requires a migration.
 

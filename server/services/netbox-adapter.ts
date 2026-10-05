@@ -185,7 +185,7 @@ export class NetBoxAdapter {
         name: 'ext_id',
         label: 'External ID',
         type: 'text',
-        description: 'External provider unique identifier for Bridge sync',
+        description: 'External provider unique identifier for Rovelink sync',
         object_types: ['virtualization.virtualmachine'],
         filter_logic: 'loose',
       },
@@ -202,7 +202,7 @@ export class NetBoxAdapter {
         name: 'provider_state',
         label: 'Provider State',
         type: 'text',
-        description: 'Last known provider presence state (active or missing). Managed automatically by Bridge sync.',
+        description: 'Last known provider presence state (active or missing). Managed automatically by Rovelink sync.',
         object_types: ['virtualization.virtualmachine'],
         filter_logic: 'loose',
         default: 'active',
@@ -926,7 +926,7 @@ export class NetBoxAdapter {
   }
 
   /**
-   * Get all VMs that have been synced by Bridge (have ext_id custom field)
+   * Get all VMs that have been synced by Rovelink (have ext_id custom field)
    * Returns VMs with their ext_id, cluster info, and ownership for missing CI detection
    */
   async getSyncedVms(): Promise<Array<{
@@ -953,7 +953,7 @@ export class NetBoxAdapter {
           break;
         }
 
-        // Only include VMs that have ext_id set (synced by Bridge)
+        // Only include VMs that have ext_id set (synced by Rovelink)
         const syncedVms = response.data.results.filter(
           (vm: any) => vm.custom_fields?.ext_id
         );
@@ -1010,7 +1010,7 @@ export class NetBoxAdapter {
   }
 
   /**
-   * Get the default cluster ID used by Bridge sync.
+   * Get the default cluster ID used by Rovelink sync.
    * Used for cluster safety check when marking VMs as missing.
    */
   async getDefaultClusterId(): Promise<number | null> {

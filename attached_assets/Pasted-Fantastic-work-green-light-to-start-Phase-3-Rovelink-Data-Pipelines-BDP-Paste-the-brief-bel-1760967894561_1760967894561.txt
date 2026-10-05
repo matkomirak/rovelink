@@ -1,9 +1,9 @@
-Fantastic work — green light to start **Phase 3: Bridge Data Pipelines (BDP)**.
+Fantastic work — green light to start **Phase 3: Rovelink Data Pipelines (BDP)**.
 Paste the brief below as your next task package.
 
 ---
 
-# ✅ Proceed: Phase 3 — Bridge Data Pipelines (BDP)
+# ✅ Proceed: Phase 3 — Rovelink Data Pipelines (BDP)
 
 ## Goal
 

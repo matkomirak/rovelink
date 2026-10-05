@@ -1,4 +1,4 @@
-Bridge App – Final Requirements for Providers, Housekeeping & Proxmox
+Rovelink – Final Requirements for Providers, Housekeeping & Proxmox
 Stack & Env (unchanged)
 
 Stack: Full-stack JS → React (UI) + Express (API) + PostgreSQL.

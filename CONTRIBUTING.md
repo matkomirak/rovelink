@@ -1,71 +1,73 @@
 # Contributing to Rovelink
 
-Thank you for considering a contribution to Rovelink. Please read the guidelines below before opening a pull request.
+Rovelink is a governance-first automation control plane for infrastructure and
+MSP teams: govern first, automate second. v0.1.0-alpha is an early alpha, not a
+production-ready release. APIs, schemas, and UI may change.
 
-## Development Workflow
+## Run Locally
 
-1. Fork the repository and create a branch from `main`.
-2. Install dependencies: `npm install`.
-3. Copy `.env.example` → `.env` and fill in the required values.
-4. Apply the schema: `npm run db:push`.
-5. Seed the database: `npm run db:seed`.
-6. Start the dev server: `npm run dev`.
+Follow the [README quickstart](README.md#quickstart) for Docker or host development.
+It covers dependency installation, private environment setup, schema push,
+bootstrap seeding, and Windows-compatible startup commands.
+Use [Local Development](LOCAL-DEVELOPMENT.md) for the disposable demo workflow.
 
-## Architecture Rules
+Work from the repository root. Host development requires Node.js 20.19+, npm,
+and a reachable Postgres database. Use `npm.cmd ci` on Windows or `npm ci`
+on Linux/macOS. Host commands must load the private environment explicitly,
+as shown in the README.
 
-### Non-negotiable constraints
+## Validate Changes
 
-These invariants exist for security and correctness. Breaking them will cause your PR to be rejected.
+Run before opening a pull request:
 
-| Invariant | Rationale |
-|---|---|
-| **Provider sync writes to `external_objects` only.** Never write directly to any CMDB inside a provider sync. | Providers are governance-blind; only pipelines may write to CMDBs. |
-| **Gate evaluation is mandatory.** Every inventory generation path must call `evaluateAllGates()` first and read from the gate store. | Skipping the gate is a security violation. |
-| **Provider hints must not affect gate decisions.** `evaluateGate()` only accepts CMDB (NetBox) data. Passing `providerHintsUsed = true` throws. | Governance authority resides exclusively in the CMDB. |
-| **All secrets are encrypted at rest.** Use `encryptSecret` / `decryptSecret` from `server/services/secrets.ts`. Never store plaintext tokens in the DB. | Protect customer credentials. |
-| **Auth tokens are HttpOnly cookies.** Never use `localStorage` for JWT storage. | Prevent XSS-based token theft. |
-| **Provider tags are namespaced** before writing to NetBox (e.g. `proxmox_customer/acme`). | Prevent tag collisions between providers and human-managed tags. |
+```powershell
+npm.cmd run check
+npm.cmd test
+npm.cmd run build
+npm.cmd audit --omit=dev
+```
 
-### Adding a new provider
+Use `npm` instead of `npm.cmd` on Linux/macOS. Add focused tests for changed
+behavior, including org/source isolation and error handling where relevant.
+For UI changes, manually check loading, empty, error, and normal states.
+Report commands not run and remaining test gaps; the default test suite does
+not replace fresh-database integration tests or browser smoke validation.
 
-1. Create `server/services/providers/<name>.ts` implementing `IProviderCollector`.
-2. Export a `create<Name>Collector(config: any)` factory function.
-3. Register the factory in `server/services/providers/registry.ts`.
-4. Add form fields in `client/src/pages/providers.tsx` behind a `selectedKind === "<name>"` guard.
+## Coding and Safety Expectations
 
-### Adding a new CMDB adapter
-
-1. Create `server/services/<name>-adapter.ts` with `test()`, `upsert()`, and `validate()` methods.
-2. Add a `case "<kind>"` branch in `getCmdbAdapter()` in `server/routes/pipelines.ts`.
-3. Wire it into the CMDB accounts UI in `client/src/pages/cmbds.tsx`.
-
-### Schema changes
-
-1. Edit `shared/schema.ts`.
-2. Run `npm run db:push` to apply.
-3. If adding a new table, export the insert schema, insert type, and select type at the bottom of the file.
-
-## Code Style
-
-- TypeScript strict mode is enforced — avoid `any` where possible.
-- No `console.log` in production paths — use `console.error` / `console.warn` for unexpected conditions.
-- React components live in `client/src/pages/` (pages) or `client/src/components/` (shared).
-- All interactive HTML elements must have a `data-testid` attribute following the `{action}-{target}` pattern.
-
-## Testing
-
-There are no automated test files yet. When adding features, manually verify:
-
-- The happy path works end to end.
-- The error path shows a meaningful toast / error message.
-- No secrets appear in API responses (check the Network tab).
-
-## Commit Messages
-
-Use conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`.
+- Follow existing TypeScript, React/Vite, Express, Drizzle/Postgres patterns.
+  See [AGENTS.md](AGENTS.md) for repository instructions.
+- Keep changes focused. Explain schema changes and compatibility implications;
+  review schema pushes against a disposable database first.
+- Preserve HttpOnly cookie authentication and organization isolation in routes,
+  queries, mutations, background work, and integration paths.
+- CustomerScope is a customer/environment boundary inside a source, not a
+  replacement for Rovelink's organization security boundary.
+- Never commit credentials, tokens, private keys, `.env`, `.local/`, bootstrap
+  credentials, local databases, logs, runtime state, or generated caches.
+  Inspect staged files; ignore-rule hardening is still pending.
+- Use existing encrypted credential helpers and sanitize responses, metadata,
+  and logs. Do not copy raw provider configuration into output or fixtures.
+- Keep normalized provider inventory read-only toward external systems.
+  New write operations require explicit design, review, and tests.
+  Existing CMDB-writing pipelines are separate from inventory discovery.
+- Provider CustomerScope candidates are hints only. Do not turn them into
+  authoritative assignments or GATE inputs implicitly.
+- Keep drift reporting analysis-only: no remediation, writeback, readiness
+  change, or Automation GATE impact.
+- Governance and GATE changes must be explicit and tested. Preserve activation
+  semantics, default policy behavior, scoring/readiness boundaries, and
+  inventory enforcement modes.
+- Constrain filesystem paths through existing safe helpers. Execute commands
+  with argument arrays, without shell interpolation of user-controlled values.
 
 ## Pull Requests
 
-- Keep PRs focused — one feature or fix per PR.
-- Reference any related issue in the PR description.
-- Ensure the dev server starts cleanly (`npm run dev`) before opening the PR.
+Open a focused PR describing the problem, resulting behavior, tests, and
+material limitations. Include screenshots with synthetic data for visible UI
+changes. Reference related issues and identify any migration or configuration
+steps. Avoid unrelated refactors and dependency churn.
+
+Use clear conventional commit messages such as `feat:`, `fix:`, or `docs:`.
+For sensitive security findings, follow [SECURITY.md](SECURITY.md) instead of
+opening a public issue.

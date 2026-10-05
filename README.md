@@ -195,16 +195,16 @@ For more detail, see [Governance MVP](GOVERNANCE-MVP.md) and
 - Provider/CMDB credentials and SSH keys are sensitive. Supported credential paths encrypt secrets at rest using AES-256-GCM; encryption is not a substitute for access controls or an independent security review.
 - Preserve HttpOnly cookie authentication and organization isolation. CustomerScope is a source-specific customer/environment boundary, not an application tenant.
 - Execute only trusted playbooks and use dedicated test credentials and targets. Automation GATE is a required control, not a guarantee that a playbook is safe.
-- A `SECURITY.md` with private vulnerability-reporting instructions is planned for the next public-readiness task. Until that channel is published, do not put credentials, sensitive logs, or exploit details in public issues.
+- Follow [SECURITY.md](SECURITY.md) for private vulnerability reporting. Maintainers must enable and verify the reporting channel before public release; do not post sensitive details in public issues.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
-Parts of the contribution guide predate the current alpha; use the validation
-commands above and preserve authentication, org isolation, and Automation GATE boundaries.
+Use the validation commands above and preserve authentication, org isolation,
+and Automation GATE boundaries. Maintainers can use the
+[public alpha checklist](docs/public-alpha-checklist.md) before release.
 
 ## License
 
-License publication is pending a follow-up task. `package.json` currently declares
-MIT, but the repository does not yet contain a `LICENSE` file. A complete license
-and copyright notice must be added before the public alpha release.
+Rovelink is licensed under the [MIT License](LICENSE), matching the existing
+package license declaration. Third-party dependencies retain their own licenses.

@@ -157,6 +157,21 @@ function DetailBlock({ title, value }: { title: string; value: unknown }) {
   );
 }
 
+function LoadError({ subject, onRetry }: { subject: string; onRetry: () => void }) {
+  return (
+    <Alert variant="destructive">
+      <AlertTriangle className="h-4 w-4" />
+      <AlertTitle>Could not load {subject}</AlertTitle>
+      <AlertDescription>
+        Check the app connection and try again.
+        <Button type="button" variant="outline" size="sm" className="ml-2" onClick={onRetry}>
+          Retry
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 export default function DriftReports() {
   const { toast } = useToast();
   const [cmdbSourceId, setCmdbSourceId] = useState("");
@@ -167,13 +182,13 @@ export default function DriftReports() {
   const [driftStatus, setDriftStatus] = useState(ALL_VALUE);
   const [driftSeverity, setDriftSeverity] = useState(ALL_VALUE);
 
-  const { data: cmdbs = [], isLoading: cmdbsLoading } = useQuery<CmdbAccount[]>({
+  const { data: cmdbs = [], isLoading: cmdbsLoading, isError: cmdbsError, refetch: refetchCmdbs } = useQuery<CmdbAccount[]>({
     queryKey: ["/api/cmdbs"],
   });
-  const { data: providers = [], isLoading: providersLoading } = useQuery<ProviderAccount[]>({
+  const { data: providers = [], isLoading: providersLoading, isError: providersError, refetch: refetchProviders } = useQuery<ProviderAccount[]>({
     queryKey: ["/api/providers"],
   });
-  const { data: runList, isLoading: runsLoading, isFetching: runsFetching } = useQuery<DriftRunListResponse>({
+  const { data: runList, isLoading: runsLoading, isFetching: runsFetching, isError: runsError, refetch: refetchRuns } = useQuery<DriftRunListResponse>({
     queryKey: ["/api/drift-runs"],
   });
 
@@ -191,7 +206,7 @@ export default function DriftReports() {
   const itemsUrl = effectiveRunId
     ? buildItemsUrl(effectiveRunId, { matchStatus, driftStatus, driftSeverity })
     : null;
-  const { data: itemsResponse, isLoading: itemsLoading } = useQuery<DriftItemsResponse>({
+  const { data: itemsResponse, isLoading: itemsLoading, isError: itemsError, refetch: refetchItems } = useQuery<DriftItemsResponse>({
     queryKey: [itemsUrl ?? "/api/drift-runs/no-run/items"],
     enabled: Boolean(itemsUrl),
   });
@@ -223,11 +238,11 @@ export default function DriftReports() {
     },
   });
 
-  const sourceSelectionDisabled = cmdbsLoading || providersLoading || runMutation.isPending;
-  const canRun = Boolean(cmdbSourceId && providerSourceId) && !runMutation.isPending;
+  const sourceSelectionDisabled = cmdbsLoading || providersLoading || cmdbsError || providersError || runMutation.isPending;
+  const canRun = Boolean(cmdbSourceId && providerSourceId) && !sourceSelectionDisabled;
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold" data-testid="text-page-title">Drift Reports</h1>
         <p className="text-sm text-muted-foreground">
@@ -270,7 +285,8 @@ export default function DriftReports() {
                 ))}
               </SelectContent>
             </Select>
-            {!cmdbsLoading && netboxCmdbs.length === 0 && (
+            {cmdbsError && <LoadError subject="CMDB sources" onRetry={() => void refetchCmdbs()} />}
+            {!cmdbsLoading && !cmdbsError && netboxCmdbs.length === 0 && (
               <p className="text-xs text-muted-foreground">No enabled NetBox CMDB sources are available.</p>
             )}
           </div>
@@ -289,7 +305,8 @@ export default function DriftReports() {
                 ))}
               </SelectContent>
             </Select>
-            {!providersLoading && enabledProviders.length === 0 && (
+            {providersError && <LoadError subject="provider sources" onRetry={() => void refetchProviders()} />}
+            {!providersLoading && !providersError && enabledProviders.length === 0 && (
               <p className="text-xs text-muted-foreground">No enabled provider sources are available.</p>
             )}
           </div>
@@ -320,6 +337,8 @@ export default function DriftReports() {
             <div className="space-y-2">
               {[0, 1, 2].map((key) => <Skeleton key={key} className="h-12 w-full" />)}
             </div>
+          ) : runsError ? (
+            <LoadError subject="drift runs" onRetry={() => void refetchRuns()} />
           ) : runs.length === 0 ? (
             <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
               No drift runs yet. Select sources and run a VM drift comparison to create the first report.
@@ -452,6 +471,8 @@ export default function DriftReports() {
             <div className="space-y-2">
               {[0, 1, 2].map((key) => <Skeleton key={key} className="h-12 w-full" />)}
             </div>
+          ) : itemsError ? (
+            <LoadError subject="drift items" onRetry={() => void refetchItems()} />
           ) : items.length === 0 ? (
             <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
               No drift items match the selected filters.

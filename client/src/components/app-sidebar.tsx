@@ -31,6 +31,7 @@ import {
   SidebarHeader,
   SidebarFooter,
   SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -104,6 +105,7 @@ function navItemIsActive(location: string, item: { url: string; activeUrls?: str
 
 export function AppSidebar() {
   const [location, setLocation] = useLocation();
+  const { setOpenMobile } = useSidebar();
   const { toast } = useToast();
   const { data: user } = useQuery<User>({
     queryKey: ["/api/auth/me"],
@@ -111,6 +113,7 @@ export function AppSidebar() {
   const logoutMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/auth/logout"),
     onSuccess: () => {
+      setOpenMobile(false);
       queryClient.setQueryData(["/api/auth/me"], null);
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
       setLocation("/login");
@@ -146,7 +149,7 @@ export function AppSidebar() {
                         isActive={navItemIsActive(location, item)}
                         data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
                       >
-                        <Link href={item.url}>
+                        <Link href={item.url} onClick={() => setOpenMobile(false)}>
                           <item.icon className="h-4 w-4" />
                           <span>{item.title}</span>
                         </Link>
@@ -197,7 +200,7 @@ export function AppSidebar() {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild data-testid="menu-item-account-settings">
-                <Link href="/settings">
+                <Link href="/settings" onClick={() => setOpenMobile(false)}>
                   <UserCog className="h-4 w-4" />
                   <span>Account settings</span>
                 </Link>

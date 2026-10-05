@@ -135,7 +135,7 @@ function AppContent() {
     <SidebarProvider style={style as React.CSSProperties}>
       <div className="flex h-screen w-full">
         <AppSidebar />
-        <div className="flex flex-col flex-1">
+        <div className="flex min-w-0 flex-col flex-1">
           <header className="flex h-20 items-center justify-between border-b border-border px-4">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <ThemeToggle />

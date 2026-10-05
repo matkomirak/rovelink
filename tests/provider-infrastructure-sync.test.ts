@@ -7,6 +7,12 @@ import supertest from "supertest";
 import type { Server } from "node:http";
 import { registerRoutes } from "../server/routes";
 import { sanitizeInfrastructureMetadata, storage } from "../server/storage";
+import { fakeInfrastructureNormalizer } from "../server/services/infrastructure-normalizers/fake";
+import {
+  ProviderInfrastructureSyncNotSupportedError,
+  syncProviderInfrastructureInventory,
+} from "../server/services/provider-infrastructure-sync";
+import type { NormalizedVm } from "../server/services/providers/types";
 import type {
   InfrastructureObject,
   InsertInfrastructureObject,
@@ -224,6 +230,87 @@ after(async () => {
 });
 
 describe("fake provider normalized infrastructure sync", () => {
+  test("fake normalizer produces objects, candidate hints, and no relationships", () => {
+    const vm: NormalizedVm = {
+      externalId: "fake-vm-1",
+      name: "acme-web-01",
+      provider: "fake",
+      status: "running",
+      primaryIp4: "10.0.0.10",
+      tags: ["provider/fake", "customer/ACME", "role/web"],
+      raw: {
+        vm: {
+          id: "native-1",
+          location: "eu-west",
+          resourceGroup: "rg-acme-prod",
+          tags: { customer: "ACME", wave: "Wave1" },
+        },
+      },
+    };
+
+    const result = fakeInfrastructureNormalizer.normalize({
+      provider: makeProvider({ id: "fake-provider-a" }),
+      orgId: ORG_A,
+      items: [vm],
+      config: {},
+      now: new Date("2026-01-01T00:00:00Z"),
+    });
+
+    assert.equal(result.objects.length, 1);
+    assert.equal(result.objects[0].providerType, "fake");
+    assert.equal(result.objects[0].objectType, "vm");
+    assert.equal(result.objects[0].externalId, "fake-vm-1");
+    assert.equal(result.objects[0].providerNativeId, "native-1");
+    assert.equal(result.objects[0].displayName, "acme-web-01");
+    assert.equal(result.relationships.length, 0);
+    assert.ok(result.customerScopeCandidates.some((candidate) => (
+      candidate.object.externalId === "fake-vm-1" &&
+      candidate.derivedFrom === "tag" &&
+      candidate.candidateValue === "ACME" &&
+      candidate.confidence === "medium"
+    )));
+    assert.ok(result.customerScopeCandidates.some((candidate) => (
+      candidate.derivedFrom === "resource_group" &&
+      candidate.candidateValue === "acme" &&
+      candidate.confidence === "low"
+    )));
+  });
+
+  test("generic sync service supports fake provider and writes hints only", async () => {
+    const provider = store.providers.get("fake-provider-a")!;
+
+    const res = await syncProviderInfrastructureInventory(
+      provider,
+      ORG_A,
+      provider.config as Record<string, unknown>,
+      store as any,
+    );
+
+    assert.equal(res.sourceId, "fake-provider-a");
+    assert.equal(res.providerType, "fake");
+    assert.equal(res.objectsUpserted, 3);
+    assert.equal(res.relationshipsUpserted, 0);
+    assert.ok(res.customerScopeCandidatesUpserted > 0);
+    assert.equal(store.objects.length, 3);
+    assert.ok(store.candidates.length > 0);
+    assert.equal(store.customerScopes.length, 0);
+    assert.equal(store.customerScopeAssignments.length, 0);
+  });
+
+  test("generic sync service rejects azure and proxmox in this slice", async () => {
+    const azureProvider = makeProvider({ id: "azure-provider-a", kind: "azure", name: "Azure Provider" });
+    const proxmoxProvider = makeProvider({ id: "proxmox-provider-a", kind: "proxmox", name: "Proxmox Provider" });
+
+    await assert.rejects(
+      syncProviderInfrastructureInventory(azureProvider, ORG_A, {}, store as any),
+      ProviderInfrastructureSyncNotSupportedError,
+    );
+    await assert.rejects(
+      syncProviderInfrastructureInventory(proxmoxProvider, ORG_A, {}, store as any),
+      ProviderInfrastructureSyncNotSupportedError,
+    );
+  });
+
   test("creates infrastructure objects and customer scope candidates without exposing provider config", async () => {
     const res = await req
       .post("/api/providers/fake-provider-a/inventory/sync")

@@ -9,7 +9,7 @@
 
 ## Table of Contents
 
-1. [Project rename: Custora → Rovelink](#1-project-rename)
+1. [Project rename: LegacyProject → Rovelink](#1-project-rename)
 2. [Architecture overview](#2-architecture-overview)
 3. [Gap 1 — Real Ansible / AWX execution engine](#3-gap-1-real-ansible--awx-execution-engine)
 4. [Gap 2 — VMware vCenter provider](#4-gap-2-vmware-vcenter-provider)
@@ -28,21 +28,21 @@
 ## 1. Project rename
 
 ### Current state
-The codebase contains the name "Custora" and "Bridge" throughout:
-- `replit.md` title: `# Custora - Infrastructure Automation Platform`
+The codebase contains the name "LegacyProject" and "Bridge" throughout:
+- `replit.md` title: `# LegacyProject - Infrastructure Automation Platform`
 - Page titles, navbar, footer, README references
 - Internal comments referencing "Bridge App" and "BDP" (Bridge Data Pipelines)
 
 ### Required changes
 
 **File: `replit.md`**
-- Replace `# Custora - Infrastructure Automation Platform` with `# Rovelink - Infrastructure Automation Platform`
-- Replace every instance of "Custora" with "Rovelink"
+- Replace `# LegacyProject - Infrastructure Automation Platform` with `# Rovelink - Infrastructure Automation Platform`
+- Replace every instance of "LegacyProject" with "Rovelink"
 - Replace "Bridge Data Pipelines" / "BDP" with "Rovelink Data Pipelines" / "RDP"
 
 **File: `client/index.html`**
 - Replace `<title>` content with `Rovelink`
-- Replace any meta description referencing Custora
+- Replace any meta description referencing LegacyProject
 
 **File: `client/src/components/app-sidebar.tsx`**
 - Replace the product name displayed in the sidebar nav header
@@ -52,11 +52,11 @@ The codebase contains the name "Custora" and "Bridge" throughout:
 - Set `"description": "Infrastructure automation platform governed by CMDB"`
 
 **File: `server/seed.ts`**
-- Update any seeded display names from "Custora" to "Rovelink"
+- Update any seeded display names from "LegacyProject" to "Rovelink"
 
 **Search and replace globally** (all `.ts`, `.tsx`, `.md` files):
-- `Custora` → `Rovelink`
-- `custora` → `rovelink`
+- `LegacyProject` → `Rovelink`
+- `LegacyProject` → `rovelink`
 - `Bridge App` → `Rovelink`
 - `bridge app` → `rovelink`
 

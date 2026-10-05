@@ -10,7 +10,7 @@ reachable remote Linux SSH targets.
 docker compose up -d --build
 ```
 
-Rovelink is available at:
+The app port binds to host loopback only. Rovelink is available at:
 
 ```text
 http://localhost:5000
@@ -144,7 +144,8 @@ evaluated time.
 
 ### CustomerScope Demo Scenarios
 
-The seed creates or updates these local demo scenarios:
+All customer names in this seed, including ACME GmbH, are fictional placeholders,
+not real customer records. The seed creates or updates these local demo scenarios:
 
 - `ACME GmbH`, with an evaluated ready VM and good score.
 - `Customer B`, with an evaluated not-ready VM and a governance finding.
@@ -206,8 +207,9 @@ Use this short flow for a CustomerScope MSP pilot walkthrough:
 8. Explain the enforcement distinction:
    - Blueprint `enforce` recommends blocking.
    - Automation Inventory `enforce` decides whether automation actually blocks.
-9. Explain the next roadmap: Azure provider, Proxmox provider, and
-   provider-vs-CMDB governance comparison.
+9. Show cached Azure/Proxmox inventory or Drift Reports if prepared. Drift
+   compares reference and runtime VMs for analysis only; it does not update
+   CMDBs, providers, Governance readiness, or Automation GATE decisions.
 
 ### Provider Infrastructure Inventory Sync
 
@@ -246,9 +248,9 @@ Current MSP pilot scope:
 
 - NetBox as the reference CMDB and governance source.
 - CustomerScope as the customer/environment boundary.
-- Azure as a planned provider source.
-- Proxmox as a planned provider source, initially with fake/demo or read-only
-  data.
+- Azure read-only normalized inventory sync.
+- Proxmox read-only VM-only normalized inventory sync.
+- Manual provider-vs-CMDB VM drift reporting.
 
 Deferred:
 
@@ -257,10 +259,8 @@ Deferred:
 
 Future work:
 
-- Provider inventory abstraction.
-- Azure read-only inventory.
-- Proxmox read-only or fake-data provider.
-- Provider-to-CMDB drift and comparison.
+- Richer provider discovery and relationship coverage.
+- Broader reference object types and drift comparisons.
 - Customer-level dashboard and reporting detail pages.
 
 ## Configure Rovelink CMDB

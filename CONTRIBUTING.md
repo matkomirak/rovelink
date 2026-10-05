@@ -45,7 +45,7 @@ not replace fresh-database integration tests or browser smoke validation.
   replacement for Rovelink's organization security boundary.
 - Never commit credentials, tokens, private keys, `.env`, `.local/`, bootstrap
   credentials, local databases, logs, runtime state, or generated caches.
-  Inspect staged files; ignore-rule hardening is still pending.
+  Inspect staged files even when ignore rules cover the expected artifacts.
 - Use existing encrypted credential helpers and sanitize responses, metadata,
   and logs. Do not copy raw provider configuration into output or fixtures.
 - Keep normalized provider inventory read-only toward external systems.

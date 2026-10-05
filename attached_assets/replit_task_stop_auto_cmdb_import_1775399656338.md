@@ -22,14 +22,14 @@ Creating or updating a provider does **not** automatically trigger CMDB import b
 - The CMDB import starts when provider sync is run via `POST /api/providers/:id/sync`.
 
 ## Goal
-Change provider sync so it only imports/caches provider data inside the Custora app.
+Change provider sync so it only imports/caches provider data inside the LegacyProject app.
 
 After this change:
 - Provider sync must **not** write anything into NetBox or any CMDB.
 - Provider sync should only:
   - validate provider connection
   - collect provider inventory
-  - persist/cache provider objects in Custora-owned tables
+  - persist/cache provider objects in LegacyProject-owned tables
   - record sync run logs and counts
 - CMDB writes must happen **only** through pipelines (`/api/pipelines/:id/sync`), which already exist and are working.
 
@@ -48,14 +48,14 @@ Remove or bypass all logic in `executeSyncRun()` that:
 - syncs IPs into NetBox
 - writes any provider sync data into NetBox/CMDB
 
-#### Replace with Custora-only caching behavior
+#### Replace with LegacyProject-only caching behavior
 Provider sync should instead:
 - collect provider inventory from the collector
-- upsert provider objects into Custora storage only
+- upsert provider objects into LegacyProject storage only
 - continue updating `external_objects` with cached provider payloads
 - optionally store normalized summary fields in `cachedPayload`
 - keep sync run history/logs/counts working
-- keep removed-object detection limited to Custora-side tracking only
+- keep removed-object detection limited to LegacyProject-side tracking only
 
 ### 2) Keep `external_objects` as the provider-side cache
 Use `external_objects` as the canonical cache for provider-synced inventory.
@@ -78,15 +78,15 @@ Update sync logs so they no longer say:
 - `NetBox connected`
 
 Replace with wording like:
-- `Phase 3: Custora Cache Update`
-- `Caching X provider objects in Custora`
+- `Phase 3: LegacyProject Cache Update`
+- `Caching X provider objects in LegacyProject`
 - `Provider sync completed without CMDB write`
 
 ### 4) Azure provider sync must also stop writing to NetBox
 In `server/services/syncWorker.ts`, the Azure path currently uses `AzureNetBoxSyncService.importAll(...)`.
 That must be removed from provider sync.
 
-Instead, Azure provider sync should cache Azure discovery results in Custora only.
+Instead, Azure provider sync should cache Azure discovery results in LegacyProject only.
 No VNets, NICs, Public IPs, Prefixes, or VMs should be created/updated in NetBox during provider sync.
 
 ### 5) Pipelines remain the only CMDB sync path
@@ -101,11 +101,11 @@ This becomes the single supported path for CMDB sync.
 
 ### 6) Optional but recommended: make the architecture explicit in code/comments
 Add comments and/or naming that clearly separate:
-- **Provider sync** = collect/cache source inventory into Custora
+- **Provider sync** = collect/cache source inventory into LegacyProject
 - **Pipeline sync** = move approved/transformed source data into CMDB
 
 If there is UI text that implies provider sync imports to CMDB, update it so the user understands:
-- provider sync refreshes Custora’s source inventory
+- provider sync refreshes LegacyProject’s source inventory
 - pipeline sync pushes data into the selected CMDB
 
 ## Acceptance criteria
@@ -113,7 +113,7 @@ If there is UI text that implies provider sync imports to CMDB, update it so the
 2. Running provider sync still:
    - tests provider access
    - collects inventory
-   - stores/upserts provider data in Custora cache/storage
+   - stores/upserts provider data in LegacyProject cache/storage
    - creates sync run logs/counts
 3. Existing pipelines still work and are the only way to write provider data into CMDB.
 4. Azure provider sync no longer writes anything into NetBox during provider sync.
@@ -139,6 +139,6 @@ If there is UI text that implies provider sync imports to CMDB, update it so the
 Please implement the refactor and provide:
 1. a summary of code changes
 2. any schema change made
-3. confirmation that provider sync is now Custora-only
+3. confirmation that provider sync is now LegacyProject-only
 4. confirmation that pipeline sync still writes to CMDB
 5. a short manual test plan with exact endpoints used

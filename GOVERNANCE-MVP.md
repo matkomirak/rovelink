@@ -154,5 +154,6 @@ Use this checklist for local validation before claiming Governance MVP work is c
 - NetBox VM browsing is supported first.
 - Other CMDB object types are future work.
 - Enforcement is inventory-level and `observe_only` by default.
-- No NetBox write-back.
+- No NetBox write-back from governance evaluation. Legacy CMDB pipelines and
+  the optional NetBox demo seed are separate write paths.
 - No ServiceNow, i-doit, or BMC integrations yet for governance object browsing/evaluation.

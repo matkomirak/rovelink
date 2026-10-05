@@ -98,7 +98,7 @@ Local bootstrap credentials and overrides are documented in
 [Local Development](LOCAL-DEVELOPMENT.md).
 
 **Local use only:** the current Compose configuration uses known demo secrets,
-enables the local runner, and publishes port 5000 on all host interfaces.
+enables the local runner, and publishes port 5000 on host loopback only.
 Keep it on a trusted, isolated machine with network access restricted.
 It is not a production deployment template.
 
@@ -191,7 +191,7 @@ For more detail, see [Governance MVP](GOVERNANCE-MVP.md) and
 
 ## Security
 
-- Keep real credentials in a private `.env` or appropriate secret store. Never commit `.env`, bootstrap credentials, `.local/`, logs, local databases, or runtime state. Ignore-rule hardening is still pending; inspect staged files.
+- Keep real credentials in a private `.env` or appropriate secret store. Never commit `.env`, bootstrap credentials, `.local/`, logs, local databases, or runtime state. Ignore rules protect common local artifacts; still inspect staged files.
 - Provider/CMDB credentials and SSH keys are sensitive. Supported credential paths encrypt secrets at rest using AES-256-GCM; encryption is not a substitute for access controls or an independent security review.
 - Preserve HttpOnly cookie authentication and organization isolation. CustomerScope is a source-specific customer/environment boundary, not an application tenant.
 - Execute only trusted playbooks and use dedicated test credentials and targets. Automation GATE is a required control, not a guarantee that a playbook is safe.

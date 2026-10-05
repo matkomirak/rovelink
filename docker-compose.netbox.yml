@@ -9,7 +9,7 @@ services:
       netbox-redis-cache:
         condition: service_started
     ports:
-      - "8000:8080"
+      - "127.0.0.1:8000:8080"
     environment:
       ALLOWED_HOSTS: ${NETBOX_ALLOWED_HOSTS:-localhost 127.0.0.1 host.docker.internal}
       DB_HOST: netbox-postgres

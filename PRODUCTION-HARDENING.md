@@ -1,6 +1,10 @@
 # Rovelink — Production Hardening Status
 
-**Current status: local MVP ready; production deployment still requires the hardening gate below**
+**Alpha status: not production-ready.**
+
+The PASS entries below are historical implementation/test snapshots, not a
+current security certification. Passing this checklist alone does not establish
+production readiness; review current risks and fresh integration results.
 
 This document tracks the remaining production hardening work. The local Docker
 MVP supports NetBox integration, public HTTPS Git sync, local/remote SSH Ansible
@@ -128,7 +132,9 @@ DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_test npm run db:push
 DATABASE_URL=postgres://user:pass@localhost:5432/rovelink_test npm run test:integration
 ```
 
-Integration tests are **always excluded** from `npm test`. The default test suite is DB-free and always passes without any infrastructure.
+Integration tests are excluded from `npm test`. The default test suite is
+designed to run without external infrastructure; its results must be checked
+for each revision.
 
 ---
 

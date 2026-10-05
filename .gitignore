@@ -6,3 +6,21 @@ vite.config.ts.*
 *.tar.gz
 .local/
 .env.netbox
+
+# Private configuration, credentials, and local runtime artifacts.
+.env
+.env.*
+!.env.example
+!.env.netbox.example
+bootstrap-credentials.txt
+runtime/
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.pem
+*.key
+*_backup_*.sql

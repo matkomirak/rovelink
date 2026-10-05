@@ -21,6 +21,7 @@ const Runs = lazy(() => import("@/pages/runs"));
 const RunDetail = lazy(() => import("@/pages/run-detail"));
 const RunComparison = lazy(() => import("@/pages/run-comparison"));
 const Reports = lazy(() => import("@/pages/reports"));
+const DriftReports = lazy(() => import("@/pages/drift-reports"));
 const Settings = lazy(() => import("@/pages/settings"));
 const Notifications = lazy(() => import("@/pages/notifications"));
 const Providers = lazy(() => import("@/pages/providers"));
@@ -76,6 +77,7 @@ function AuthenticatedRouter() {
         <Route path="/runs" component={Runs} />
         <Route path="/runs/:id" component={RunDetail} />
         <Route path="/compare" component={RunComparison} />
+        <Route path="/reports/drift" component={DriftReports} />
         <Route path="/reports" component={Reports} />
         <Route path="/notifications" component={Notifications} />
         <Route path="/governance" component={Governance} />

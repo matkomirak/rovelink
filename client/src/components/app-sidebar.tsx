@@ -7,6 +7,7 @@ import {
   FileText,
   PlayCircle,
   BarChart3,
+  GitCompareArrows,
   Bell,
   Cloud,
   Boxes,
@@ -52,7 +53,8 @@ const navigationSections = [
     items: [
       { title: "Dashboard", url: "/", icon: LayoutDashboard },
       { title: "Runs", url: "/runs", icon: PlayCircle },
-      { title: "Reports", url: "/reports", icon: BarChart3 },
+      { title: "Reports", url: "/reports", exact: true, icon: BarChart3 },
+      { title: "Drift Reports", url: "/reports/drift", icon: GitCompareArrows },
     ],
   },
   {
@@ -95,7 +97,8 @@ function isActiveRoute(location: string, url: string, activeUrls: string[] = [])
   });
 }
 
-function navItemIsActive(location: string, item: { url: string; activeUrls?: string[] }) {
+function navItemIsActive(location: string, item: { url: string; activeUrls?: string[]; exact?: boolean }) {
+  if (item.exact) return location === item.url;
   return isActiveRoute(location, item.url, item.activeUrls);
 }
 

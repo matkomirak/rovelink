@@ -429,6 +429,14 @@ function createFakeGovernanceStorage() {
       return existing;
     },
 
+    async replaceNetboxVmCustomerAssignments(orgId: string, sourceId: string, objectId: string, assignments: InsertCustomerScopeObjectAssignment[]) {
+      for (let i = customerScopeObjectAssignments.length - 1; i >= 0; i--) {
+        const a = customerScopeObjectAssignments[i];
+        if (a.orgId === orgId && a.sourceType === "netbox_inventory_source" && a.sourceId === sourceId && a.objectType === "netbox_vm" && a.objectId === objectId) customerScopeObjectAssignments.splice(i, 1);
+      }
+      for (const assignment of assignments) await this.createCustomerScopeObjectAssignment(assignment);
+    },
+
     async listCustomerScopeObjectAssignments(orgId: string, sourceType?: string, sourceId?: string) {
       customerScopeAssignmentReadCount += 1;
       return customerScopeObjectAssignments.filter((assignment) => (
@@ -1119,6 +1127,26 @@ describe("governance routes", () => {
     assert.equal(storage.customerScopeObjectAssignments[0].objectId.startsWith("vm-"), true);
     assert.equal(storage.customerScopeObjectAssignments[0].relationship, "dedicated");
     assert.equal(storage.customerScopeObjectAssignments[0].customerScopeId, storage.customerScopes[0].id);
+  });
+
+  it("refresh replaces customer assignments when Tenant changes, is removed, or is restored", async () => {
+    let tenant: { id: number; name: string } | null = { id: 20, name: "ACME" };
+    const syncReq = makeRequest(storage, { listNetboxVmsForSource: async () => [{ id: 701, name: "transition-vm", tenant, custom_fields: {}, tags: [] }] });
+    const sync = () => syncReq.post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`).set("x-role", "operator").set("x-org-id", ORG_A).expect(200);
+    await sync();
+    tenant = { id: 21, name: "Other customer" };
+    await sync();
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+    assert.equal(storage.customerScopes.find(s => s.id === storage.customerScopeObjectAssignments[0].customerScopeId)?.name, "Other customer");
+    tenant = null;
+    await sync();
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+    assert.equal(storage.customerScopeObjectAssignments[0].relationship, "unassigned");
+    assert.equal(storage.customerScopeObjectAssignments[0].customerScopeId, null);
+    tenant = { id: 20, name: "ACME" };
+    await sync();
+    assert.equal(storage.customerScopeObjectAssignments.length, 1);
+    assert.equal(storage.customerScopeObjectAssignments[0].relationship, "dedicated");
   });
 
   it("sync without NetBox tenant creates explicit unassigned assignment", async () => {

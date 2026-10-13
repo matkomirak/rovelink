@@ -1054,3 +1054,11 @@ describe("canonical NetBox customer assignment requirements", () => {
     assert.ok(!evaluateGovernanceObject(baseObject, legacyRules).findings.some(f => f.code === "required_data_missing"));
   });
 });
+
+
+it("provider customer hints alone cannot satisfy canonical reference assignment", () => {
+  const object = withCustomerAssignments([]);
+  object.fields.providerCustomerScopeCandidates = [{ candidateValue: "ACME", confidence: "high" }];
+  const result = evaluateGovernanceObject(object, baseRules);
+  assert.ok(result.findings.some(f => f.code === "required_data_missing" && f.fieldKey === "customerAssignment"));
+});

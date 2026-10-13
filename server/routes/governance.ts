@@ -21,6 +21,7 @@ import type {
   InsertNetboxInventorySource,
   CustomerScope,
   CustomerScopeObjectAssignment,
+  InsertCustomerScopeObjectAssignment,
   NetboxInventorySource,
   NetboxVm,
 } from "@shared/schema";
@@ -206,9 +207,10 @@ async function upsertResolvedCustomerScopeAssignment(
 ): Promise<{ scopesUpserted: number; assignmentsUpserted: number; unassignedCount: number }> {
   let scopesUpserted = 0;
   let assignmentsUpserted = 0;
+  const assignments: InsertCustomerScopeObjectAssignment[] = [];
 
   if (resolved.relationship === "unassigned") {
-    await storage.upsertCustomerScopeObjectAssignment({
+    assignments.push({
       orgId,
       sourceType: "netbox_inventory_source",
       sourceId,
@@ -221,6 +223,7 @@ async function upsertResolvedCustomerScopeAssignment(
       metadata: resolved.metadata ?? null,
       lastSyncedAt: syncedAt,
     });
+    await storage.replaceNetboxVmCustomerAssignments(orgId, sourceId, cachedVm.id, assignments);
     return { scopesUpserted, assignmentsUpserted: 1, unassignedCount: 1 };
   }
 
@@ -240,7 +243,7 @@ async function upsertResolvedCustomerScopeAssignment(
     });
     scopesUpserted += 1;
 
-    await storage.upsertCustomerScopeObjectAssignment({
+    assignments.push({
       orgId,
       sourceType: "netbox_inventory_source",
       sourceId,
@@ -256,6 +259,7 @@ async function upsertResolvedCustomerScopeAssignment(
     assignmentsUpserted += 1;
   }
 
+  await storage.replaceNetboxVmCustomerAssignments(orgId, sourceId, cachedVm.id, assignments);
   return { scopesUpserted, assignmentsUpserted, unassignedCount: 0 };
 }
 

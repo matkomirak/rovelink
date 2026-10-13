@@ -296,6 +296,7 @@ export interface IStorage {
   getCustomerScopeByExternalId(orgId: string, sourceType: string, sourceId: string, externalId: string): Promise<CustomerScope | undefined>;
   createCustomerScopeObjectAssignment(assignment: InsertCustomerScopeObjectAssignment): Promise<CustomerScopeObjectAssignment>;
   upsertCustomerScopeObjectAssignment(assignment: InsertCustomerScopeObjectAssignment): Promise<CustomerScopeObjectAssignment>;
+  replaceNetboxVmCustomerAssignments(orgId: string, sourceId: string, objectId: string, assignments: InsertCustomerScopeObjectAssignment[]): Promise<void>;
   listCustomerScopeObjectAssignments(orgId: string, sourceType?: string, sourceId?: string): Promise<CustomerScopeObjectAssignment[]>;
   listAssignmentsForObject(orgId: string, sourceType: string, sourceId: string, objectType: string, objectId: string): Promise<CustomerScopeObjectAssignment[]>;
   listAssignmentsForCustomerScope(orgId: string, customerScopeId: string): Promise<CustomerScopeObjectAssignment[]>;
@@ -1568,6 +1569,26 @@ export class DatabaseStorage implements IStorage {
     }
 
     return this.createCustomerScopeObjectAssignment(assignment);
+  }
+
+  async replaceNetboxVmCustomerAssignments(orgId: string, sourceId: string, objectId: string, assignments: InsertCustomerScopeObjectAssignment[]): Promise<void> {
+    if (!assignments.length) throw new Error("Resolved assignments are required");
+    for (const assignment of assignments) {
+      if (assignment.orgId !== orgId || assignment.sourceId !== sourceId || assignment.objectId !== objectId || assignment.sourceType !== "netbox_inventory_source" || assignment.objectType !== "netbox_vm") {
+        throw new Error("Assignment identity mismatch");
+      }
+      await this.assertCustomerScopeAssignmentIsOrgScoped(assignment);
+    }
+    await db.transaction(async tx => {
+      await tx.delete(customerScopeObjectAssignments).where(and(
+        eq(customerScopeObjectAssignments.orgId, orgId),
+        eq(customerScopeObjectAssignments.sourceType, "netbox_inventory_source"),
+        eq(customerScopeObjectAssignments.sourceId, sourceId),
+        eq(customerScopeObjectAssignments.objectType, "netbox_vm"),
+        eq(customerScopeObjectAssignments.objectId, objectId),
+      ));
+      await tx.insert(customerScopeObjectAssignments).values(assignments);
+    });
   }
 
   async listCustomerScopeObjectAssignments(

@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getGovernanceReadinessReport, governanceKeys } from "@/lib/governance-api";
 import { availableTopIssues, displayGovernanceScore, findingLabel, readinessRatio } from "@/lib/governance-report-presentation";
 import type { GovernanceReadinessRow } from "@shared/governance-readiness";
+import { AutomationReadinessDashboard } from "@/components/automation-readiness-report";
 
 function Metric({ label, value, helper, icon: Icon, accent }: { label: string; value: string | number; helper: string; icon: LucideIcon; accent: string }) {
   return <div className={`rounded-xl border bg-card p-5 shadow-sm ${accent}`}>
@@ -53,7 +54,7 @@ export default function Reports() {
 
   return <div className="space-y-6">
     <div><h1 className="text-2xl font-semibold" data-testid="text-page-title">Reports</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Governance reports summarize the latest evaluation results. They do not run automation or change CMDB/provider data.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Reports summarize governance evaluations and automation inventory readiness signals. They do not run automation or change CMDB/provider data.</p>
     </div>
     <Card>
       <CardHeader className="gap-2">
@@ -130,5 +131,6 @@ export default function Reports() {
           </>}
       </CardContent>
     </Card>
+    <AutomationReadinessDashboard />
   </div>;
 }

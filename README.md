@@ -22,6 +22,7 @@ local stack to the internet or connect it to production infrastructure.
 - **Automation:** manage inventories and job templates, run Ansible locally or against reachable Linux SSH targets, and inspect run output. SSH private-key credentials are encrypted at rest.
 - **Cached CMDB inventory:** import and browse NetBox VMs as documented/reference objects, including customer assignments.
 - **Governance:** version and explicitly activate blueprints, evaluate cached objects, and report scores, findings, recommendations, and automation readiness.
+- **Reports:** review governance posture and [automation inventory readiness signals](docs/automation-readiness-report.md). Unknown execution readiness is shown explicitly; reports do not authorize or execute automation.
 - **CustomerScope:** represent customer/environment boundaries for MSP workflows, separately from Rovelink's organization security boundary.
 - **Provider inventory:** cache observed runtime objects from fake/demo, Azure, and Proxmox sources. Provider customer candidates remain hints only.
 - **Drift Reports:** manually compare cached reference VMs with cached provider VMs and inspect matches, ambiguous/unmatched objects, and IP, OS, or power-state differences.

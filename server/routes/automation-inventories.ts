@@ -13,6 +13,7 @@ import { hasRoleAtLeast } from "../auth/roles";
 import { storage as appStorage } from "../storage";
 import { enrichGateDecisionsWithGovernance, enrichInventoryHostsWithGovernance } from "../services/gate-governance-context";
 import { ZodError } from "zod";
+import { createAutomationReadinessRouter } from "./automation-readiness-report";
 
 // Auth request type — orgId is stamped by auth middleware
 interface AuthRequest extends Request {
@@ -46,6 +47,20 @@ function extractPolicy(inventory: any): EligibilityPolicy {
 }
 
 const router = express.Router();
+
+// Aggregated read-only projection; mounted before /:id.
+router.use(createAutomationReadinessRouter({
+  listInventories: orgId => db.select({
+    id: automationInventories.id, orgId: automationInventories.orgId,
+    name: automationInventories.name, type: automationInventories.type,
+    hostsCount: automationInventories.hostsCount, cachedData: automationInventories.cachedData,
+    lastRefreshedAt: automationInventories.lastRefreshedAt,
+  }).from(automationInventories).where(eq(automationInventories.orgId, orgId)),
+  getGovernanceReady: async (orgId, objectId) => {
+    const latest = await appStorage.getLatestGovernanceEvaluationForObject(orgId, "netbox_vm", objectId);
+    return latest?.evaluation.automationReady ?? null;
+  },
+}));
 
 // List all automation inventories — org-scoped
 router.get("/", async (req: AuthRequest, res: Response) => {

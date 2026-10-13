@@ -75,6 +75,16 @@ If NetBox does not create its admin, use its interactive command:
 docker compose --env-file .env.demo -f docker-compose.demo.yml exec netbox /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py createsuperuser
 ```
 
+On the CMDB detail page, **Refresh** opens a confirmation dialog. Confirming
+**Refresh CMDB** reads NetBox VMs into Rovelink's reference cache and may update
+CustomerScopes/assignments from NetBox tenants. It does not write to NetBox or
+providers, evaluate Governance, run drift, or trigger automation. The dialog
+shows running, success (import and assignment counts), or a safe failure message.
+An empty NetBox refresh succeeds with zero imported VMs and a latest-import
+time. The existing import upserts records; it does not remove older cached VMs
+that were deleted upstream. Use a fresh demo reference source for the empty
+scenario.
+
 ### Seed and sync provider inventory
 
 ```powershell

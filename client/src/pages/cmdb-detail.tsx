@@ -1,5 +1,5 @@
 import { useParams, Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,6 +84,16 @@ interface CmdbObjectDetailResponse {
   objectTypeName: string;
   mode: "cached" | "live";
   object: NetBoxVmObject;
+}
+
+interface CmdbRefreshResult {
+  sourceId: string;
+  importedCount: number;
+  customerScopesUpserted: number;
+  customerAssignmentsUpserted: number;
+  customerUnassignedCount: number;
+  customerScopeResolutionErrors: number;
+  lastImportAt: string | null;
 }
 
 interface CustomerScopeSummary {
@@ -515,6 +525,8 @@ function CmdbObjectDetailSheet({
 
 export default function CmdbDetail() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const [refreshOpen, setRefreshOpen] = useState(false);
   const [retryOpen, setRetryOpen] = useState(false);
   const [protocol, setProtocol] = useState<string[]>([]);
   const [retryRunning, setRetryRunning] = useState(false);
@@ -526,6 +538,32 @@ export default function CmdbDetail() {
     queryKey: ["/api/cmdbs"],
   });
   const cmdb = cmdbs.find((candidate) => candidate.id === id);
+
+  const importSourcesQuery = useQuery<Array<{ id: string; lastImportAt: string | null }>>({
+    queryKey: ["/api/governance/netbox-sources"],
+    enabled: !!id && cmdb?.kind === "netbox",
+  });
+  const refreshMutation = useMutation<CmdbRefreshResult, Error>({
+    mutationFn: async () => {
+      const response = await fetch(`/api/governance/netbox-sources/${encodeURIComponent(id!)}/sync-cached-vms`, {
+        method: "POST", credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error(`Refresh request failed (Rovelink HTTP ${response.status}). ${response.status === 403
+          ? "An admin or operator role is required."
+          : response.status === 404 ? "The NetBox source is unavailable in this organization."
+          : "Check NetBox connectivity, TLS, base URL, and token permissions. For host NetBox from Docker use host.docker.internal; within the demo stack use http://netbox:8080."}`);
+      }
+      return response.json();
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/cmdbs"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cmdbs", id] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/governance/netbox-sources"] }),
+      ]);
+    },
+  });
 
   const objectTypesQuery = useQuery<CmdbObjectTypesResponse>({
     queryKey: ["/api/cmdbs", id, "object-types"],
@@ -625,17 +663,41 @@ export default function CmdbDetail() {
         </div>
         <Button
           variant="outline"
-          onClick={() => {
-            objectTypesQuery.refetch();
-            objectsQuery.refetch();
-          }}
-          disabled={objectsQuery.isFetching || objectTypesQuery.isFetching}
+          onClick={() => { refreshMutation.reset(); setRefreshOpen(true); }}
+          disabled={refreshMutation.isPending || objectsQuery.isFetching || objectTypesQuery.isFetching || cmdb?.kind !== "netbox"}
           data-testid="button-refresh-cmdb-objects"
         >
-          <RefreshCw className={`w-4 h-4 mr-2 ${objectsQuery.isFetching ? "animate-spin" : ""}`} />
-          Refresh
+          <RefreshCw className={`w-4 h-4 mr-2 ${refreshMutation.isPending ? "animate-spin" : ""}`} />
+          {refreshMutation.isPending ? "Refreshing CMDB…" : "Refresh"}
         </Button>
       </div>
+
+      <Dialog open={refreshOpen} onOpenChange={setRefreshOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{refreshMutation.isSuccess ? "CMDB refresh completed" : refreshMutation.isError ? "CMDB refresh failed" : refreshMutation.isPending ? "Refreshing CMDB…" : "Refresh CMDB source?"}</DialogTitle>
+            <DialogDescription>
+              Read the latest virtual machines from {cmdb?.name ?? "this NetBox source"} into Rovelink's cached CMDB/reference inventory.
+              This does not write to NetBox or providers. NetBox tenants may update CustomerScopes and assignments.
+              No provider sync, drift comparison, Governance evaluation, or automation/GATE action will run.
+            </DialogDescription>
+          </DialogHeader>
+          {refreshMutation.isPending && <p role="status" className="flex items-center gap-2 text-sm"><RefreshCw className="h-4 w-4 animate-spin" />Reading NetBox and updating the local cache…</p>}
+          {refreshMutation.isSuccess && (
+            <div role="status" className="space-y-2 text-sm">
+              <p>{refreshMutation.data.importedCount === 0 ? "Refresh completed. No virtual machines were returned by this CMDB source." : `${refreshMutation.data.importedCount} virtual machines imported/upserted.`}</p>
+              <p>CustomerScopes updated: {refreshMutation.data.customerScopesUpserted}. Assignments updated: {refreshMutation.data.customerAssignmentsUpserted}. Unassigned VMs in this import: {refreshMutation.data.customerUnassignedCount}.</p>
+              <p>Latest import: {formatDate(refreshMutation.data.lastImportAt) ?? "Completed"}</p>
+              {refreshMutation.data.customerScopeResolutionErrors > 0 && <p className="text-amber-600">{refreshMutation.data.customerScopeResolutionErrors} VM customer assignments could not be resolved. VM import completed; review assignments before relying on them.</p>}
+            </div>
+          )}
+          {refreshMutation.isError && <p role="alert" className="text-sm text-destructive">{refreshMutation.error.message.includes("Refresh request failed") ? refreshMutation.error.message : "Could not complete the refresh request. Check your connection and server availability."}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setRefreshOpen(false)}>{refreshMutation.isPending || refreshMutation.isSuccess || refreshMutation.isError ? "Close" : "Cancel"}</Button>
+            {!refreshMutation.isSuccess && <Button onClick={() => refreshMutation.mutate()} disabled={refreshMutation.isPending} data-testid="button-confirm-cmdb-refresh">{refreshMutation.isPending ? "Refreshing CMDB…" : refreshMutation.isError ? "Retry refresh" : "Refresh CMDB"}</Button>}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader>
@@ -681,7 +743,7 @@ export default function CmdbDetail() {
                 </div>
                 <div className="rounded-md border p-3">
                   <p className="text-xs text-muted-foreground">Latest Sync</p>
-                  <p className="text-sm font-medium">{formatDate(customerScopeSummaryQuery.data?.latestLastSyncedAt) ?? "-"}</p>
+                  <p className="text-sm font-medium">{formatDate(importSourcesQuery.data?.find(source => source.id === id)?.lastImportAt ?? customerScopeSummaryQuery.data?.latestLastSyncedAt) ?? "-"}</p>
                 </div>
               </div>
 
@@ -910,7 +972,7 @@ export default function CmdbDetail() {
                 <DialogDescription>Request steps and results. Credentials, headers, URLs, and response bodies are excluded.</DialogDescription>
               </DialogHeader>
               <pre role="log" aria-live="polite" className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-4 text-xs">{protocol.join("\n")}</pre>
-              <Button onClick={retryObjects} disabled={retryRunning || objectsQuery.isFetching}>{retryRunning ? "Retrying�" : "Retry again"}</Button>
+              <Button onClick={retryObjects} disabled={retryRunning || objectsQuery.isFetching}>{retryRunning ? "Retrying…" : "Retry again"}</Button>
             </DialogContent>
           </Dialog>
           {objectsQuery.isError ? (
@@ -918,7 +980,7 @@ export default function CmdbDetail() {
               <p className="font-medium">Failed to load CMDB objects</p>
               <p className="text-sm text-muted-foreground">{(objectsQuery.error as Error).message}</p>
               <Button variant="outline" size="sm" onClick={retryObjects} disabled={objectsQuery.isFetching || retryRunning}>
-                {objectsQuery.isFetching ? "Retrying�" : "Retry"}
+                {objectsQuery.isFetching ? "Retrying…" : "Retry"}
               </Button>
             </div>
           ) : objectsQuery.isLoading ? (

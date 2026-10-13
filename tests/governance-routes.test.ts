@@ -1018,6 +1018,22 @@ describe("governance routes", () => {
     assert.equal(storage.sources.length, 1);
   });
 
+  it("refreshing an empty NetBox succeeds and records an import time without evaluating Governance", async () => {
+    const syncReq = makeRequest(storage, { listNetboxVmsForSource: async () => [] });
+    const response = await syncReq
+      .post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`)
+      .set("x-role", "operator")
+      .set("x-org-id", ORG_A)
+      .expect(200);
+    assert.equal(response.body.importedCount, 0);
+    assert.equal(response.body.customerScopesUpserted, 0);
+    assert.equal(response.body.customerAssignmentsUpserted, 0);
+    assert.equal(response.body.customerUnassignedCount, 0);
+    assert.ok(response.body.lastImportAt);
+    assert.ok(!JSON.stringify(response.body).includes("token"));
+    assert.equal(storage.vms.length, 0);
+  });
+
   it("syncs cached VMs for a governance source with stable source linkage", async () => {
     const syncReq = makeRequest(storage, {
       listNetboxVmsForSource: async () => [

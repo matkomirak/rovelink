@@ -58,7 +58,9 @@ other. Use separate browser profiles or an incognito session side by side.
 
 1. Sign into NetBox as `demo-admin` at `http://localhost:8100`.
 2. Open **Admin > API Tokens**, create a token for the local demo user, and
-   copy its raw value privately. Token creation is manual, not scripted.
+   copy its raw value privately. NetBox may display/copy the full `Bearer`
+   authorization value; remove that prefix before pasting into Rovelink.
+   Token creation is manual, not scripted.
 3. In Rovelink, use **CMDBs > Add CMDB > NetBox**. Enter `http://netbox:8080`
    as the base URL. Do not append `/api`.
 4. Enter only the raw token, for example `nbt_xxx` (a placeholder).
@@ -126,11 +128,31 @@ docker compose --env-file .env.demo -f docker-compose.demo.yml down
 ```
 
 Volumes are preserved. Removing volumes deletes that demo's data.
-Verified: service health, both browser logins, internal NetBox connectivity,
-three-provider seeding/sync (22 objects), zero NetBox VMs, and zero
-CustomerScopes/assignments. The complete manual token creation, CMDB connection,
-and Drift Reports run remains the next smoke step. Expected drift above is
-supported by implementation/tests, not a claim of completed manual verification.
+End-to-end smoke verified on 2026-10-13 against the documented demo flow
+following commit `f273e33`: services started; the demo-admin NetBox session and
+Rovelink admin login worked; a read-only v2 token was created through the
+NetBox UI; the raw token connected Rovelink to `http://netbox:8080`; the CMDB
+browser showed zero VMs.
+
+| Runtime provider | Cached objects | VM drift items | Matched | Unmatched provider |
+| --- | --- | --- | --- | --- |
+| Demo Proxmox | 4 | 4 | 0 | 4 |
+| Demo Azure | 14 | 4 | 0 | 4 |
+| Demo Generic/Fake | 4 | 4 | 0 | 4 |
+
+All three runs completed. Every item had `unmatched_provider`,
+`not_compared`, and warning severity; zero reference matches and zero field
+drift were expected. Item details opened for each provider. Analysis-only
+copy explicitly excluded CMDB/provider updates, Governance readiness, and
+Automation GATE changes; no writeback or remediation actions appeared in
+the drift report/detail views.
+
+Read-only database checks confirmed NetBox still had zero VMs and Rovelink
+had zero CustomerScopes, assignments, Governance evaluation runs, Automation
+GATE decisions, and job runs. Only demo configuration/token state and stored
+drift reports were added by this smoke. The test reused the isolated demo
+volumes; fresh-volume startup was verified during initial stack implementation.
+No token, password, or private report identifier is included in this document.
 
 ## Scenario 2: Existing local NetBox
 

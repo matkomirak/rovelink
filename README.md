@@ -251,89 +251,14 @@ drift against an active reference. Without matching reference VMs, all four
 will appear only in provider inventory. Relationships remain empty; NIC links
 are recorded in metadata through the existing Azure normalizer.
 
-## Self-contained demo with empty NetBox and demo providers
+## Demo scenarios
 
-This optional stack includes Rovelink/Postgres, NetBox/Postgres, two Redis
-services, and a NetBox worker. NetBox was already available separately in
-`docker-compose.netbox.yml`; this stack brings everything onto one private
-Compose network. The normal development stacks remain unchanged.
+The recommended first public demo is the self-contained empty-NetBox stack.
+It needs no real Azure/Proxmox credentials. With provider runtime VMs and zero
+NetBox reference VMs, expect `unmatched_provider` drift: missing CMDB
+documentation is the intended result.
 
-Run from the repository root (Docker Desktop with Linux containers):
-
-```powershell
-npm.cmd run demo:setup
-docker compose --env-file .env.demo -f docker-compose.demo.yml config --quiet
-docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --build
-docker compose --env-file .env.demo -f docker-compose.demo.yml ps
-```
-
-The setup command generates private, local-only credentials in ignored
-`.env.demo`. It never prints them or overwrites an existing file. Keep that
-file private and do not use these settings in production. Open it locally to
-read `DEMO_ADMIN_PASSWORD` for Rovelink user `admin`, and
-`DEMO_NETBOX_ADMIN_PASSWORD` for NetBox user `demo-admin`.
-
-- Rovelink browser: `http://localhost:5100`
-- NetBox browser: `http://localhost:8100`
-- NetBox URL in Rovelink CMDB settings: `http://netbox:8080` (no `/api` suffix)
-
-Ports are separate from the existing 5000/8000 stacks; override
-`DEMO_ROVELINK_PORT` and `DEMO_NETBOX_PORT` in `.env.demo` if needed.
-Inside the shared Docker network use the service name `netbox`. The browser
-uses the mapped localhost port. If NetBox instead runs on the host, use
-`http://host.docker.internal:8000` from Rovelink's container.
-
-Wait for NetBox to become healthy (its first migration can take several minutes).
-Log into NetBox, create an API token under **Admin > API Tokens**, and copy the
-raw token into **CMDBs > Add CMDB > NetBox** in Rovelink. Do not include a
-`Bearer` or `Token` prefix. Tokens are created manually, never generated or
-printed by the demo scripts. If your NetBox image does not create the admin,
-use its interactive command:
-
-```powershell
-docker compose --env-file .env.demo -f docker-compose.demo.yml exec netbox /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py createsuperuser
-```
-
-Create the three providers in the bootstrap `default` organization:
-
-```powershell
-docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true app npm run db:seed:demo-providers
-```
-
-The seed is opt-in, organization-scoped, and repeatable. It adds missing demo
-accounts without overwriting existing configuration. For a different existing
-organization add `-e ROVELINK_DEMO_ORG_SLUG=<slug>` before `app`.
-
-Open **Providers** and use **Sync Cached Inventory** on each account:
-
-| Provider | Runtime inventory | Live API calls |
-| --- | --- | --- |
-| Demo Proxmox | Four fake VMs with node/VMID identities through the Proxmox normalizer | None |
-| Demo Azure | Four VMs, four NICs, two VNets, three subnets, one documentation-range public IP | None |
-| Demo Generic/Fake | Four seeded fake vSphere-style VMs through the existing fake path | None |
-
-All three accounts keep kind `fake`; Azure and Proxmox objects retain fake
-provider type with demo profile metadata. No real Azure/Proxmox credentials are
-needed. Provider customer candidates are hints only; they create neither
-CustomerScopes nor CustomerScope assignments.
-
-NetBox deliberately has **zero VMs on a fresh volume**: only the admin and
-built-in NetBox metadata exist. No NetBox VM seed runs. Existing demo volumes
-are preserved on restart and may contain objects users added; this command
-never clears them. CMDB/NetBox is documented/reference state; providers are
-observed/runtime state. In **Drift Reports**, compare this empty NetBox source
-against each synced provider. Expect `unmatched_provider` results (runtime VMs
-missing from CMDB documentation), not matching VMs. Only VMs participate in drift;
-Azure network objects are available in provider inventory. Reference sources
-are materialized through the existing CMDB/drift onboarding flow.
-
-Provider data is never written back to NetBox or providers. Drift is analysis
-only and this demo does not change Governance readiness or Automation GATE.
-Stop the isolated stack while preserving data:
-
-```powershell
-docker compose --env-file .env.demo -f docker-compose.demo.yml down
-```
-
-The NetBox service layout and pinned image follow the public
-[NetBox Docker setup](https://github.com/netbox-community/netbox-docker/blob/release/docker-compose.yml).
+See [Demo scenarios](docs/demo-scenarios.md) for commands, private demo credentials, manual
+NetBox token creation, the three-provider walkthrough, expected results, and
+troubleshooting. It also covers existing host NetBox through
+`host.docker.internal` and optional real-provider exploration.

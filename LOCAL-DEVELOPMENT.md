@@ -408,3 +408,5 @@ is not the same thing as a customer.
 
 See [Recommended NetBox customer model](docs/netbox-customer-model.md) for the terminology table,
 ACME GmbH example, object-type support, and refresh/evaluation workflow.
+
+For the explicit offline Proxmox-to-NetBox reference follow-up, see [Customer-style demo](docs/demo-scenarios.md#customer-style-follow-up-demo-explicit-proxmox-reference-import). This is an opt-in demo write, never automatic provider sync.

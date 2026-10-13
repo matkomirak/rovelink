@@ -221,7 +221,7 @@ export default function CmdbsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">CMDBs</h1>
-          <p className="text-sm text-muted-foreground">Manage NetBox and future CMDB target connections</p>
+          <p className="text-sm text-muted-foreground">CMDB sources are documented reference state. Refresh reads into Rovelink cache; provider data is not silently written back.</p>
         </div>
         <Button onClick={handleAdd} data-testid="button-add-cmdb">
           <Plus className="w-4 h-4 mr-2" />

@@ -66,7 +66,7 @@ export default function Governance() {
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Governance</h1>
           <p className="text-sm text-muted-foreground">
-            Blueprint defines governance rules. Evaluation applies those rules to cached CMDB objects from a selected source.
+            Governance evaluates whether reference objects are complete, owned, and ready for safe automation. Evaluate explicitly after refreshing the cache.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

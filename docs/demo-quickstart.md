@@ -229,3 +229,5 @@ See [Demo scenarios](demo-scenarios.md) for commands, private demo credentials, 
 NetBox token creation, the three-provider walkthrough, expected results, and
 troubleshooting. It also covers existing host NetBox through
 `host.docker.internal` and optional real-provider exploration.
+
+For the explicit offline Proxmox-to-NetBox reference follow-up, see [Customer-style demo](demo-scenarios.md#customer-style-follow-up-demo-explicit-proxmox-reference-import). This is an opt-in demo write, never automatic provider sync.

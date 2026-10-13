@@ -246,7 +246,7 @@ export default function DriftReports() {
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold" data-testid="text-page-title">Drift Reports</h1>
         <p className="text-sm text-muted-foreground">
-          Compare documented CMDB reference state with observed provider runtime state.
+          Compare documented reference VMs with observed runtime VMs. Drift is analysis only; it updates neither CMDBs nor providers.
         </p>
       </div>
 

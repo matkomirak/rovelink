@@ -132,7 +132,7 @@ export default function AutomationInventories() {
             Automation Inventories
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Inventory sources for Ansible automation: CMDB / File / Script
+            Prepare governed targets for automation. Configured Governance and GATE checks determine eligibility at execution; inventory setup alone does not grant readiness.
           </p>
         </div>
         {userRole === "admin" && (

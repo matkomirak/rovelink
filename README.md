@@ -273,3 +273,5 @@ is not the same thing as a customer.
 
 See [Recommended NetBox customer model](docs/netbox-customer-model.md) for the terminology table,
 ACME GmbH example, object-type support, and refresh/evaluation workflow.
+
+For a short product glossary and the Dashboard onboarding path, see [Concepts](docs/concepts.md).

@@ -235,3 +235,86 @@ docker compose --env-file .env.demo -f docker-compose.demo.yml logs netbox
 Review logs locally and remove secrets/private data before sharing. Resolved
 `docker compose config` output contains environment secrets; use `config --quiet`
 for safe configuration validation.
+
+## Customer-style follow-up demo: explicit Proxmox reference import
+
+Start with the empty scenario first. Then deliberately add selected offline
+Demo Proxmox VMs to the isolated NetBox as reference documentation. This is an
+explicit write operation, not provider sync or drift writeback. It is opt-in,
+restricted to the selected organization and `http://netbox:8080`, and requires a
+NetBox token with write permission. Create a separate local demo token manually
+and set it on the selected CMDB account; a read-only smoke token cannot import.
+Do not use this command against production. ACME GmbH is fictional.
+
+List the offline VM names without writing:
+
+```powershell
+docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true app npm run demo:import:proxmox
+```
+
+Copy the desired exact names and the CMDB ID from its Rovelink page URL:
+
+```powershell
+docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true -e ROVELINK_DEMO_CMDB_ID=<cmdb-id> -e ROVELINK_DEMO_VM_NAMES=<first-name>,<second-name> app npm run demo:import:proxmox
+```
+
+The command uses only the seeded offline Proxmox fixture. It creates a demo
+Tenant **ACME GmbH**, cluster/platform, selected VMs, interfaces and private IPs.
+Existing named VMs are preserved, including manual changes. It never runs on
+startup. NetBox API failures may leave partial objects: inspect NetBox before
+retrying. This small demo helper is not a reconciliation tool.
+
+1. Confirm the selected reference VMs and Tenant in NetBox.
+2. In Rovelink, open the CMDB, confirm **Refresh CMDB**, and inspect the VM's
+   CustomerScope and **Derived from: NetBox Tenant** label.
+3. Run governance explicitly. Customer assignment should be present. Other
+   required data/owners/approval may still be missing; do not claim full readiness.
+4. Run drift against Demo Proxmox. Selected VMs match by exact name; remaining
+   runtime VMs are unmatched. Review IP/platform/power-state field differences.
+5. Manually remove one VM's Tenant in NetBox, then refresh and reevaluate. Expect
+   a customer-assignment finding for that VM, not a generic tenant requirement.
+6. Restore the Tenant, then change one primary IP in NetBox, refresh, and rerun
+   drift. The stored new comparison should show an IP difference for the match.
+7. Inspect governance readiness and Dashboard GATE status. Onboarding completion
+   does not authorize automation. GATE enforcement is controlled by existing
+   inventory settings and execution checks, not drift. The isolated stack keeps
+   its local runner disabled; this walkthrough does not execute remediation.
+
+Known limits: imports preserve existing named VMs, refresh does not purge deleted
+upstream VMs, stored reports require explicit reruns, and zero cached reference
+VMs leave the onboarding import step Ready. CustomerScope policy modes and
+separate required-data rules retain their configured effects. A visibility-only
+customer policy is not a promise that an otherwise incomplete VM is ready.
+See [Concepts](concepts.md) for the milestone/readiness distinction.
+
+### Smoke verification (2026-10-13)
+
+Verified on a fresh isolated Compose project with temporary browser ports
+5200/8200 so the existing demo volumes and data were preserved:
+
+- Empty Dashboard offered Connect CMDB first; NetBox started with zero VMs.
+- Offline provider sync produced 4 Proxmox VMs, 14 Azure objects and 4 generic VMs.
+- Explicitly importing `alpha-web-001,gamma-app-002` created two reference VMs.
+  Confirmed CMDB refresh imported both with ACME GmbH CustomerScope assignments,
+  displayed as **Derived from NetBox Tenant**.
+- Governance evaluated both without missing customer findings. They remained
+  blocked by other missing role, approval, provider-state and owner data.
+- Removing one Tenant and primary IPv4 manually, then refreshing and evaluating,
+  showed **Customer assignment is required but missing.** and a missing primary
+  IP finding. Refresh replaces prior assignments for that VM, rather than
+  retaining obsolete customer assignments.
+- Restoring the Tenant removed the customer finding on the next evaluation.
+  Changing its primary IPv4 from `10.60.239.15` to `10.60.239.99` was visible in
+  the next drift item's reference/provider field diff. Two VMs matched by name;
+  two remaining runtime VMs stayed `unmatched_provider`. Item details opened
+  with read-only/analysis-only copy.
+- No automation was executed. Dashboard GATE remained Pending; governance
+  findings and setup milestones are not execution-time GATE decisions.
+
+The fixture includes IPv6 runtime addresses, while this importer and cached
+reference comparison currently use primary IPv4. Therefore even the initial
+matched demo VMs can show IP drift for absent reference IPv6; do not promise
+a clean baseline. Inspect the actual IPv4 values before/after the manual edit.
+Clearing an IP entirely is best demonstrated with governance: the drift matcher
+may skip a field when reference values are absent. NetBox status is not retained
+as a comparable power state by this cache path, so it can display as unknown.

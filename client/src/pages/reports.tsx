@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { AlertTriangle, ArrowUpRight, CheckCircle2, ClipboardCheck, RefreshCw, ShieldCheck, TrendingUp, type LucideIcon } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { getGovernanceReadinessReport, governanceKeys } from "@/lib/governance-a
 import { availableTopIssues, displayGovernanceScore, findingLabel, readinessRatio } from "@/lib/governance-report-presentation";
 import type { GovernanceReadinessRow } from "@shared/governance-readiness";
 import { AutomationReadinessDashboard } from "@/components/automation-readiness-report";
+import { reportsVisibleSections } from "@/lib/sidebar-navigation";
 
 function Metric({ label, value, helper, icon: Icon, accent }: { label: string; value: string | number; helper: string; icon: LucideIcon; accent: string }) {
   return <div className={`rounded-xl border bg-card p-5 shadow-sm ${accent}`}>
@@ -45,8 +46,11 @@ function ViewResults({ id }: { id: string }) {
 }
 
 export default function Reports() {
+  const [location] = useLocation();
+  const visible = reportsVisibleSections(location);
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: governanceKeys.readinessReport, queryFn: getGovernanceReadinessReport, refetchOnMount: "always",
+    enabled: visible.governance,
   });
   const ratio = readinessRatio(data?.summary.ready ?? 0, data?.summary.blocked ?? 0);
   const issues = availableTopIssues(data?.rows ?? []);
@@ -56,7 +60,7 @@ export default function Reports() {
     <div><h1 className="text-2xl font-semibold" data-testid="text-page-title">Reports</h1>
       <p className="mt-1 text-sm text-muted-foreground">Reports summarize governance evaluations and automation inventory readiness signals. They do not run automation or change CMDB/provider data.</p>
     </div>
-    <Card>
+    {visible.governance && <Card>
       <CardHeader className="gap-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-2"><CardTitle>Governance Readiness Report</CardTitle>
@@ -130,7 +134,7 @@ export default function Reports() {
             </div>
           </>}
       </CardContent>
-    </Card>
-    <AutomationReadinessDashboard />
+    </Card>}
+    {visible.automation && <AutomationReadinessDashboard />}
   </div>;
 }

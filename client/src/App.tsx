@@ -78,6 +78,8 @@ function AuthenticatedRouter() {
         <Route path="/runs/:id" component={RunDetail} />
         <Route path="/compare" component={RunComparison} />
         <Route path="/reports/drift" component={DriftReports} />
+        <Route path="/reports/governance" component={Reports} />
+        <Route path="/reports/automation" component={Reports} />
         <Route path="/reports" component={Reports} />
         <Route path="/notifications" component={Notifications} />
         <Route path="/governance" component={Governance} />

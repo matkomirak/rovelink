@@ -1,18 +1,4 @@
 import {
-  Settings,
-  LayoutDashboard,
-  Server,
-  FolderGit2,
-  Key,
-  FileText,
-  PlayCircle,
-  BarChart3,
-  GitCompareArrows,
-  Bell,
-  Cloud,
-  Boxes,
-  GitBranch,
-  ClipboardCheck,
   ChevronsUpDown,
   LogOut,
   UserCog,
@@ -48,60 +34,7 @@ import { BrandLogo } from "@/components/brand-logo";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const navigationSections = [
-  {
-    label: "Navigation",
-    items: [
-      { title: "Dashboard", url: "/", icon: LayoutDashboard },
-      { title: "Automation Runs", url: "/runs", icon: PlayCircle },
-      { title: "Reports", url: "/reports", exact: true, icon: BarChart3 },
-      { title: "Drift Reports", url: "/reports/drift", icon: GitCompareArrows },
-    ],
-  },
-  {
-    label: "Inputs",
-    items: [
-      { title: "Providers", url: "/providers", icon: Cloud },
-      { title: "CMDBs", url: "/cmdbs", icon: Boxes },
-      { title: "Sync Flows", url: "/pipelines", icon: GitBranch },
-    ],
-  },
-  {
-    label: "Governance",
-    items: [
-      { title: "Governance", url: "/governance", icon: ClipboardCheck },
-    ],
-  },
-  {
-    label: "Automation",
-    items: [
-      { title: "Automation Inventories", url: "/automation-inventories", activeUrls: ["/inventories"], icon: Server },
-      { title: "Templates", url: "/templates", icon: FileText },
-      { title: "Credentials", url: "/credentials", icon: Key },
-      { title: "Projects", url: "/projects", icon: FolderGit2 },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { title: "Notifications", url: "/notifications", icon: Bell },
-      { title: "Settings", url: "/settings", icon: Settings },
-    ],
-  },
-];
-
-function isActiveRoute(location: string, url: string, activeUrls: string[] = []) {
-  const urls = [url, ...activeUrls];
-  return urls.some((candidate) => {
-    if (candidate === "/") return location === "/";
-    return location === candidate || location.startsWith(`${candidate}/`);
-  });
-}
-
-function navItemIsActive(location: string, item: { url: string; activeUrls?: string[]; exact?: boolean }) {
-  if (item.exact) return location === item.url;
-  return isActiveRoute(location, item.url, item.activeUrls);
-}
+import { navigationSections, navItemIsActive } from "@/lib/sidebar-navigation";
 
 export function AppSidebar() {
   const [location, setLocation] = useLocation();

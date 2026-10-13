@@ -27,6 +27,8 @@ local stack to the internet or connect it to production infrastructure.
 - **Provider inventory:** cache observed runtime objects from fake/demo, Azure, and Proxmox sources. Provider customer candidates remain hints only.
 - **Drift Reports:** manually compare cached reference VMs with cached provider VMs and inspect matches, ambiguous/unmatched objects, and IP, OS, or power-state differences.
 
+The sidebar groups **Governance Readiness** and **Automation Readiness** under **Reports**. **Drift Reports** stays in its own **Drift** section. **Blueprints** and **Evaluation Runs** are under **Governance**, while **Automation Runs** is under **Automation**. The existing `/reports` page still shows both readiness dashboards.
+
 ## Scope and Limitations
 
 Rovelink is not a CMDB replacement, an AWX replacement, or a provider writeback tool.

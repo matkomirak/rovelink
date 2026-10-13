@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { useLocation } from "wouter";
 import { ClipboardCheck, Loader2, PlayCircle, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,6 @@ import {
   listGovernanceNetBoxSources,
   runCachedNetboxVmEvaluation,
   syncGovernanceCachedNetBoxVms,
-  type CachedNetBoxEvaluationResponse,
   type GovernanceNetBoxSourceSummary,
 } from "@/lib/governance-api";
 import type { GovernanceBlueprint } from "@shared/schema";
@@ -51,9 +50,9 @@ export function GovernanceEvaluationLauncher({
   fixedBlueprint,
 }: GovernanceEvaluationLauncherProps) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [selectedBlueprintId, setSelectedBlueprintId] = useState(fixedBlueprintId ?? "");
   const [selectedSourceId, setSelectedSourceId] = useState("");
-  const [lastResult, setLastResult] = useState<CachedNetBoxEvaluationResponse | null>(null);
 
   const {
     data: blueprints = [],
@@ -92,7 +91,6 @@ export function GovernanceEvaluationLauncher({
 
   useEffect(() => {
     if (!open) return;
-    setLastResult(null);
     if (fixedBlueprintId) {
       setSelectedBlueprintId(fixedBlueprintId);
     } else if (!selectedBlueprintId && blueprintOptions.length > 0) {
@@ -127,17 +125,19 @@ export function GovernanceEvaluationLauncher({
   const evaluationMutation = useMutation({
     mutationFn: () => runCachedNetboxVmEvaluation(selectedBlueprintId, { netboxSourceId: selectedSourceId }),
     onSuccess: (result) => {
-      setLastResult(result);
       queryClient.invalidateQueries({ queryKey: governanceKeys.evaluationRuns });
-      toast({
-        title: "Evaluation complete",
-        description: `${result.evaluatedCount} cached NetBox VM${result.evaluatedCount === 1 ? "" : "s"} evaluated from ${selectedSource?.name ?? "selected source"}.`,
-      });
+      toast({ title: "Evaluation complete" });
+      onOpenChange(false);
+      setLocation(`/governance/evaluation-runs/${result.evaluationRunId}`);
     },
-    onError: (error: Error) => {
-      toast({ variant: "destructive", title: "Evaluation failed", description: error.message });
+    onError: () => {
+      toast({ variant: "destructive", title: "Evaluation failed", description: "Check your access and cached source, then retry." });
     },
   });
+
+  useEffect(() => {
+    if (open) evaluationMutation.reset();
+  }, [open, evaluationMutation.reset]);
 
   const syncMutation = useMutation({
     mutationFn: () => syncGovernanceCachedNetBoxVms(selectedSourceId),
@@ -294,15 +294,9 @@ export function GovernanceEvaluationLauncher({
             </div>
           )}
 
-          {lastResult && (
-            <div className="rounded-md border border-green-500/30 bg-green-500/10 p-3 text-sm">
-              <p className="font-medium">Evaluation complete</p>
-              <p className="mt-1 text-muted-foreground">
-                {lastResult.evaluatedCount} evaluated, {lastResult.compliantCount} compliant, {lastResult.warningCount} warning, {lastResult.blockedCount} blocked.
-              </p>
-              <Button variant="ghost" size="sm" className="mt-1 h-auto px-0" asChild>
-                <Link href={`/governance/evaluation-runs/${lastResult.evaluationRunId}`}>View evaluation run</Link>
-              </Button>
+          {evaluationMutation.isError && (
+            <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              Evaluation could not be completed. Check your access and cached source, then retry or close this dialog.
             </div>
           )}
         </div>
@@ -321,7 +315,7 @@ export function GovernanceEvaluationLauncher({
             ) : (
               <PlayCircle className="h-4 w-4 mr-2" />
             )}
-            Run Evaluation
+            {evaluationMutation.isPending ? "Evaluating…" : "Run Evaluation"}
           </Button>
         </DialogFooter>
       </DialogContent>

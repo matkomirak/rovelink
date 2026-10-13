@@ -251,6 +251,17 @@ function createFakeGovernanceStorage() {
       return evaluation;
     },
 
+    async getGovernanceReadinessData(orgId: string) {
+      return {
+        runs: runs.filter(r => r.orgId === orgId).map(r => {
+          const blueprint = blueprints.find(b => b.id === r.blueprintId && b.orgId === orgId)!;
+          const sourceId = r.netboxSourceId ?? r.cmdbAccountId;
+          return { ...r, blueprintName: blueprint.name, objectType: blueprint.objectType, sourceId, sourceName: sources.find(s => s.id === sourceId && s.orgId === orgId)?.name ?? null };
+        }),
+        objects: objectEvaluations.filter(o => o.orgId === orgId),
+      };
+    },
+
     async listGovernanceEvaluationRuns(orgId: string, limit = 50, blueprintId?: string) {
       return runs.filter((run) => run.orgId === orgId && (!blueprintId || run.blueprintId === blueprintId)).slice(0, limit);
     },
@@ -605,6 +616,32 @@ describe("governance routes", () => {
     await req.delete(`/api/governance/blueprints/${blueprint.id}`).set("x-role", "admin").set("x-org-id", ORG_B).expect(404);
     await req.delete("/api/governance/blueprints/missing").set("x-role", "admin").expect(404);
     assert.equal(storage.blueprints.length, 1);
+  });
+
+  it("readiness report is empty without successful completed evaluations", async () => {
+    const response = await req.get("/api/governance/readiness-report").expect(200);
+    assert.deepEqual(response.body, { rows: [], summary: { evaluated: 0, ready: 0, blocked: 0, averageScore: null } });
+  });
+
+  it("readiness API reports latest object readiness and hides foreign organization history", async () => {
+    const selected = await createDefaultBlueprint(req);
+    const foreign = await createDefaultBlueprint(req, ORG_B);
+    const old = await storage.createGovernanceEvaluationRun({ orgId: ORG_A, blueprintId: selected.blueprint.id, blueprintVersionId: selected.activeVersion.id, netboxSourceId: `${ORG_A}-source`, status: "ok", completedAt: new Date("2026-01-01") });
+    const latest = await storage.createGovernanceEvaluationRun({ orgId: ORG_A, blueprintId: selected.blueprint.id, blueprintVersionId: selected.activeVersion.id, netboxSourceId: `${ORG_A}-source`, status: "ok", completedAt: new Date("2026-01-02"), counts: { evaluated: 99, compliant: 99 } });
+    await storage.createGovernanceEvaluationRun({ orgId: ORG_B, blueprintId: foreign.blueprint.id, blueprintVersionId: foreign.activeVersion.id, status: "ok", completedAt: new Date("2026-01-03") });
+    for (const [run, ready, score] of [[old, false, 10], [latest, true, 90]] as const) {
+      await storage.storeGovernanceObjectEvaluation({ orgId: ORG_A, runId: run.id, blueprintId: selected.blueprint.id, blueprintVersionId: selected.activeVersion.id, objectType: "netbox_vm", automationReady: ready, governanceScore: score, findings: [{ code: "required_owner_missing", severity: "warning" }] });
+    }
+    const response = await req.get("/api/governance/readiness-report").expect(200);
+    assert.equal(response.body.rows.length, 1);
+    assert.equal(response.body.rows[0].latestRunId, latest.id);
+    assert.equal(response.body.rows[0].sourceName, "Alpha NetBox");
+    assert.deepEqual(response.body.summary, { evaluated: 1, ready: 1, blocked: 0, averageScore: 90 });
+    assert.deepEqual(response.body.rows[0].topFindings, [{ code: "required_owner_missing", count: 1 }]);
+    assert.ok(!JSON.stringify(response.body).includes(ORG_B));
+    assert.ok(!JSON.stringify(response.body).includes("encrypted-token"));
+    const foreignResponse = await req.get("/api/governance/readiness-report").set("x-org-id", ORG_B).expect(200);
+    assert.equal(foreignResponse.body.rows[0].blueprintId, foreign.blueprint.id);
   });
 
   it("admin can create the default NetBox VM blueprint for a source", async () => {

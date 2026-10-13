@@ -1,4 +1,5 @@
 import { apiRequest } from "@/lib/queryClient";
+import type { GovernanceReadinessReport } from "@shared/governance-readiness";
 import type {
   GovernanceBlueprint,
   GovernanceBlueprintVersion,
@@ -99,6 +100,7 @@ async function postJson<T>(url: string, data: unknown = {}): Promise<T> {
 }
 
 export const governanceKeys = {
+  readinessReport: ["/api/governance/readiness-report"] as const,
   blueprints: ["/api/governance/blueprints"] as const,
   netboxSources: ["/api/governance/netbox-sources"] as const,
   blueprint: (id: string) => ["/api/governance/blueprints", id] as const,
@@ -117,6 +119,10 @@ export const governanceKeys = {
 
 export function listGovernanceBlueprints() {
   return fetchJson<GovernanceBlueprint[]>("/api/governance/blueprints");
+}
+
+export function getGovernanceReadinessReport() {
+  return fetchJson<GovernanceReadinessReport>("/api/governance/readiness-report");
 }
 
 export async function deleteGovernanceBlueprint(id: string) {

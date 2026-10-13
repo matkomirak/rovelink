@@ -27,6 +27,7 @@ import type {
 } from "@shared/schema";
 import type { ResolvedCustomerScopeAssignment } from "@shared/customer-scope";
 import { decryptNetboxToken, encryptNetboxToken } from "../services/secrets";
+import { summarizeGovernanceReadiness } from "../services/governance-readiness-report";
 
 interface AuthRequest extends Request {
   user?: { id?: string; role?: string; orgId?: string | null };
@@ -693,6 +694,16 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage, deps:
         return sendClientError(res, 400, "Invalid governance evaluation payload", { issues: error.issues });
       }
       sendInternalError(res, error, "governance.evaluate.cached-netbox-vms", "Failed to evaluate cached NetBox VMs");
+    }
+  });
+
+  router.get("/readiness-report", async (req: AuthRequest, res: Response) => {
+    if (!requireMinimumRole(req, res, "viewer")) return;
+    try {
+      const orgId = resolveOrgId(req);
+      res.json(summarizeGovernanceReadiness(orgId, await storage.getGovernanceReadinessData(orgId)));
+    } catch (error) {
+      sendInternalError(res, error, "governance.readiness-report", "Failed to load governance readiness report");
     }
   });
 

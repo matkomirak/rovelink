@@ -126,6 +126,7 @@ export function GovernanceEvaluationLauncher({
     mutationFn: () => runCachedNetboxVmEvaluation(selectedBlueprintId, { netboxSourceId: selectedSourceId }),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: governanceKeys.evaluationRuns });
+      queryClient.invalidateQueries({ queryKey: governanceKeys.readinessReport });
       toast({ title: "Evaluation complete" });
       onOpenChange(false);
       setLocation(`/governance/evaluation-runs/${result.evaluationRunId}`);

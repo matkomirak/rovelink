@@ -44,6 +44,7 @@ export default function Governance() {
       setDeleting(null);
       queryClient.invalidateQueries({ queryKey: governanceKeys.blueprints });
       queryClient.invalidateQueries({ queryKey: governanceKeys.evaluationRuns });
+      queryClient.invalidateQueries({ queryKey: governanceKeys.readinessReport });
       queryClient.invalidateQueries({ queryKey: ["/api/governance/objects"] });
       toast({ title: "Blueprint deleted" });
     },

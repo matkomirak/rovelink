@@ -38,6 +38,7 @@ import {
   type DriftRunStatus, type DriftMatchStatus, type DriftStatus, type DriftSeverity,
 } from "@shared/schema";
 import { db } from "./db";
+import type { GovernanceReadinessData } from "./services/governance-readiness-report";
 import { eq, desc, gte, lte, and, lt, sql, inArray, isNull } from "drizzle-orm";
 
 const SECRET_METADATA_KEYS = new Set([
@@ -275,6 +276,7 @@ export interface IStorage {
   createGovernanceEvaluationRun(run: InsertGovernanceEvaluationRun): Promise<GovernanceEvaluationRun>;
   storeGovernanceObjectEvaluation(evaluation: InsertGovernanceObjectEvaluation): Promise<GovernanceObjectEvaluation>;
   listGovernanceEvaluationRuns(orgId: string, limit?: number, blueprintId?: string): Promise<GovernanceEvaluationRun[]>;
+  getGovernanceReadinessData(orgId: string): Promise<GovernanceReadinessData>;
   getGovernanceEvaluationRun(id: string, orgId: string): Promise<GovernanceEvaluationRun | undefined>;
   listGovernanceObjectEvaluations(runId: string, orgId: string): Promise<GovernanceObjectEvaluation[]>;
   getLatestGovernanceEvaluationForObject(
@@ -1392,6 +1394,29 @@ export class DatabaseStorage implements IStorage {
       .values(insertEvaluation)
       .returning();
     return evaluation;
+  }
+
+  async getGovernanceReadinessData(orgId: string): Promise<GovernanceReadinessData> {
+    const sourceId = sql<string | null>`coalesce(${governanceEvaluationRuns.netboxSourceId}, ${governanceEvaluationRuns.cmdbAccountId})`;
+    const runs = await db.selectDistinctOn([governanceEvaluationRuns.blueprintId, sourceId, governanceBlueprints.objectType], {
+      id: governanceEvaluationRuns.id, orgId: governanceEvaluationRuns.orgId,
+      blueprintId: governanceEvaluationRuns.blueprintId, blueprintName: governanceBlueprints.name,
+      sourceId, sourceName: sql<string | null>`coalesce(${netboxInventorySources.name}, ${cmdbAccounts.name})`,
+      objectType: governanceBlueprints.objectType, status: governanceEvaluationRuns.status,
+      createdAt: governanceEvaluationRuns.createdAt, completedAt: governanceEvaluationRuns.completedAt,
+    }).from(governanceEvaluationRuns)
+      .innerJoin(governanceBlueprints, and(eq(governanceBlueprints.id, governanceEvaluationRuns.blueprintId), eq(governanceBlueprints.orgId, orgId)))
+      .leftJoin(netboxInventorySources, and(eq(netboxInventorySources.id, governanceEvaluationRuns.netboxSourceId), eq(netboxInventorySources.orgId, orgId)))
+      .leftJoin(cmdbAccounts, and(eq(cmdbAccounts.id, governanceEvaluationRuns.cmdbAccountId), eq(cmdbAccounts.orgId, orgId)))
+      .where(and(eq(governanceEvaluationRuns.orgId, orgId), eq(governanceEvaluationRuns.status, "ok"), sql`${governanceEvaluationRuns.completedAt} is not null`))
+      .orderBy(governanceEvaluationRuns.blueprintId, sourceId, governanceBlueprints.objectType, desc(governanceEvaluationRuns.completedAt), desc(governanceEvaluationRuns.createdAt), desc(governanceEvaluationRuns.id));
+    if (!runs.length) return { runs, objects: [] };
+    const objects = await db.select({
+      orgId: governanceObjectEvaluations.orgId, runId: governanceObjectEvaluations.runId,
+      objectType: governanceObjectEvaluations.objectType, automationReady: governanceObjectEvaluations.automationReady,
+      governanceScore: governanceObjectEvaluations.governanceScore, findings: governanceObjectEvaluations.findings,
+    }).from(governanceObjectEvaluations).where(and(eq(governanceObjectEvaluations.orgId, orgId), inArray(governanceObjectEvaluations.runId, runs.map(r => r.id))));
+    return { runs, objects };
   }
 
   async listGovernanceEvaluationRuns(orgId: string, limit: number = 50, blueprintId?: string): Promise<GovernanceEvaluationRun[]> {

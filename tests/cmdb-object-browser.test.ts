@@ -1129,3 +1129,23 @@ describe("CMDB object browser routes", () => {
     assert.match(res.body.message, /Unsupported CMDB object type/);
   });
 });
+
+
+test("NetBox VM diagnostics exclude upstream secrets and identify HTTP failures", async () => {
+  const adapter = new NetBoxAdapter({ url: "https://netbox.test/api///", token: "hidden-token" });
+  const client = (adapter as any).client;
+  assert.equal(client.defaults.baseURL, "https://netbox.test/api");
+  client.get = async () => { throw { response: { status: 403, data: "hidden-token" }, message: "hidden-token", config: { headers: { Authorization: "hidden-token" } } }; };
+  const steps: string[] = [];
+  await assert.rejects(original.listAllVms.call(adapter, (step) => steps.push(step)), /Permission denied/);
+  assert.match(steps.join("\n"), /HTTP 403/);
+  assert.ok(!steps.join("\n").includes("hidden-token"));
+});
+
+test("NetBox VM browsing rejects HTML instead of treating it as empty inventory", async () => {
+  const adapter = new NetBoxAdapter({ url: "https://netbox.test", token: "hidden-token" });
+  (adapter as any).client.get = async () => ({ status: 200, data: "<html>login</html>" });
+  const steps: string[] = [];
+  await assert.rejects(original.listAllVms.call(adapter, (step) => steps.push(step)));
+  assert.match(steps.join("\n"), /expected paginated JSON/);
+});

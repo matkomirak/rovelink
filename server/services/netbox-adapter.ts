@@ -42,7 +42,7 @@ export class NetBoxAdapter {
     this.config = config;
 
     // Strip trailing slash from URL
-    const baseURL = config.url.replace(/\/$/, '');
+    const baseURL = config.url.trim().replace(/\/+$/, '').replace(/\/api$/, '');
 
     this.client = axios.create({
       baseURL: `${baseURL}/api`,
@@ -794,18 +794,26 @@ export class NetBoxAdapter {
   /**
    * List all virtual machines from NetBox
    */
-  async listAllVms(): Promise<any[]> {
+  async listAllVms(report?: (step: string) => void): Promise<any[]> {
     try {
       const vms: any[] = [];
       let offset = 0;
       const limit = 100;
       
       while (true) {
+        const started = Date.now();
+        report?.(`GET /api/virtualization/virtual-machines/ offset=${offset} limit=${limit}`);
         const response = await this.client.get('/virtualization/virtual-machines/', {
           params: { offset, limit }
         });
         
-        if (!response.data.results || response.data.results.length === 0) {
+        report?.(`HTTP ${response.status}; ${Date.now() - started} ms`);
+        if (!Array.isArray(response.data?.results)) {
+          report?.('Invalid response: expected paginated JSON. Check the NetBox base URL.');
+          throw new Error('Invalid NetBox response');
+        }
+        report?.(`Received ${response.data.results.length} records`);
+        if (response.data.results.length === 0) {
           break;
         }
         
@@ -820,19 +828,14 @@ export class NetBoxAdapter {
       
       return vms;
     } catch (error: any) {
-      console.error('Failed to list VMs from NetBox:', error.message);
-      console.error('NetBox URL:', this.config.url);
-      console.error('Error details:', {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data
-      });
-      
-      if (error.response?.status === 403) {
-        throw new Error(`NetBox API returned 403 Forbidden. The API token may not have permission to access virtualization resources. Please verify the token has the required permissions in NetBox.`);
-      }
-      
-      throw new Error(`Failed to list VMs: ${error.message}`);
+      const status = error.response?.status;
+      const reason = status === 401 ? 'Authentication rejected. Check the token.'
+        : status === 403 ? 'Permission denied. Check virtualization view permissions.'
+        : status === 404 ? 'Endpoint not found. Check the NetBox base URL.'
+        : error.code === 'ECONNABORTED' ? 'Request timed out after 30 seconds.'
+        : 'Unable to load VMs. Check connectivity, TLS certificates, and the NetBox base URL.';
+      report?.(`${typeof status === 'number' ? `HTTP ${status}: ` : ''}${reason}`);
+      throw new Error(reason);
     }
   }
 

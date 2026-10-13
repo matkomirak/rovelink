@@ -1793,6 +1793,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get(["/api/cmdbs/:id/objects/:objectType", "/api/cmdb/:id/objects/:objectType"], authMiddleware, async (req: AuthRequest, res) => {
+    const diagnostics: string[] = [];
+    const report = (step: string) => { if (diagnostics.length < 500) diagnostics.push(`${new Date().toISOString()} ${step}`); };
     try {
       const objectType = req.params.objectType;
       if (!isSupportedCmdbObjectType(objectType)) {
@@ -1807,17 +1809,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return sendClientError(res, 400, "Object browsing is only supported for NetBox CMDBs");
       }
 
+      report("Organization access verified; checking cache");
       const cachedVms = await getCachedNetboxVmsForCmdb(cmdb.id, req.orgId!);
       if (cachedVms.length > 0) {
-        return res.json(buildCmdbObjectResponse(cmdb, objectType, cachedVms, "cached"));
+        report(`Loaded ${cachedVms.length} cached VMs`);
+        return res.json({ ...buildCmdbObjectResponse(cmdb, objectType, cachedVms, "cached"), diagnostics });
       }
 
+      report("Cache empty; preparing authenticated NetBox request (credentials hidden)");
       const decryptedConfig = decryptCmdbConfig(cmdb.config as Record<string, any>);
       const adapter = new NetBoxAdapter(decryptedConfig as any);
-      const vms = await adapter.listAllVms();
-      res.json(buildCmdbObjectResponse(cmdb, objectType, vms, "live"));
+      const vms = await adapter.listAllVms(report);
+      report(`Completed: ${vms.length} VMs loaded`);
+      res.json({ ...buildCmdbObjectResponse(cmdb, objectType, vms, "live"), diagnostics });
     } catch (error: any) {
-      sendInternalError(res, error, "cmdbs.objects.list", "Failed to fetch CMDB objects");
+      report("Object loading failed. If no HTTP result is shown, check server configuration and database availability.");
+      res.status(500).json({ message: "Failed to fetch CMDB objects", diagnostics });
     }
   });
 

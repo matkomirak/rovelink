@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   ArrowLeft,
@@ -514,6 +515,9 @@ function CmdbObjectDetailSheet({
 
 export default function CmdbDetail() {
   const { id } = useParams<{ id: string }>();
+  const [retryOpen, setRetryOpen] = useState(false);
+  const [protocol, setProtocol] = useState<string[]>([]);
+  const [retryRunning, setRetryRunning] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedObjectType, setSelectedObjectType] = useState<"netbox_vm">("netbox_vm");
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
@@ -530,8 +534,29 @@ export default function CmdbDetail() {
 
   const objectsQuery = useQuery<CmdbObjectsResponse>({
     queryKey: ["/api/cmdbs", id, "objects", selectedObjectType],
+    queryFn: async ({ signal }) => {
+      setProtocol([`${new Date().toISOString()} Request started`]);
+      try {
+        const response = await fetch(`/api/cmdbs/${encodeURIComponent(id!)}/objects/${selectedObjectType}`, { credentials: "include", signal, cache: "no-store" });
+        const body = await response.json();
+        setProtocol((steps) => [...steps, `Rovelink HTTP ${response.status}`, ...(Array.isArray(body.diagnostics) ? body.diagnostics : []), response.ok ? 'Completed successfully' : 'Request failed']);
+        if (!response.ok) throw new Error(`CMDB request failed (HTTP ${response.status}). Retry to view diagnostics.`);
+        return body;
+      } catch (error) {
+        setProtocol((steps) => [...steps, 'Request ended. If no HTTP result is shown, check connection and server availability.']);
+        throw error;
+      }
+    },
     enabled: !!id && !!selectedObjectType,
   });
+
+  async function retryObjects() {
+    if (retryRunning || objectsQuery.isFetching) return;
+    setRetryOpen(true);
+    setRetryRunning(true);
+    try { await objectsQuery.refetch(); }
+    finally { setRetryRunning(false); }
+  }
 
   const customerScopeSummaryQuery = useQuery<CustomerScopeSummary>({
     queryKey: ["/api/cmdbs", id, "customer-scope-summary"],
@@ -878,12 +903,22 @@ export default function CmdbDetail() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
+          <Dialog open={retryOpen} onOpenChange={setRetryOpen}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>CMDB retry protocol</DialogTitle>
+                <DialogDescription>Request steps and results. Credentials, headers, URLs, and response bodies are excluded.</DialogDescription>
+              </DialogHeader>
+              <pre role="log" aria-live="polite" className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-4 text-xs">{protocol.join("\n")}</pre>
+              <Button onClick={retryObjects} disabled={retryRunning || objectsQuery.isFetching}>{retryRunning ? "Retrying…" : "Retry again"}</Button>
+            </DialogContent>
+          </Dialog>
           {objectsQuery.isError ? (
             <div className="p-8 text-center text-destructive space-y-2">
               <p className="font-medium">Failed to load CMDB objects</p>
               <p className="text-sm text-muted-foreground">{(objectsQuery.error as Error).message}</p>
-              <Button variant="outline" size="sm" onClick={() => objectsQuery.refetch()}>
-                Retry
+              <Button variant="outline" size="sm" onClick={retryObjects} disabled={objectsQuery.isFetching || retryRunning}>
+                {objectsQuery.isFetching ? "Retrying…" : "Retry"}
               </Button>
             </div>
           ) : objectsQuery.isLoading ? (

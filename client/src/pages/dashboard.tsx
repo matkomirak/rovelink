@@ -1,3 +1,4 @@
+import { OnboardingProgress } from "@/components/onboarding-progress";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,6 +75,8 @@ export default function Dashboard() {
         <p className="text-sm text-muted-foreground">Operational snapshot for projects, gate readiness, and recent automation activity</p>
       </div>
 
+      <OnboardingProgress />
+
       {/* Automation GATE readiness — primary hero section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="md:col-span-1">
@@ -85,7 +88,7 @@ export default function Dashboard() {
             <div className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-gate-allowed">
               {gate?.allowed ?? "—"}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">assets safe to automate</p>
+            <p className="text-xs text-muted-foreground mt-1">assets currently allowed by GATE</p>
             {totalGate > 0 && (
               <div className="mt-3">
                 <div className="flex items-center justify-between mb-1">
@@ -208,7 +211,7 @@ export default function Dashboard() {
             <div className="text-center py-8 text-muted-foreground">
               <PlayCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
               <p className="font-medium text-foreground">No job runs yet</p>
-              <p className="text-sm mt-1">Sync a project, create a template, and launch a localhost playbook to see activity here.</p>
+              <p className="text-sm mt-1">Connect and review your sources first. Prepare inventory and templates, then inspect GATE before starting a run.</p>
             </div>
           ) : (
             <div className="space-y-3">

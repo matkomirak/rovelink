@@ -265,6 +265,7 @@ export interface IStorage {
   createGovernanceBlueprint(blueprint: InsertGovernanceBlueprint): Promise<GovernanceBlueprint>;
   listGovernanceBlueprints(orgId: string): Promise<GovernanceBlueprint[]>;
   getGovernanceBlueprint(id: string, orgId: string): Promise<GovernanceBlueprint | undefined>;
+  deleteGovernanceBlueprint(id: string, orgId: string): Promise<boolean>;
   updateGovernanceBlueprint(id: string, data: Partial<GovernanceBlueprint>, orgId: string): Promise<GovernanceBlueprint | undefined>;
   createGovernanceBlueprintVersion(version: InsertGovernanceBlueprintVersion): Promise<GovernanceBlueprintVersion>;
   getGovernanceBlueprintVersion(id: string, orgId: string): Promise<GovernanceBlueprintVersion | undefined>;
@@ -1225,6 +1226,13 @@ export class DatabaseStorage implements IStorage {
       .values({ ...insertBlueprint, updatedAt: new Date() })
       .returning();
     return blueprint;
+  }
+
+  async deleteGovernanceBlueprint(id: string, orgId: string): Promise<boolean> {
+    const deleted = await db.delete(governanceBlueprints)
+      .where(and(eq(governanceBlueprints.id, id), eq(governanceBlueprints.orgId, orgId)))
+      .returning({ id: governanceBlueprints.id });
+    return deleted.length > 0;
   }
 
   async listGovernanceBlueprints(orgId: string): Promise<GovernanceBlueprint[]> {

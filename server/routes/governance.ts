@@ -113,7 +113,16 @@ async function materializeNetboxSourcesFromCmdbAccounts(storage: IStorage, orgId
   const existingSourceIds = new Set(existingSources.map((source) => source.id));
 
   for (const account of cmdbAccounts) {
-    if (!isNetboxCmdbAccountWithCredentials(account) || existingSourceIds.has(account.id)) continue;
+    if (!isNetboxCmdbAccountWithCredentials(account)) continue;
+    if (existingSourceIds.has(account.id)) {
+      await storage.updateNetboxInventorySource(account.id, {
+        name: account.name,
+        url: account.config.url,
+        token: encryptNetboxToken(account.config.token),
+        enabled: account.enabled,
+      }, orgId);
+      continue;
+    }
 
     await storage.createNetboxInventorySource({
       id: account.id,
@@ -163,7 +172,13 @@ function toCachedNetboxVm(sourceId: string, vm: unknown): InsertNetboxVm {
     operatingSystem: normalizeOperatingSystem(
       stringValue(customFields.operating_system) ?? stringValue(platform.name),
     ),
-    customFields,
+    customFields: {
+      ...customFields,
+      // Preserve the native NetBox role separately from legacy custom role fields.
+      _netboxRole: isRecord(record.role)
+        ? stringValue(record.role.name) ?? stringValue(record.role.slug) ?? null
+        : stringValue(record.role) ?? null,
+    },
     tags: Array.isArray(record.tags)
       ? record.tags.map((tag) => (
         isRecord(tag) ? stringValue(tag.name) ?? stringValue(tag.slug) : stringValue(tag)
@@ -425,6 +440,17 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage, deps:
       res.json(blueprint);
     } catch (error) {
       sendInternalError(res, error, "governance.blueprints.get", "Failed to read governance blueprint");
+    }
+  });
+
+  router.delete("/blueprints/:id", async (req: AuthRequest, res: Response) => {
+    if (!requireMinimumRole(req, res, "admin")) return;
+    try {
+      const deleted = await storage.deleteGovernanceBlueprint(req.params.id, resolveOrgId(req));
+      if (!deleted) return sendClientError(res, 404, "Governance blueprint not found");
+      res.status(204).end();
+    } catch (error) {
+      sendInternalError(res, error, "governance.blueprints.delete", "Failed to delete governance blueprint");
     }
   });
 
@@ -847,7 +873,7 @@ function normalizeCachedNetboxVm(
     objectName: vm.name,
     fields: {
       tenant: customFields.tenant,
-      role: customFields.role,
+      role: customFields._netboxRole ?? customFields.role,
       platform: vm.operatingSystem,
       primaryIp: vm.ip,
       automatable: customFields.automatable,

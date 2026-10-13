@@ -47,7 +47,7 @@ export class NetBoxAdapter {
     this.client = axios.create({
       baseURL: `${baseURL}/api`,
       headers: {
-        'Authorization': `Token ${config.token}`,
+        'Authorization': `${config.token.startsWith('nbt_') && config.token.includes('.') ? 'Bearer' : 'Token'} ${config.token}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },

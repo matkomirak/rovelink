@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ClipboardCheck, FilePlus2, History, PlayCircle, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +9,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { GovernanceBlueprintCreateDialog } from "@/components/governance-blueprint-create-dialog";
 import { GovernanceEvaluationLauncher } from "@/components/governance-evaluation-launcher";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import {
   governanceKeys,
+  deleteGovernanceBlueprint,
   listGovernanceBlueprints,
   listGovernanceBlueprintVersions,
   listGovernanceNetBoxSources,
@@ -32,6 +36,19 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 export default function Governance() {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleting, setDeleting] = useState<GovernanceBlueprint | null>(null);
+  const { toast } = useToast();
+  const deletion = useMutation({
+    mutationFn: (id: string) => deleteGovernanceBlueprint(id),
+    onSuccess: () => {
+      setDeleting(null);
+      queryClient.invalidateQueries({ queryKey: governanceKeys.blueprints });
+      queryClient.invalidateQueries({ queryKey: governanceKeys.evaluationRuns });
+      queryClient.invalidateQueries({ queryKey: ["/api/governance/objects"] });
+      toast({ title: "Blueprint deleted" });
+    },
+    onError: () => toast({ variant: "destructive", title: "Could not delete blueprint", description: "Check your permissions and try again." }),
+  });
   const { data: blueprints = [], isLoading, isError, error, refetch, isFetching } = useQuery<GovernanceBlueprint[]>({
     queryKey: governanceKeys.blueprints,
     queryFn: listGovernanceBlueprints,
@@ -141,7 +158,7 @@ export default function Governance() {
                 <TableBody>
                   {blueprints.map((blueprint) => (
                     <TableRow key={blueprint.id}>
-                      <TableCell className="font-medium">{blueprint.name}</TableCell>
+                      <TableCell className="font-medium"><a href={`/governance/blueprints/${blueprint.id}`} className="text-primary hover:underline">{blueprint.name}</a></TableCell>
                       <TableCell>
                         {blueprint.sourceType === "netbox_inventory_source" && blueprint.sourceId ? (
                           sourceNames.get(blueprint.sourceId) ?? "Bound source"
@@ -158,6 +175,7 @@ export default function Governance() {
                         <Button variant="outline" size="sm" asChild>
                           <Link href={`/governance/blueprints/${blueprint.id}`}>View</Link>
                         </Button>
+                        <Button variant="destructive" size="sm" className="ml-2" onClick={() => { deletion.reset(); setDeleting(blueprint); }} aria-label={`Delete ${blueprint.name}`}>Delete</Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -169,6 +187,18 @@ export default function Governance() {
       </Card>
       <GovernanceBlueprintCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <GovernanceEvaluationLauncher open={launcherOpen} onOpenChange={setLauncherOpen} />
+      <Dialog open={Boolean(deleting)} onOpenChange={open => { if (!open && !deletion.isPending) setDeleting(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Delete governance blueprint?</DialogTitle>
+            <DialogDescription>Delete “{deleting?.name}”? This permanently removes its versions, evaluation runs, and object findings. Automation inventories referring to it will need review. CMDB and provider objects are not deleted.</DialogDescription>
+          </DialogHeader>
+          {deletion.isError && <p role="alert" className="text-sm text-destructive">Deletion failed. Check your permissions and retry.</p>}
+          <DialogFooter>
+            <Button variant="outline" disabled={deletion.isPending} onClick={() => setDeleting(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={deletion.isPending} onClick={() => deleting && deletion.mutate(deleting.id)}>{deletion.isPending ? "Deleting…" : "Delete blueprint"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

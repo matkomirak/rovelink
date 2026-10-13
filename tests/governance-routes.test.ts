@@ -125,6 +125,16 @@ function createFakeGovernanceStorage() {
       return blueprint;
     },
 
+    async deleteGovernanceBlueprint(id: string, orgId: string) {
+      const index = blueprints.findIndex(b => b.id === id && b.orgId === orgId);
+      if (index < 0) return false;
+      blueprints.splice(index, 1);
+      for (const rows of [versions, runs, objectEvaluations]) {
+        for (let i = rows.length - 1; i >= 0; i--) if (rows[i].blueprintId === id && rows[i].orgId === orgId) rows.splice(i, 1);
+      }
+      return true;
+    },
+
     async listGovernanceBlueprints(orgId: string) {
       return blueprints.filter((blueprint) => blueprint.orgId === orgId);
     },
@@ -577,6 +587,24 @@ describe("governance routes", () => {
     for (const query of ["blueprintId=", "blueprintId[]=one&blueprintId[]=two", "limit=0", "limit=201", "limit=1.5", "limit=invalid"]) {
       await req.get(`/api/governance/evaluation-runs?${query}`).expect(400);
     }
+  });
+
+  it("admin deletion removes blueprint and its dependent history", async () => {
+    const { blueprint, activeVersion } = await createDefaultBlueprint(req);
+    const run = await storage.createGovernanceEvaluationRun({ orgId: ORG_A, blueprintId: blueprint.id, blueprintVersionId: activeVersion.id, status: "ok" });
+    await req.delete(`/api/governance/blueprints/${blueprint.id}`).set("x-role", "admin").expect(204);
+    await req.get(`/api/governance/blueprints/${blueprint.id}`).expect(404);
+    await req.get(`/api/governance/evaluation-runs/${run.id}`).expect(404);
+    assert.equal(storage.versions.length, 0);
+    assert.equal(storage.sources.length, 3);
+  });
+
+  it("blueprint deletion rejects viewers, operators, and cross-org IDs", async () => {
+    const { blueprint } = await createDefaultBlueprint(req);
+    for (const role of ["viewer", "operator"]) await req.delete(`/api/governance/blueprints/${blueprint.id}`).set("x-role", role).expect(403);
+    await req.delete(`/api/governance/blueprints/${blueprint.id}`).set("x-role", "admin").set("x-org-id", ORG_B).expect(404);
+    await req.delete("/api/governance/blueprints/missing").set("x-role", "admin").expect(404);
+    assert.equal(storage.blueprints.length, 1);
   });
 
   it("admin can create the default NetBox VM blueprint for a source", async () => {
@@ -1063,6 +1091,14 @@ describe("governance routes", () => {
     assert.equal(response.body[0].cachedVmCount, 0);
     assert.equal(response.body[0].token, undefined);
     assert.equal(storage.sources.length, 1);
+    storage.cmdbAccounts[0].config = { url: "http://netbox:8080", token: "updated-synthetic-token" };
+    storage.cmdbAccounts[0].name = "Updated NetBox";
+    const updated = await req.get("/api/governance/netbox-sources").set("x-role", "viewer").set("x-org-id", ORG_A).expect(200);
+    assert.equal(updated.body[0].url, "http://netbox:8080");
+    assert.equal(updated.body[0].name, "Updated NetBox");
+    assert.equal(updated.body[0].token, undefined);
+    assert.notEqual(storage.sources[0].token, "encrypted-token");
+    assert.equal(storage.sources.length, 1);
   });
 
   it("refreshing an empty NetBox succeeds and records an import time without evaluating Governance", async () => {
@@ -1380,6 +1416,22 @@ describe("governance routes", () => {
       .expect(404);
 
     assert.equal(storage.vms.length, 0);
+  });
+
+  it("native NetBox VM role survives refresh and satisfies governance; removal creates a role finding", async () => {
+    const { blueprint } = await createDefaultBlueprint(req);
+    let role: { name: string; slug: string } | null = { name: "Web", slug: "web" };
+    const syncReq = makeRequest(storage, { listNetboxVmsForSource: async () => [{ id: 991, name: "native-role-vm", role, custom_fields: {}, tags: [] }] });
+    const sync = () => syncReq.post(`/api/governance/netbox-sources/${ORG_A}-source/sync-cached-vms`).set("x-role", "operator").expect(200);
+    const evaluate = () => req.post(`/api/governance/blueprints/${blueprint.id}/evaluate-cached-netbox-vms`).set("x-role", "operator").expect(200);
+    await sync();
+    assert.equal((storage.vms[0].customFields as any)._netboxRole, "Web");
+    await evaluate();
+    assert.ok(!storage.objectEvaluations[0].findings.some(f => f.fieldKey === "role"));
+    role = null;
+    await sync();
+    await evaluate();
+    assert.ok(storage.objectEvaluations[1].findings.some(f => f.fieldKey === "role" && f.message === "Role is required but missing."));
   });
 
   it("evaluation after source sync evaluates cached VMs without another live NetBox call", async () => {

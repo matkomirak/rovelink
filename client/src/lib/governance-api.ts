@@ -119,6 +119,14 @@ export function listGovernanceBlueprints() {
   return fetchJson<GovernanceBlueprint[]>("/api/governance/blueprints");
 }
 
+export async function deleteGovernanceBlueprint(id: string) {
+  try {
+    await apiRequest("DELETE", `/api/governance/blueprints/${encodeURIComponent(id)}`);
+  } catch (error) {
+    throw formatGovernanceError(error);
+  }
+}
+
 export function listGovernanceNetBoxSources() {
   return fetchJson<GovernanceNetBoxSourceSummary[]>("/api/governance/netbox-sources");
 }

@@ -1132,6 +1132,19 @@ describe("CMDB object browser routes", () => {
 });
 
 
+test("NetBox adapter uses Bearer for v2 tokens and preserves legacy Token authentication", async () => {
+  for (const [token, scheme] of [["nbt_demo.synthetic-secret", "Bearer"], ["legacy-synthetic-token", "Token"]]) {
+    const adapter = new NetBoxAdapter({ url: "https://netbox.test", token });
+    const client = (adapter as any).client;
+    client.defaults.adapter = async (config: any) => {
+      assert.equal(config.headers.Authorization, `${scheme} ${token}`);
+      return { status: 200, statusText: "OK", headers: {}, config, data: { results: [], next: null } };
+    };
+    assert.equal((await adapter.test()).ok, true);
+    assert.deepEqual(await original.listAllVms.call(adapter), []);
+  }
+});
+
 test("NetBox VM diagnostics exclude upstream secrets and identify HTTP failures", async () => {
   const adapter = new NetBoxAdapter({ url: "https://netbox.test/api///", token: "hidden-token" });
   const client = (adapter as any).client;

@@ -11,6 +11,8 @@ import type {
   ProviderCustomerScopeCandidate,
 } from "@shared/schema";
 import { getProviderCollector } from "./providers/registry";
+import { FakeCollector } from "./providers/fake";
+import { generateFakeAzureDiscovery } from "./providers/fake-azure-demo";
 import type { AzureConfig } from "./providers/azure";
 import { fakeInfrastructureNormalizer } from "./infrastructure-normalizers/fake";
 import { azureInfrastructureNormalizer } from "./infrastructure-normalizers/azure";
@@ -97,7 +99,9 @@ export async function syncProviderInfrastructureInventory(
   store: InfrastructureStorage = defaultStorage as IStorage,
   options: SyncOptions = {},
 ): Promise<ProviderInfrastructureSyncResult> {
-  const normalizer = normalizers[provider.kind as InfrastructureProviderType];
+  const azureDemo = provider.kind === "fake" && config.scenario === "azure";
+  const proxmoxDemo = provider.kind === "fake" && config.scenario === "proxmox";
+  const normalizer = azureDemo ? azureInfrastructureNormalizer : proxmoxDemo ? proxmoxInfrastructureNormalizer : normalizers[provider.kind as InfrastructureProviderType];
   if (!normalizer) {
     throw new ProviderInfrastructureSyncNotSupportedError(provider);
   }
@@ -113,7 +117,9 @@ export async function syncProviderInfrastructureInventory(
     errors: [],
   };
 
-  const items = await collectProviderItems(provider, config, options.collectorFactory ?? getProviderCollector);
+  const items = azureDemo ? generateFakeAzureDiscovery() : proxmoxDemo
+    ? await new FakeCollector({ ...config, variant: "proxmox", seed: 43, vms: 4 }).listVms()
+    : await collectProviderItems(provider, config, options.collectorFactory ?? getProviderCollector);
   const normalized = await normalizer.normalize({ provider, orgId, items, config, now });
   result.skipped.push(...toSkipped(normalized));
   result.errors.push(...toErrors(normalized));
@@ -124,6 +130,7 @@ export async function syncProviderInfrastructureInventory(
     try {
       const object = await store.upsertInfrastructureObject({
         ...objectInput,
+        ...((azureDemo || proxmoxDemo) ? { providerType: "fake" as const, metadata: { ...objectInput.metadata as Record<string, unknown>, demo: true, demoProfile: azureDemo ? "azure" : "proxmox" } } : {}),
         orgId,
         sourceId: provider.id,
       });

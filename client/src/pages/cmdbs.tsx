@@ -421,7 +421,10 @@ export default function CmdbsPage() {
                       <FormControl>
                         <Input {...field} placeholder="https://netbox.example.com" data-testid="input-url" />
                       </FormControl>
-                      <FormDescription>Base URL without /api suffix</FormDescription>
+                      <FormDescription>
+                        Base URL, for example https://netbox.example.com. For local Docker development use http://host.docker.internal:8000.
+                        Do not include /api at the end. If Rovelink runs in Docker and NetBox runs on the host, localhost points to the Rovelink container.
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -463,7 +466,7 @@ export default function CmdbsPage() {
                               {...field}
                               type="password"
                               autoFocus={tokenEditing && !!editingCmdb}
-                              placeholder="Enter new API token"
+                              placeholder="Raw NetBox token, e.g. nbt_xxx"
                               className="flex-1"
                               data-testid="input-token"
                             />
@@ -492,6 +495,7 @@ export default function CmdbsPage() {
                           : editingCmdb
                           ? "Enter a new token to replace the existing one."
                           : "Authentication token for API access."}
+                        {" Use the raw NetBox token only, for example nbt_xxx. Do not paste a Bearer or Token prefix."}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

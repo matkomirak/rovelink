@@ -89,4 +89,12 @@ When Rovelink is running in Docker, configure its NetBox URL as:
 http://host.docker.internal:8000
 ```
 
-Use the local NetBox API token from `.env.netbox`.
+Use a base URL such as `https://netbox.example.com`, without `/api` at the end.
+If Rovelink runs in Docker and NetBox runs on the host at `http://localhost:8000`,
+set the CMDB connection URL to `http://host.docker.internal:8000`.
+Inside the Rovelink container, `localhost` points to that container, not the host.
+Your browser and seed scripts running directly on the host can still use
+`http://localhost:8000`.
+
+Enter the raw NetBox API token only, for example `nbt_xxx` (a placeholder).
+Do not paste a `Bearer` or `Token` prefix into the token field.

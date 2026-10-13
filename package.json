@@ -10,6 +10,8 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx server/seed.ts",
+    "demo:setup": "node scripts/setup-demo.mjs",
+    "db:seed:demo-providers": "tsx server/scripts/seed-demo-providers.ts",
     "db:seed:demo-customer-scopes": "tsx server/scripts/seed-customer-scope-demo.ts",
     "netbox:seed:demo": "tsx server/scripts/seed-local-netbox-demo.ts",
     "test": "cross-env NODE_ENV=test tsx --test tests/authz.test.ts tests/security.test.ts tests/credential-secrets.test.ts tests/bootstrap-seed.test.ts tests/runtime-config.test.ts tests/playbook-paths.test.ts tests/git-project-sync.test.ts tests/local-runner.test.ts tests/ssh-credential-materializer.test.ts tests/governance-blueprint-evaluator.test.ts tests/governance-routes.test.ts tests/governance-gate-enforcement.test.ts tests/gate-governance-context.test.ts tests/gate-isolation.test.ts tests/automation-inventory-isolation.test.ts tests/cmdb-object-browser.test.ts tests/customer-scope-storage.test.ts tests/customer-scope-provider-registry.test.ts tests/customer-scope-resolver.test.ts tests/customer-scope-netbox-resolver.test.ts tests/customer-scope-demo-seed.test.ts tests/infrastructure-object-storage.test.ts tests/drift-storage.test.ts tests/drift-vm-matcher.test.ts tests/drift-comparison-service.test.ts tests/drift-routes.test.ts tests/provider-infrastructure-sync.test.ts tests/provider-inventory-api.test.ts tests/azure-infrastructure-normalizer.test.ts tests/proxmox-infrastructure-normalizer.test.ts tests/legacy-route-scope.test.ts tests/org-context.test.ts",

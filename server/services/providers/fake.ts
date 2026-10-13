@@ -5,9 +5,11 @@
 // - Automation (gate decisions)
 // - Gating (CMDB governance)
 
+import { generateFakeAzureDiscovery } from "./fake-azure-demo";
 import { IProviderCollector, TestConnectionResult, NormalizedVm } from "./types";
 
 export interface FakeConfig {
+  scenario?: "azure" | "proxmox" | "generic";
   variant: "proxmox" | "vsphere" | "azure" | "aws";
   seed: number;
   vms: number;
@@ -87,6 +89,14 @@ export class FakeCollector implements IProviderCollector {
   }
 
   async listVms(): Promise<NormalizedVm[]> {
+    if (this.config.scenario === "azure") {
+      return generateFakeAzureDiscovery().flatMap(discovery => discovery.vms.map(vm => ({
+        externalId: vm.id, name: vm.name, provider: "azure", status: vm.status,
+        primaryIp4: vm.primaryIp4, vcpus: vm.vcpus, memory: (vm.ramGiB ?? 0) * 1024,
+        disk: vm.disk, platform: vm.platform,
+        tags: Object.entries(vm.tags).map(([key, value]) => `${key}:${value}`), raw: { vm },
+      })));
+    }
     const rng = new SeededRandom(this.config.seed);
     const vms: NormalizedVm[] = [];
 

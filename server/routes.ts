@@ -1824,6 +1824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ...buildCmdbObjectResponse(cmdb, objectType, vms, "live"), diagnostics });
     } catch (error: any) {
       report("Object loading failed. If no HTTP result is shown, check server configuration and database availability.");
+      report("If Rovelink runs in Docker and NetBox runs on the host, use http://host.docker.internal:8000 instead of localhost.");
       res.status(500).json({ message: "Failed to fetch CMDB objects", diagnostics });
     }
   });

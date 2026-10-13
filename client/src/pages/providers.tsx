@@ -126,7 +126,8 @@ export default function Providers() {
       
       if (data.kind === "fake") {
         config = {
-          variant,
+          variant: variant === "azure-demo" ? "azure" : variant,
+          ...(variant === "azure-demo" ? { scenario: "azure" } : {}),
           seed: seed || 42,
           vms: vms || 100,
           linux_pct: linux_pct || 70,
@@ -321,7 +322,7 @@ export default function Providers() {
         name: provider.name,
         kind: provider.kind,
         enabled: provider.enabled,
-        variant: config?.variant || "proxmox",
+        variant: config?.scenario === "azure" ? "azure-demo" : config?.variant || "proxmox",
         seed: config?.seed || 42,
         vms: config?.vms || 100,
         linux_pct: config?.linux_pct || 70,
@@ -465,10 +466,11 @@ export default function Providers() {
                               <SelectItem value="proxmox">Proxmox</SelectItem>
                               <SelectItem value="vsphere">vSphere</SelectItem>
                               <SelectItem value="azure">Azure</SelectItem>
+                              <SelectItem value="azure-demo">Azure demo inventory (4 VMs + networks)</SelectItem>
                               <SelectItem value="aws">AWS</SelectItem>
                             </SelectContent>
                           </Select>
-                          <FormDescription>Provider shape to emulate</FormDescription>
+                          <FormDescription>Provider shape to emulate. Azure demo inventory uses fixed fictional runtime data with no Azure calls or credentials. It does not write to NetBox or providers; customer candidates are hints only. Seed and VM count apply to the other variants.</FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}

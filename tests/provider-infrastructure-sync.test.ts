@@ -14,6 +14,9 @@ import {
   ProviderInfrastructureSyncNotSupportedError,
   syncProviderInfrastructureInventory,
 } from "../server/services/provider-infrastructure-sync";
+import { FakeCollector } from "../server/services/providers/fake";
+import { demoProviderDefinitions } from "../server/scripts/seed-demo-providers";
+import { generateFakeAzureDiscovery } from "../server/services/providers/fake-azure-demo";
 import type { AzureDiscoveryResult } from "../server/services/providers/azure";
 import type { NormalizedVm } from "../server/services/providers/types";
 import type {
@@ -945,4 +948,64 @@ describe("fake provider normalized infrastructure sync", () => {
 
     assert.equal(store.objects.length, 0);
   });
+});
+
+
+test("fake Azure scenario generates stable fictional inventory through Azure normalization without collectors or governance writes", async () => {
+  assert.deepEqual(generateFakeAzureDiscovery(), generateFakeAzureDiscovery());
+  const provider = makeProvider({ config: { variant: "azure", scenario: "azure" } });
+  const demoStore = new ProviderInfrastructureMemoryStore();
+  demoStore.providers.set(provider.id, provider);
+  const options = { collectorFactory: () => { throw new Error("Demo must never construct a live collector"); } };
+  const first = await syncProviderInfrastructureInventory(provider, ORG_A, provider.config as Record<string, unknown>, demoStore, options);
+  assert.equal(first.objectsUpserted, 14);
+  assert.equal(first.relationshipsUpserted, 0);
+  assert.deepEqual(first.errors, []);
+  const identities = demoStore.objects.map(o => [o.id, o.externalId]);
+  await syncProviderInfrastructureInventory(provider, ORG_A, provider.config as Record<string, unknown>, demoStore, options);
+  assert.deepEqual(demoStore.objects.map(o => [o.id, o.externalId]), identities);
+  assert.equal(demoStore.objects.length, 14);
+  const vms = demoStore.objects.filter(o => o.objectType === "vm");
+  assert.deepEqual(vms.map(o => o.name), ["acme-web-01", "acme-db-01", "contoso-app-01", "orphan-runtime-01"]);
+  assert.ok(demoStore.objects.every(o => o.providerType === "fake" && o.orgId === ORG_A && o.sourceId === provider.id));
+  assert.ok(vms.every(o => o.externalId.startsWith("/subscriptions/00000000-0000-0000-0000-00000000000")));
+  assert.ok(vms.every(o => (o.metadata as any).primaryIp4 && (o.metadata as any).demoProfile === "azure"));
+  assert.ok(demoStore.candidates.some(c => c.candidateValue === "ACME"));
+  assert.ok(demoStore.candidates.some(c => c.candidateValue === "contoso"));
+  assert.deepEqual(demoStore.customerScopes, []);
+  assert.deepEqual(demoStore.customerScopeAssignments, []);
+});
+
+
+test("local demo definitions are organization-scoped and Proxmox profile stays offline", async () => {
+  const defs = demoProviderDefinitions(ORG_A);
+  assert.deepEqual(defs.map(d => d.name), ["Demo Proxmox", "Demo Azure", "Demo Generic/Fake"]);
+  assert.ok(defs.every(d => d.kind === "fake" && d.orgId === ORG_A));
+  assert.deepEqual(defs, demoProviderDefinitions(ORG_A));
+  assert.ok(defs.every((d, i) => d.id !== demoProviderDefinitions(ORG_B)[i].id));
+  const demoStore = new ProviderInfrastructureMemoryStore();
+  const definition = defs[0];
+  const provider = makeProvider({ ...definition, id: definition.id!, config: definition.config! });
+  demoStore.providers.set(provider.id, provider);
+  const options = { collectorFactory: () => { throw new Error("Proxmox demo must not construct a live collector"); } };
+  const first = await syncProviderInfrastructureInventory(provider, ORG_A, provider.config as Record<string, unknown>, demoStore, options);
+  assert.equal(first.objectsUpserted, 4);
+  assert.deepEqual(first.errors, []);
+  const ids = demoStore.objects.map(o => [o.id, o.externalId]);
+  await syncProviderInfrastructureInventory(provider, ORG_A, provider.config as Record<string, unknown>, demoStore, options);
+  assert.deepEqual(demoStore.objects.map(o => [o.id, o.externalId]), ids);
+  assert.ok(demoStore.objects.every(o => o.providerType === "fake" && o.objectType === "vm" && o.node));
+  assert.ok(demoStore.objects.every(o => /^10[0-3]$/.test(o.providerNativeId!)));
+  assert.ok(demoStore.candidates.length > 0);
+  assert.deepEqual(demoStore.customerScopes, []);
+  assert.deepEqual(demoStore.customerScopeAssignments, []);
+});
+
+
+test("Azure demo generated VM preview agrees with cached inventory fixture", async () => {
+  const collector = new FakeCollector({ variant: "azure", scenario: "azure", seed: 42, vms: 100 });
+  const vms = await collector.listVms();
+  assert.deepEqual(vms.map(vm => vm.externalId), generateFakeAzureDiscovery().flatMap(d => d.vms.map(vm => vm.id)));
+  assert.equal(vms.length, 4);
+  assert.ok(vms.every(vm => vm.platform === "linux" && vm.memory));
 });

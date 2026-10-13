@@ -1,0 +1,122 @@
+# Optional, isolated local demo. Generate private values with npm.cmd run demo:setup.
+# Based on the public netbox-community/netbox-docker service layout.
+name: rovelink-demo
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:${DEMO_ROVELINK_PORT:-5100}:5000"
+    environment:
+      NODE_ENV: production
+      DATABASE_CLIENT: pg
+      DATABASE_URL: postgres://rovelink:${DEMO_DB_PASSWORD:?Run demo:setup}@db:5432/rovelink
+      ROVELINK_LOCAL_DEV: "true"
+      SESSION_SECRET: ${DEMO_SESSION_SECRET:?Run demo:setup}
+      JWT_SECRET: ${DEMO_JWT_SECRET:?Run demo:setup}
+      ENCRYPTION_KEY: ${DEMO_ENCRYPTION_KEY:?Run demo:setup}
+      BOOTSTRAP_ADMIN_USER: admin
+      BOOTSTRAP_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:?Run demo:setup}
+      ROVELINK_PROJECTS_ROOT: /data/git-projects
+      ROVELINK_LOCAL_RUNNER_ENABLED: "false"
+    volumes:
+      - demo-git-projects:/data/git-projects
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rovelink
+      POSTGRES_USER: rovelink
+      POSTGRES_PASSWORD: ${DEMO_DB_PASSWORD:?Run demo:setup}
+    volumes:
+      - demo-rovelink-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U rovelink -d rovelink"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  netbox: &netbox
+    image: netboxcommunity/netbox:v4.7-5.1.1
+    ports:
+      - "127.0.0.1:${DEMO_NETBOX_PORT:-8100}:8080"
+    environment:
+      ALLOWED_HOSTS: localhost 127.0.0.1 netbox
+      DB_HOST: netbox-postgres
+      DB_NAME: netbox
+      DB_USER: netbox
+      DB_PASSWORD: ${DEMO_NETBOX_DB_PASSWORD:?Run demo:setup}
+      REDIS_HOST: netbox-redis
+      REDIS_CACHE_HOST: netbox-redis-cache
+      REDIS_DATABASE: 0
+      REDIS_CACHE_DATABASE: 1
+      SECRET_KEY: ${DEMO_NETBOX_SECRET_KEY:?Run demo:setup}
+      API_TOKEN_PEPPER_1: ${DEMO_NETBOX_TOKEN_PEPPER:?Run demo:setup}
+      SUPERUSER_NAME: demo-admin
+      SUPERUSER_EMAIL: demo-admin@example.invalid
+      SUPERUSER_PASSWORD: ${DEMO_NETBOX_ADMIN_PASSWORD:?Run demo:setup}
+      SKIP_SUPERUSER: "false"
+      RELEASE_CHECK_URL: ""
+    depends_on:
+      netbox-postgres:
+        condition: service_healthy
+      netbox-redis:
+        condition: service_healthy
+      netbox-redis-cache:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, /opt/netbox/health.sh]
+      start_period: 120s
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  netbox-worker:
+    <<: *netbox
+    ports: []
+    command: [/opt/netbox/venv/bin/python, /opt/netbox/netbox/manage.py, rqworker]
+    depends_on:
+      netbox:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, "ps -aux | grep -v grep | grep -q rqworker"]
+      start_period: 30s
+      interval: 15s
+      timeout: 5s
+      retries: 10
+  netbox-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD: ${DEMO_NETBOX_DB_PASSWORD:?Run demo:setup}
+    volumes:
+      - demo-netbox-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U netbox -d netbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  netbox-redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, "yes"]
+    volumes:
+      - demo-netbox-redis:/data
+    healthcheck: &redis-health
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  netbox-redis-cache:
+    image: redis:7-alpine
+    healthcheck: *redis-health
+    restart: unless-stopped
+volumes:
+  demo-rovelink-db:
+  demo-netbox-db:
+  demo-netbox-redis:
+  demo-git-projects:

@@ -11,6 +11,7 @@ import {
   getGovernanceEvaluationRun,
   governanceKeys,
   listGovernanceEvaluationObjects,
+  listGovernanceNetBoxSources,
 } from "@/lib/governance-api";
 import type { GovernanceBlueprint, GovernanceEvaluationRun, GovernanceObjectEvaluation } from "@shared/schema";
 import type { GovernanceFinding, RecommendedGovernanceAction } from "@shared/governance";
@@ -96,6 +97,7 @@ export default function GovernanceEvaluationRunDetail() {
     queryFn: () => getGovernanceBlueprint(run!.blueprintId),
     enabled: Boolean(run?.blueprintId),
   });
+  const { data: sources = [] } = useQuery({ queryKey: governanceKeys.netboxSources, queryFn: listGovernanceNetBoxSources, enabled: Boolean(run?.netboxSourceId) });
 
   const {
     data: evaluations = [],
@@ -114,7 +116,7 @@ export default function GovernanceEvaluationRunDetail() {
     return (
       <div className="space-y-4">
         <Button variant="ghost" asChild>
-          <Link href="/governance/evaluation-runs"><ArrowLeft className="h-4 w-4 mr-2" />Back</Link>
+          <Link href="/governance/evaluation-runs"><ArrowLeft className="h-4 w-4 mr-2" />Back to Evaluation History</Link>
         </Button>
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
           {(error as Error).message}
@@ -127,11 +129,12 @@ export default function GovernanceEvaluationRunDetail() {
     <div className="space-y-6">
       <div className="space-y-2">
         <Button variant="ghost" size="sm" asChild>
-          <Link href="/governance/evaluation-runs"><ArrowLeft className="h-4 w-4 mr-2" />Back to Evaluation Runs</Link>
+          <Link href="/governance/evaluation-runs"><ArrowLeft className="h-4 w-4 mr-2" />Back to Evaluation History</Link>
         </Button>
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Governance Evaluation</h1>
           <p className="text-sm text-muted-foreground">Object-level scores, readiness, findings, and recommended actions.</p>
+          {run && <Link href={`/governance/blueprints/${run.blueprintId}`} className="mt-2 inline-block text-sm text-primary hover:underline">Back to blueprint: {blueprint?.name ?? run.blueprintId}</Link>}
         </div>
       </div>
 
@@ -139,7 +142,7 @@ export default function GovernanceEvaluationRunDetail() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5" />
-            Run Metadata
+            Evaluation Metadata
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -155,7 +158,11 @@ export default function GovernanceEvaluationRunDetail() {
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Blueprint</div>
-                <div className="font-medium">{blueprint?.name ?? run.blueprintId}</div>
+                <Link href={`/governance/blueprints/${run.blueprintId}`} className="font-medium text-primary hover:underline">{blueprint?.name ?? run.blueprintId}</Link>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">CMDB source</div>
+                <div className="font-medium">{sources.find(source => source.id === run.netboxSourceId)?.name ?? run.netboxSourceId ?? "No source recorded"}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Created</div>

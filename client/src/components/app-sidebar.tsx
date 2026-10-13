@@ -53,7 +53,7 @@ const navigationSections = [
     label: "Navigation",
     items: [
       { title: "Dashboard", url: "/", icon: LayoutDashboard },
-      { title: "Runs", url: "/runs", icon: PlayCircle },
+      { title: "Automation Runs", url: "/runs", icon: PlayCircle },
       { title: "Reports", url: "/reports", exact: true, icon: BarChart3 },
       { title: "Drift Reports", url: "/reports/drift", icon: GitCompareArrows },
     ],

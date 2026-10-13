@@ -11,6 +11,7 @@ import {
   governanceKeys,
   listGovernanceBlueprints,
   listGovernanceEvaluationRuns,
+  listGovernanceNetBoxSources,
 } from "@/lib/governance-api";
 import type { GovernanceBlueprint, GovernanceEvaluationRun } from "@shared/schema";
 
@@ -36,7 +37,7 @@ function getEvaluatedCount(run: GovernanceEvaluationRun) {
 export default function GovernanceEvaluationRuns() {
   const { data: runs = [], isLoading, isError, error, refetch, isFetching } = useQuery<GovernanceEvaluationRun[]>({
     queryKey: governanceKeys.evaluationRuns,
-    queryFn: listGovernanceEvaluationRuns,
+    queryFn: () => listGovernanceEvaluationRuns(),
   });
   const { data: blueprints = [] } = useQuery<GovernanceBlueprint[]>({
     queryKey: governanceKeys.blueprints,
@@ -44,6 +45,7 @@ export default function GovernanceEvaluationRuns() {
   });
 
   const blueprintNames = useMemo(() => new Map(blueprints.map((blueprint) => [blueprint.id, blueprint.name])), [blueprints]);
+  const { data: sources = [] } = useQuery({ queryKey: governanceKeys.netboxSources, queryFn: listGovernanceNetBoxSources });
 
   return (
     <div className="space-y-6">
@@ -54,7 +56,7 @@ export default function GovernanceEvaluationRuns() {
           </Button>
           <div>
             <h1 className="text-2xl font-semibold" data-testid="text-page-title">Governance Evaluation Runs</h1>
-            <p className="text-sm text-muted-foreground">Review cached CMDB governance evaluation history.</p>
+            <p className="text-sm text-muted-foreground">Review governance evaluation history across blueprints and CMDB sources.</p>
           </div>
         </div>
         <Button variant="outline" onClick={() => refetch()} disabled={isFetching}>
@@ -67,7 +69,7 @@ export default function GovernanceEvaluationRuns() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <History className="h-5 w-5" />
-            Runs
+            Evaluation History
           </CardTitle>
           <CardDescription>{runs.length} governance evaluation run{runs.length === 1 ? "" : "s"}</CardDescription>
         </CardHeader>
@@ -94,6 +96,7 @@ export default function GovernanceEvaluationRuns() {
                   <TableRow>
                     <TableHead>Created</TableHead>
                     <TableHead>Blueprint</TableHead>
+                    <TableHead>CMDB source</TableHead>
                     <TableHead>Object Type</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Evaluated</TableHead>
@@ -104,13 +107,14 @@ export default function GovernanceEvaluationRuns() {
                   {runs.map((run) => (
                     <TableRow key={run.id}>
                       <TableCell>{formatDate(run.createdAt)}</TableCell>
-                      <TableCell className="font-medium">{blueprintNames.get(run.blueprintId) ?? run.blueprintId}</TableCell>
+                      <TableCell className="font-medium"><Link href={`/governance/blueprints/${run.blueprintId}`} className="text-primary hover:underline">{blueprintNames.get(run.blueprintId) ?? run.blueprintId}</Link></TableCell>
+                      <TableCell>{sources.find(source => source.id === run.netboxSourceId)?.name ?? run.netboxSourceId ?? "No source recorded"}</TableCell>
                       <TableCell><Badge variant="outline">netbox_vm</Badge></TableCell>
                       <TableCell><Badge variant={statusVariant(run.status)}>{run.status}</Badge></TableCell>
                       <TableCell>{getEvaluatedCount(run)}</TableCell>
                       <TableCell className="text-right">
                         <Button variant="outline" size="sm" asChild>
-                          <Link href={`/governance/evaluation-runs/${run.id}`}>View</Link>
+                          <Link href={`/governance/evaluation-runs/${run.id}`}>View results</Link>
                         </Button>
                       </TableCell>
                     </TableRow>

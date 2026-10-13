@@ -273,7 +273,7 @@ export interface IStorage {
   getActiveGovernanceBlueprintForObjectType(objectType: string, orgId: string): Promise<{ blueprint: GovernanceBlueprint; version: GovernanceBlueprintVersion } | undefined>;
   createGovernanceEvaluationRun(run: InsertGovernanceEvaluationRun): Promise<GovernanceEvaluationRun>;
   storeGovernanceObjectEvaluation(evaluation: InsertGovernanceObjectEvaluation): Promise<GovernanceObjectEvaluation>;
-  listGovernanceEvaluationRuns(orgId: string, limit?: number): Promise<GovernanceEvaluationRun[]>;
+  listGovernanceEvaluationRuns(orgId: string, limit?: number, blueprintId?: string): Promise<GovernanceEvaluationRun[]>;
   getGovernanceEvaluationRun(id: string, orgId: string): Promise<GovernanceEvaluationRun | undefined>;
   listGovernanceObjectEvaluations(runId: string, orgId: string): Promise<GovernanceObjectEvaluation[]>;
   getLatestGovernanceEvaluationForObject(
@@ -1386,11 +1386,14 @@ export class DatabaseStorage implements IStorage {
     return evaluation;
   }
 
-  async listGovernanceEvaluationRuns(orgId: string, limit: number = 50): Promise<GovernanceEvaluationRun[]> {
+  async listGovernanceEvaluationRuns(orgId: string, limit: number = 50, blueprintId?: string): Promise<GovernanceEvaluationRun[]> {
     return await db
       .select()
       .from(governanceEvaluationRuns)
-      .where(eq(governanceEvaluationRuns.orgId, orgId))
+      .where(and(
+        eq(governanceEvaluationRuns.orgId, orgId),
+        blueprintId ? eq(governanceEvaluationRuns.blueprintId, blueprintId) : undefined,
+      ))
       .orderBy(desc(governanceEvaluationRuns.createdAt))
       .limit(limit);
   }

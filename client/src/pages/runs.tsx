@@ -166,7 +166,7 @@ export default function Runs() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Runs</h1>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Automation Runs</h1>
           <p className="text-sm text-muted-foreground">Monitor playbooks, provider syncs, and pipeline syncs in one place</p>
         </div>
         <div className="flex items-center gap-2">

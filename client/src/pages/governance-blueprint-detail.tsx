@@ -23,6 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { GovernanceEvaluationLauncher } from "@/components/governance-evaluation-launcher";
+import { GovernanceBlueprintRuns } from "@/components/governance-blueprint-runs";
 import {
   activateGovernanceBlueprintVersion,
   createGovernanceBlueprintVersion,
@@ -705,6 +706,7 @@ export default function GovernanceBlueprintDetail() {
           onEdit={() => setPolicyDialogOpen(true)}
         />
       )}
+      {blueprint && <GovernanceBlueprintRuns blueprintId={id} />}
       <GovernanceEvaluationLauncher open={launcherOpen} onOpenChange={setLauncherOpen} fixedBlueprintId={id} fixedBlueprint={blueprint} />
       <CustomerScopePolicyDialog
         open={policyDialogOpen}

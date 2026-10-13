@@ -674,8 +674,17 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage, deps:
     if (!requireMinimumRole(req, res, "viewer")) return;
 
     try {
-      const limit = req.query.limit ? Number(req.query.limit) : 50;
-      const runs = await storage.listGovernanceEvaluationRuns(resolveOrgId(req), Number.isFinite(limit) ? limit : 50);
+      const orgId = resolveOrgId(req);
+      const query = z.object({
+        blueprintId: z.string().trim().min(1).optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(50),
+      }).safeParse(req.query);
+      if (!query.success) return sendClientError(res, 400, "Invalid evaluation history filter");
+      const { blueprintId, limit } = query.data;
+      if (blueprintId && !await storage.getGovernanceBlueprint(blueprintId, orgId)) {
+        return sendClientError(res, 404, "Governance blueprint not found");
+      }
+      const runs = await storage.listGovernanceEvaluationRuns(orgId, limit, blueprintId);
       res.json(runs);
     } catch (error) {
       sendInternalError(res, error, "governance.evaluation-runs.list", "Failed to list governance evaluation runs");

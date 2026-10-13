@@ -104,6 +104,7 @@ export const governanceKeys = {
   blueprint: (id: string) => ["/api/governance/blueprints", id] as const,
   versions: (id: string) => ["/api/governance/blueprints", id, "versions"] as const,
   evaluationRuns: ["/api/governance/evaluation-runs"] as const,
+  blueprintEvaluationRuns: (blueprintId: string) => ["/api/governance/evaluation-runs", { blueprintId }] as const,
   evaluationRun: (id: string) => ["/api/governance/evaluation-runs", id] as const,
   evaluationObjects: (id: string) => ["/api/governance/evaluation-runs", id, "objects"] as const,
   latestObjectEvaluation: (objectType: string, objectId: string) => [
@@ -155,8 +156,9 @@ export function runCachedNetboxVmEvaluation(blueprintId: string, options: { netb
   );
 }
 
-export function listGovernanceEvaluationRuns() {
-  return fetchJson<GovernanceEvaluationRun[]>("/api/governance/evaluation-runs");
+export function listGovernanceEvaluationRuns(blueprintId?: string) {
+  const query = blueprintId ? `?blueprintId=${encodeURIComponent(blueprintId)}&limit=10` : "";
+  return fetchJson<GovernanceEvaluationRun[]>(`/api/governance/evaluation-runs${query}`);
 }
 
 export function getGovernanceEvaluationRun(id: string) {

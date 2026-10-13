@@ -241,8 +241,8 @@ function createFakeGovernanceStorage() {
       return evaluation;
     },
 
-    async listGovernanceEvaluationRuns(orgId: string, limit = 50) {
-      return runs.filter((run) => run.orgId === orgId).slice(0, limit);
+    async listGovernanceEvaluationRuns(orgId: string, limit = 50, blueprintId?: string) {
+      return runs.filter((run) => run.orgId === orgId && (!blueprintId || run.blueprintId === blueprintId)).slice(0, limit);
     },
 
     async getGovernanceEvaluationRun(id: string, orgId: string) {
@@ -540,6 +540,43 @@ describe("governance routes", () => {
   beforeEach(() => {
     storage = createFakeGovernanceStorage();
     req = makeRequest(storage);
+  });
+
+  it("lists blueprint evaluation history with filtering before the limit, without changing all-runs history", async () => {
+    const selected = await createDefaultBlueprint(req);
+    const otherResponse = await req.post("/api/governance/defaults/netbox-vm").set("x-role", "admin").send({ netboxSourceId: `${ORG_A}-secondary-source` }).expect(201);
+    const other = otherResponse.body;
+    const foreign = await createDefaultBlueprint(req, ORG_B);
+    for (const entry of [other, selected, foreign]) {
+      await storage.createGovernanceEvaluationRun({ orgId: entry.blueprint.orgId, blueprintId: entry.blueprint.id, blueprintVersionId: entry.activeVersion.id, status: "ok", counts: { evaluated: 1, blocked: 0 } });
+    }
+    const filtered = await req.get("/api/governance/evaluation-runs").query({ blueprintId: selected.blueprint.id, limit: 1 }).expect(200);
+    assert.equal(filtered.body.length, 1);
+    assert.equal(filtered.body[0].blueprintId, selected.blueprint.id);
+    assert.equal(filtered.body[0].orgId, ORG_A);
+    const all = await req.get("/api/governance/evaluation-runs").expect(200);
+    assert.equal(all.body.length, 2);
+    assert.ok(all.body.every((run: any) => run.orgId === ORG_A));
+  });
+
+  it("rejects missing and cross-org blueprint history with the same not-found response", async () => {
+    const foreign = await createDefaultBlueprint(req, ORG_B);
+    for (const blueprintId of [foreign.blueprint.id, "missing-blueprint"]) {
+      const response = await req.get("/api/governance/evaluation-runs").query({ blueprintId }).expect(404);
+      assert.equal(response.body.message, "Governance blueprint not found");
+    }
+  });
+
+  it("returns empty evaluation history for an owned blueprint without runs", async () => {
+    const { blueprint } = await createDefaultBlueprint(req);
+    const response = await req.get("/api/governance/evaluation-runs").query({ blueprintId: blueprint.id }).expect(200);
+    assert.deepEqual(response.body, []);
+  });
+
+  it("rejects malformed blueprint and limit filters", async () => {
+    for (const query of ["blueprintId=", "blueprintId[]=one&blueprintId[]=two", "limit=0", "limit=201", "limit=1.5", "limit=invalid"]) {
+      await req.get(`/api/governance/evaluation-runs?${query}`).expect(400);
+    }
   });
 
   it("admin can create the default NetBox VM blueprint for a source", async () => {

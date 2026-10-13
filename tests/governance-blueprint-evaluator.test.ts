@@ -75,6 +75,8 @@ function withCustomerScopePolicy(
 ): GovernanceBlueprintRules {
   return {
     ...baseRules,
+    // Isolate policy-mode scoring from the independent required assignment rule.
+    dataManagement: baseRules.dataManagement.map(rule => rule.fieldKey === "customerAssignment" ? { ...rule, required: false } : rule),
     customerScope: {
       ...DEFAULT_CUSTOMER_SCOPE_GOVERNANCE_POLICY,
       mode: "score_only",
@@ -102,8 +104,8 @@ describe("governanceBlueprintRulesSchema", () => {
         dataManagement: [
           ...baseRules.dataManagement,
           {
-            fieldKey: "tenant",
-            label: "Duplicate tenant",
+            fieldKey: "customerAssignment",
+            label: "Duplicate customer assignment",
             required: true,
             managementMode: "owned_by_cmdb",
             weight: 1,
@@ -138,7 +140,7 @@ describe("governanceBlueprintRulesSchema", () => {
       () => governanceBlueprintRulesSchema.parse({
         ...baseRules,
         dataManagement: baseRules.dataManagement.map((rule) => (
-          rule.fieldKey === "tenant" ? { ...rule, weight: 0.09 } : rule
+          rule.fieldKey === "customerAssignment" ? { ...rule, weight: 0.09 } : rule
         )),
       }),
       /greater than or equal to 0.1/i
@@ -250,7 +252,7 @@ describe("evaluateGovernanceObject", () => {
   it("does not create a CustomerScope finding for a dedicated authoritative assignment", () => {
     const result = evaluateGovernanceObject(
       withCustomerAssignments([dedicatedCustomerScopeAssignment()]),
-      baseRules,
+      withCustomerScopePolicy({ mode: "visibility_only" }),
     );
 
     assert.ok(!result.findings.some((finding) => finding.code.startsWith("CUSTOMER_")));
@@ -259,7 +261,7 @@ describe("evaluateGovernanceObject", () => {
   });
 
   it("creates CUSTOMER_SCOPE_MISSING when no CustomerScope assignment exists", () => {
-    const result = evaluateGovernanceObject(withCustomerAssignments([]), baseRules);
+    const result = evaluateGovernanceObject(withCustomerAssignments([]), withCustomerScopePolicy({ mode: "visibility_only" }));
 
     assert.ok(result.findings.some((finding) => (
       finding.code === "CUSTOMER_SCOPE_MISSING" &&
@@ -752,7 +754,7 @@ describe("evaluateGovernanceObject", () => {
         customerScopeId: null,
         customerScope: null,
       })]),
-      baseRules,
+      withCustomerScopePolicy({ mode: "visibility_only" }),
     );
     const internal = evaluateGovernanceObject(
       withCustomerAssignments([dedicatedCustomerScopeAssignment({
@@ -760,7 +762,7 @@ describe("evaluateGovernanceObject", () => {
         customerScopeId: null,
         customerScope: null,
       })]),
-      baseRules,
+      withCustomerScopePolicy({ mode: "visibility_only" }),
     );
 
     assert.ok(unassigned.findings.some((finding) => (
@@ -791,7 +793,7 @@ describe("evaluateGovernanceObject", () => {
           },
         }),
       ]),
-      baseRules,
+      withCustomerScopePolicy({ mode: "visibility_only" }),
     );
 
     assert.ok(!result.findings.some((finding) => finding.code.startsWith("CUSTOMER_")));
@@ -802,7 +804,7 @@ describe("evaluateGovernanceObject", () => {
   it("creates CUSTOMER_ASSIGNMENT_LOW_CONFIDENCE for non-authoritative assignment confidence", () => {
     const result = evaluateGovernanceObject(
       withCustomerAssignments([dedicatedCustomerScopeAssignment({ confidence: "mapped" })]),
-      baseRules,
+      withCustomerScopePolicy({ mode: "visibility_only" }),
     );
 
     assert.ok(result.findings.some((finding) => (
@@ -821,7 +823,7 @@ describe("evaluateGovernanceObject", () => {
         customerScopeId: null,
         customerScope: null,
       })]),
-      baseRules,
+      withCustomerScopePolicy({ mode: "visibility_only" }),
     );
 
     assert.ok(result.findings.some((finding) => (
@@ -836,7 +838,7 @@ describe("evaluateGovernanceObject", () => {
   it("creates CUSTOMER_SCOPE_NOT_FOUND when assignment references a missing scope", () => {
     const result = evaluateGovernanceObject(
       withCustomerAssignments([dedicatedCustomerScopeAssignment({ customerScope: null })]),
-      baseRules,
+      withCustomerScopePolicy({ mode: "visibility_only" }),
     );
 
     assert.ok(result.findings.some((finding) => (
@@ -1012,5 +1014,43 @@ describe("evaluateGovernanceObject", () => {
     const second = evaluateGovernanceObject(object, baseRules);
 
     assert.deepEqual(first, second);
+  });
+});
+
+
+describe("canonical NetBox customer assignment requirements", () => {
+  const legacyRules = governanceBlueprintRulesSchema.parse({ ...baseRules, customerScope: undefined,
+    dataManagement: [{ fieldKey: "tenant", label: "Tenant", required: true, managementMode: "owned_by_cmdb", weight: 1 }],
+  });
+  it("resolved NetBox Tenant CustomerScope satisfies legacy and standard requirements without raw tenant", () => {
+    const object = withCustomerAssignments([dedicatedCustomerScopeAssignment()]);
+    delete object.fields.tenant;
+    for (const rules of [legacyRules, baseRules]) {
+      const result = evaluateGovernanceObject(object, rules);
+      assert.ok(!result.findings.some(f => f.code === "required_data_missing" && ["tenant", "customerAssignment"].includes(f.fieldKey ?? "")));
+      assert.equal(result.scores.governance, 100);
+      assert.equal(result.automationReadiness.ready, true);
+    }
+  });
+  it("resolved shared and internal CustomerScope references satisfy the presence rule", () => {
+    for (const relationship of ["shared", "internal"]) {
+      const result = evaluateGovernanceObject(withCustomerAssignments([dedicatedCustomerScopeAssignment({ relationship })]), legacyRules);
+      assert.ok(!result.findings.some(f => f.code === "required_data_missing"));
+    }
+  });
+  it("raw tenant cannot mask missing assignments when resolved context exists", () => {
+    const result = evaluateGovernanceObject(withCustomerAssignments([]), legacyRules);
+    const finding = result.findings.find(f => f.code === "required_data_missing");
+    assert.equal(finding?.fieldKey, "customerAssignment");
+    assert.equal(finding?.message, "Customer assignment is required but missing.");
+  });
+  it("dangling or unassigned scope references do not satisfy the requirement", () => {
+    for (const assignment of [dedicatedCustomerScopeAssignment({ customerScope: null }), dedicatedCustomerScopeAssignment({ relationship: "unassigned" })]) {
+      const result = evaluateGovernanceObject(withCustomerAssignments([assignment]), legacyRules);
+      assert.ok(result.findings.some(f => f.code === "required_data_missing" && f.fieldKey === "customerAssignment"));
+    }
+  });
+  it("legacy normalized inputs without assignment context remain compatible", () => {
+    assert.ok(!evaluateGovernanceObject(baseObject, legacyRules).findings.some(f => f.code === "required_data_missing"));
   });
 });

@@ -25,8 +25,8 @@ export const STANDARD_NETBOX_VM_GOVERNANCE_BLUEPRINT = {
     objectType: "netbox_vm",
     dataManagement: [
       {
-        fieldKey: "tenant",
-        label: "Tenant",
+        fieldKey: "customerAssignment",
+        label: "Customer assignment",
         required: true,
         managementMode: "owned_by_cmdb",
         weight: 1,
@@ -145,6 +145,9 @@ export function evaluateGovernanceObject(
   const highRelevance = relevanceTotal >= rules.reporting.highPriorityRelevanceScore;
 
   const baseDataManagementScore = scoreWeightedRules(rules.dataManagement, (rule) => {
+    const assignmentRule = rule.fieldKey === "tenant" || rule.fieldKey === "customerAssignment";
+    const fieldKey = assignmentRule ? "customerAssignment" : rule.fieldKey;
+    const label = assignmentRule ? "Customer assignment" : rule.label;
     const value = getFieldValue(object, rule.fieldKey);
     const present = hasGovernanceValue(value);
 
@@ -153,8 +156,8 @@ export function evaluateGovernanceObject(
         layer: "data_management",
         severity: highRelevance ? "blocker" : "warning",
         code: "required_data_missing",
-        fieldKey: rule.fieldKey,
-        message: `${rule.label} is required but missing.`,
+        fieldKey,
+        message: `${label} is required but missing.`,
         recommendedActions: highRelevance ? ["enrich", "block_automation"] : ["enrich", "report"],
       });
       return 0;
@@ -165,8 +168,8 @@ export function evaluateGovernanceObject(
         layer: "data_management",
         severity: "info",
         code: "optional_data_missing",
-        fieldKey: rule.fieldKey,
-        message: `${rule.label} is optional but missing.`,
+        fieldKey,
+        message: `${label} is optional but missing.`,
         recommendedActions: ["report"],
       });
       return 1;
@@ -177,8 +180,8 @@ export function evaluateGovernanceObject(
         layer: "data_management",
         severity: "warning",
         code: "management_mode_unknown",
-        fieldKey: rule.fieldKey,
-        message: `${rule.label} has an unknown data management mode.`,
+        fieldKey,
+        message: `${label} has an unknown data management mode.`,
         recommendedActions: ["validate"],
       });
       return 0.5;
@@ -538,6 +541,23 @@ function getOwnerValue(
 }
 
 function getFieldValue(object: NormalizedGovernanceObject, fieldKey: string): unknown {
+  if (fieldKey === "tenant" || fieldKey === "customerAssignment") {
+    // Cached NetBox evaluations always include resolved assignment context.
+    // Only legacy normalized inputs without that context may use raw tenant data.
+    if (!Object.prototype.hasOwnProperty.call(object.fields, "customerAssignments")) {
+      return getPath(object.fields, "tenant");
+    }
+    const assignments = object.fields.customerAssignments;
+    if (!Array.isArray(assignments)) return undefined;
+    const valid = assignments.find((entry) => {
+      if (!isRecord(entry) || !["dedicated", "shared", "internal"].includes(String(entry.relationship))) return false;
+      if (!isRecord(entry.customerScope)) return false;
+      const scopeId = stringValue(entry.customerScope.id);
+      const assignmentScopeId = stringValue(entry.customerScopeId);
+      return Boolean(scopeId && assignmentScopeId && scopeId === assignmentScopeId);
+    });
+    return valid;
+  }
   return getPath(object.fields, fieldKey);
 }
 

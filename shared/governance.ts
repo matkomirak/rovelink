@@ -160,3 +160,11 @@ export type OwnershipRule = z.infer<typeof ownershipRuleSchema>;
 export type GovernanceBlueprintRules = z.infer<typeof governanceBlueprintRulesSchema>;
 export type GovernanceFinding = z.infer<typeof governanceFindingSchema>;
 export type GovernanceEvaluationResult = z.infer<typeof governanceEvaluationResultSchema>;
+
+
+/** Display provenance for a resolved NetBox CMDB assignment, not provider hints. */
+export function netboxCustomerAssignmentSourceLabel(derivedFrom: string, strategy?: string): string {
+  if (derivedFrom === "provider") return strategy === "tenant" ? "NetBox Tenant" : "NetBox CMDB";
+  if (derivedFrom === "manual") return "Manual assignment";
+  return derivedFrom;
+}

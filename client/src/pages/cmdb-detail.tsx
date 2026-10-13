@@ -1,3 +1,4 @@
+import { netboxCustomerAssignmentSourceLabel } from "@shared/governance";
 import { useParams, Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -420,7 +421,7 @@ function CmdbObjectDetailSheet({
               <AttrRow label="NetBox ID" value={<span className="font-mono">{object.id}</span>} />
               <AttrRow label="Status" value={<Badge variant={statusVariant(statusValue(object.status))}>{statusLabel(object.status) ?? "unknown"}</Badge>} />
               <AttrRow label="Platform" value={relationName(object.platform)} />
-              <AttrRow label="Tenant / Customer" value={relationName(object.tenant)} />
+              <AttrRow label="NetBox Tenant (source)" value={relationName(object.tenant)} />
               <AttrRow label="Role" value={relationName(object.role)} />
               <AttrRow label="Cluster" value={relationName(object.cluster)} />
               <AttrRow label="Site" value={relationName(object.site)} />
@@ -428,6 +429,7 @@ function CmdbObjectDetailSheet({
             </Section>
 
             <Section icon={Users} title="Customer Assignment">
+              <p className="py-2 text-xs text-muted-foreground">CustomerScope is the business/customer boundary. NetBox Tenant supplies tenant-based customer assignments.</p>
               {!localObjectId ? (
                 <div className="py-2 text-xs text-muted-foreground">
                   Customer assignments are available after this VM is imported into the local cache.
@@ -463,14 +465,14 @@ function CmdbObjectDetailSheet({
                       {assignment.customerScope ? (
                         <>
                           <AttrRow label="CustomerScope" value={assignment.customerScope.displayName ?? assignment.customerScope.name} />
-                          <AttrRow label="External ID" value={<span className="font-mono">{assignment.customerScope.externalId}</span>} />
-                          <AttrRow label="Strategy" value={<Badge variant="outline">{assignment.customerScope.strategy}</Badge>} />
+                          <AttrRow label={assignment.customerScope.strategy === "tenant" ? "NetBox Tenant ID" : "External ID"} value={<span className="font-mono">{assignment.customerScope.externalId}</span>} />
+                          <AttrRow label="Strategy" value={<Badge variant="outline">{assignment.customerScope.strategy === "tenant" ? "NetBox Tenant" : assignment.customerScope.strategy}</Badge>} />
                           <AttrRow label="Isolation" value={assignment.customerScope.isolation ? <Badge variant="outline">{assignment.customerScope.isolation}</Badge> : undefined} />
                         </>
                       ) : (
                         <AttrRow label="CustomerScope" value={<span className="text-destructive">No CustomerScope assigned</span>} />
                       )}
-                      <AttrRow label="Derived from" value={<Badge variant="outline">{assignment.derivedFrom}</Badge>} />
+                      <AttrRow label="Derived from" value={<Badge variant="outline">{netboxCustomerAssignmentSourceLabel(assignment.derivedFrom, assignment.customerScope?.strategy)}</Badge>} />
                       <AttrRow label="Confidence" value={<Badge variant="outline">{assignment.confidence}</Badge>} />
                       <AttrRow label="Last synced" value={formatDate(assignment.lastSyncedAt)} />
                     </div>
@@ -1002,7 +1004,7 @@ export default function CmdbDetail() {
                     <th className="text-left px-4 py-3 font-medium">Status</th>
                     <th className="text-left px-4 py-3 font-medium">Platform</th>
                     <th className="text-left px-4 py-3 font-medium">Primary IP</th>
-                    <th className="text-left px-4 py-3 font-medium">Tenant / Customer</th>
+                    <th className="text-left px-4 py-3 font-medium">NetBox Tenant (source)</th>
                     <th className="text-left px-4 py-3 font-medium">Role</th>
                     <th className="text-left px-4 py-3 font-medium">Cluster / Site</th>
                     <th className="text-left px-4 py-3 font-medium">Last synced/imported</th>

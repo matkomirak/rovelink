@@ -1,3 +1,4 @@
+import { netboxCustomerAssignmentSourceLabel } from "../shared/governance";
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import express from "express";
@@ -1148,4 +1149,11 @@ test("NetBox VM browsing rejects HTML instead of treating it as empty inventory"
   const steps: string[] = [];
   await assert.rejects(original.listAllVms.call(adapter, (step) => steps.push(step)));
   assert.match(steps.join("\n"), /expected paginated JSON/);
+});
+
+
+test("NetBox assignment provenance labels identify the CMDB tenant rather than provider hints", () => {
+  assert.equal(netboxCustomerAssignmentSourceLabel("provider", "tenant"), "NetBox Tenant");
+  assert.equal(netboxCustomerAssignmentSourceLabel("provider"), "NetBox CMDB");
+  assert.equal(netboxCustomerAssignmentSourceLabel("manual", "tenant"), "Manual assignment");
 });

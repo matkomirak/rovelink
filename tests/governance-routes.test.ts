@@ -737,7 +737,6 @@ describe("governance routes", () => {
       ip: "192.0.2.151",
       operatingSystem: "linux",
       customFields: {
-        tenant: "alpha",
         role: "app",
         automatable: true,
         provider_state: "present",
@@ -766,6 +765,8 @@ describe("governance routes", () => {
     assert.equal(storage.customerScopeAssignmentReadCount, 1);
     assert.equal(storage.customerScopeReadCount, 1);
     assert.equal(storage.objectEvaluations.length, 2);
+    assert.ok(storage.objectEvaluations.every(e => e.governanceScore === 100 && e.automationReady));
+    assert.ok(storage.objectEvaluations.every(e => !e.findings.some((f: any) => f.code === "required_data_missing" && ["tenant", "customerAssignment"].includes(f.fieldKey))));
     assert.ok(storage.objectEvaluations.every((evaluation) => (
       !evaluation.findings.some((finding: any) => String(finding.code).startsWith("CUSTOMER_"))
     )));
@@ -798,10 +799,11 @@ describe("governance routes", () => {
       .set("x-org-id", ORG_A)
       .expect(200);
 
+    assert.ok(storage.objectEvaluations[0].findings.some((finding: any) => finding.fieldKey === "customerAssignment" && finding.message === "Customer assignment is required but missing."));
     assert.equal(response.body.evaluatedCount, 1);
     assert.equal(storage.objectEvaluations[0].objectId, "vm-alpha-no-customer-assignment");
-    assert.equal(storage.objectEvaluations[0].governanceScore, 100);
-    assert.equal(storage.objectEvaluations[0].automationReady, true);
+    assert.equal(storage.objectEvaluations[0].governanceScore, 92);
+    assert.equal(storage.objectEvaluations[0].automationReady, false);
     assert.ok(storage.objectEvaluations[0].findings.some((finding: any) => (
       finding.code === "CUSTOMER_SCOPE_MISSING"
     )));

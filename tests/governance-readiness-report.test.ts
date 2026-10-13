@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { summarizeGovernanceReadiness, type ReadinessRun, type ReadinessObject } from "../server/services/governance-readiness-report";
+import { availableTopIssues, displayGovernanceScore, readinessRatio } from "../client/src/lib/governance-report-presentation";
 
 const run = (id: string, patch: Partial<ReadinessRun> = {}): ReadinessRun => ({
   id, orgId: "a", blueprintId: "blueprint", blueprintName: "Blueprint", sourceId: "source", sourceName: "CMDB",
@@ -46,4 +47,26 @@ test("empty or failed-only report has zero counts and no fabricated average", ()
   for (const runs of [[], [run("failed", { status: "failed" })]]) {
     assert.deepEqual(summarizeGovernanceReadiness("a", { runs, objects: [] }), { rows: [], summary: { evaluated: 0, ready: 0, blocked: 0, averageScore: null } });
   }
+});
+
+test("dashboard readiness ratios handle mixed, all-ready, all-attention and empty data", () => {
+  assert.deepEqual(readinessRatio(1, 3), { total: 4, readyPercent: 25, attentionPercent: 75 });
+  assert.deepEqual(readinessRatio(4, 0), { total: 4, readyPercent: 100, attentionPercent: 0 });
+  assert.deepEqual(readinessRatio(0, 4), { total: 4, readyPercent: 0, attentionPercent: 100 });
+  assert.deepEqual(readinessRatio(0, 0), { total: 0, readyPercent: 0, attentionPercent: 0 });
+  assert.deepEqual(readinessRatio(NaN, -1), { total: 0, readyPercent: 0, attentionPercent: 0 });
+});
+
+test("dashboard findings aggregate available group summaries without double-counting blockers", () => {
+  const rows = summarizeGovernanceReadiness("a", { runs: [run("one"), run("two", { sourceId: "second" })], objects: [object("one", { findings: [{ code: "required_data_missing", severity: "blocker" }], automationReady: false }), object("two", { findings: [{ code: "required_data_missing", severity: "warning" }] })] }).rows;
+  assert.deepEqual(availableTopIssues(rows), [{ code: "required_data_missing", count: 2, includesBlockers: true }]);
+  assert.deepEqual(availableTopIssues([]), []);
+});
+
+test("dashboard score formatting preserves zero and handles missing scores", () => {
+  assert.equal(displayGovernanceScore(0), "0/100");
+  assert.equal(displayGovernanceScore(72), "72/100");
+  assert.equal(displayGovernanceScore(null), "—");
+  assert.equal(displayGovernanceScore(undefined), "—");
+  assert.equal(displayGovernanceScore(NaN), "—");
 });

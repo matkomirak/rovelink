@@ -7,6 +7,20 @@ Rovelink v0.1.0-alpha is not production-ready.
 For the recommended first public walkthrough, start with [Demo scenarios](demo-scenarios.md).
 The steps below describe the separate development/governance demo.
 
+## Recommended NetBox modeling for MSPs
+
+Use **one NetBox Tenant per customer**, and assign customer objects to that
+Tenant. Rovelink imports each VM's NetBox Tenant as a **CustomerScope** and
+resolves its customer assignment. Provider hints are non-authoritative and
+cannot replace CMDB customer modeling. A Rovelink organization or Azure tenant
+is not the same thing as a customer.
+
+See [Recommended NetBox customer model](netbox-customer-model.md) for the
+Tenant -> CustomerScope -> Business Customer concept map and follow-up demo.
+The empty-NetBox first demo intentionally starts before customer/reference
+modeling; add customer assignments manually in NetBox when exploring that
+next step.
+
 ## 1. Start Locally
 
 Prerequisites: Git, Node.js 20.19+, npm, and a reachable development Postgres

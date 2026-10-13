@@ -1,5 +1,19 @@
 # Rovelink demo scenarios
 
+## Recommended NetBox modeling for MSPs
+
+Use **one NetBox Tenant per customer**, and assign customer objects to that
+Tenant. Rovelink imports each VM's NetBox Tenant as a **CustomerScope** and
+resolves its customer assignment. Provider hints are non-authoritative and
+cannot replace CMDB customer modeling. A Rovelink organization or Azure tenant
+is not the same thing as a customer.
+
+See [Recommended NetBox customer model](netbox-customer-model.md) for the
+Tenant -> CustomerScope -> Business Customer concept map and follow-up demo.
+The empty-NetBox first demo intentionally starts before customer/reference
+modeling; add customer assignments manually in NetBox when exploring that
+next step.
+
 ## Overview
 
 Rovelink is governance-first automation: **govern first, automate second**.

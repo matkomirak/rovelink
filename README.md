@@ -262,3 +262,14 @@ See [Demo scenarios](docs/demo-scenarios.md) for commands, private demo credenti
 NetBox token creation, the three-provider walkthrough, expected results, and
 troubleshooting. It also covers existing host NetBox through
 `host.docker.internal` and optional real-provider exploration.
+
+## Recommended NetBox modeling for MSPs
+
+Use **one NetBox Tenant per customer**, and assign customer objects to that
+Tenant. Rovelink imports each VM's NetBox Tenant as a **CustomerScope** and
+resolves its customer assignment. Provider hints are non-authoritative and
+cannot replace CMDB customer modeling. A Rovelink organization or Azure tenant
+is not the same thing as a customer.
+
+See [Recommended NetBox customer model](docs/netbox-customer-model.md) for the terminology table,
+ACME GmbH example, object-type support, and refresh/evaluation workflow.

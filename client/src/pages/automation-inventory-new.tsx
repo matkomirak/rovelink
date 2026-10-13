@@ -170,7 +170,7 @@ db-01 ansible_host=10.0.2.10`,
                 <Database className="h-8 w-8 mx-auto mb-2" />
                 <h3 className="font-semibold">Linked (CMDB)</h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Source from NetBox, i-doit, or ServiceNow
+                    Source from NetBox (alpha support)
                 </p>
               </button>
 

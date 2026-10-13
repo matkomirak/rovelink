@@ -32,7 +32,7 @@ export function AutomationReadinessDashboard() {
     </CardHeader>
     <CardContent className="space-y-6">
       <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
-        <p>Missing cached host addresses or a latest stored governance result that is not ready need attention. Remaining targets are Unknown: current execution GATE authorization is not tracked by this report. Ready stays zero until full execution readiness can be established.</p>
+        <p>Rovelink does not mark targets Ready unless readiness can be proven. Unknown means required governance, inventory, or execution signals cannot yet be verified. This alpha report does not verify current GATE authorization, connection users, or credentials, so Ready = 0 is expected. Missing cached addresses or a stored governance result marked not ready need attention.</p>
         <p className="mt-2">Connection user and credential availability are selected at run preparation and are not tracked here. File/script host details are not assessed. Counts cover inventory targets, not source VMs excluded during inventory sync; the same target in two inventories counts twice. Stored governance results may be older than the current CMDB state. Execution always checks GATE again.</p>
       </div>
       {isError ? <p role="alert" className="text-sm text-destructive">Could not load automation readiness. Use Refresh report to retry.</p>

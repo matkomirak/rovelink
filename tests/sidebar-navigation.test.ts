@@ -13,7 +13,7 @@ test("sidebar groups reporting, drift and automation separately", () => {
     ["Drift", ["Drift Reports"]],
     ["Inputs", ["Providers", "CMDBs", "Sync Flows"]],
     ["Governance", ["Blueprints", "Evaluation Runs"]],
-    ["Automation", ["Automation Inventories", "Templates", "Credentials", "Projects", "Automation Runs"]],
+    ["Automation", ["Inventories", "Templates", "Credentials", "Projects", "Automation Runs"]],
     ["System", ["Notifications", "Settings"]],
   ]);
 });
@@ -32,8 +32,8 @@ test("active state distinguishes reports, drift and governance history, includin
     ["/reports/governance", "Governance Readiness"], ["/reports/automation", "Automation Readiness"],
     ["/reports/drift", "Drift Reports"], ["/reports/drift/run-id", "Drift Reports"],
     ["/runs", "Automation Runs"], ["/runs/run-id", "Automation Runs"],
-    ["/automation-inventories", "Automation Inventories"], ["/inventories/new", "Automation Inventories"],
-    ["/inventories/id/edit", "Automation Inventories"], ["/governance", "Blueprints"],
+    ["/automation-inventories", "Inventories"], ["/inventories/new", "Inventories"],
+    ["/inventories/id/edit", "Inventories"], ["/governance", "Blueprints"],
     ["/governance/blueprints/id", "Blueprints"], ["/governance/evaluation-runs", "Evaluation Runs"],
     ["/governance/evaluation-runs/id", "Evaluation Runs"], ["/providers/id", "Providers"],
     ["/cmdbs/id", "CMDBs"], ["/pipelines/id", "Sync Flows"],

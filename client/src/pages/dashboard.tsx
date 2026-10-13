@@ -72,7 +72,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold" data-testid="text-page-title">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Operational snapshot for projects, gate readiness, and recent automation activity</p>
+        <p className="text-sm text-muted-foreground">Operational snapshot for projects, recorded GATE eligibility, and recent automation activity</p>
       </div>
 
       <OnboardingProgress />
@@ -81,18 +81,18 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="md:col-span-1">
           <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
-            <CardTitle className="text-sm font-medium">Automation Readiness</CardTitle>
+            <CardTitle className="text-sm font-medium">Recorded GATE Eligibility</CardTitle>
             <ShieldCheck className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-gate-allowed">
               {gate?.allowed ?? "—"}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">assets currently allowed by GATE</p>
+            <p className="text-xs text-muted-foreground mt-1">assets allowed in the last recorded inventory check; execution checks GATE again</p>
             {totalGate > 0 && (
               <div className="mt-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-muted-foreground">{readinessPct}% ready</span>
+                  <span className="text-xs text-muted-foreground">{readinessPct}% eligible in the recorded check</span>
                 </div>
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
                   <div
@@ -118,7 +118,7 @@ export default function Dashboard() {
             >
               {gate?.blocked ?? "—"}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">assets blocked from automation</p>
+            <p className="text-xs text-muted-foreground mt-1">assets blocked in the last recorded GATE check</p>
             {gate && gate.blocked > 0 && (
               <Button
                 variant="outline"
@@ -181,7 +181,7 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
-            <CardTitle className="text-sm font-medium">Successful Runs</CardTitle>
+            <CardTitle className="text-sm font-medium">Successful Automation Runs</CardTitle>
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
@@ -192,7 +192,7 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2 flex-wrap">
-            <CardTitle className="text-sm font-medium">Failed Runs</CardTitle>
+            <CardTitle className="text-sm font-medium">Failed Automation Runs</CardTitle>
             <XCircle className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
@@ -204,13 +204,13 @@ export default function Dashboard() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent Runs</CardTitle>
+          <CardTitle>Recent Automation Runs</CardTitle>
         </CardHeader>
         <CardContent>
           {recentRuns.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <PlayCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p className="font-medium text-foreground">No job runs yet</p>
+              <p className="font-medium text-foreground">No automation runs yet</p>
               <p className="text-sm mt-1">Connect and review your sources first. Prepare inventory and templates, then inspect GATE before starting a run.</p>
             </div>
           ) : (

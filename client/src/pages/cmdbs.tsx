@@ -251,7 +251,7 @@ export default function CmdbsPage() {
         <Card>
           <CardHeader>
             <CardTitle>CMDB Accounts</CardTitle>
-            <CardDescription>Target systems for infrastructure data synchronization</CardDescription>
+            <CardDescription>Configured reference sources and explicit synchronization targets</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -296,6 +296,8 @@ export default function CmdbsPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleTest(cmdb.id)}
+                            aria-label={`Test ${cmdb.name} connection`}
+                            title="Test connection"
                             disabled={testingId === cmdb.id}
                             data-testid={`button-test-${cmdb.id}`}
                           >
@@ -400,7 +402,7 @@ export default function CmdbsPage() {
                   <FormItem className="flex items-center justify-between rounded-lg border p-4">
                     <div className="space-y-0.5">
                       <FormLabel className="text-base">Enabled</FormLabel>
-                      <FormDescription>Allow this CMDB to receive data</FormDescription>
+                        <FormDescription>Use this CMDB connection</FormDescription>
                     </div>
                     <FormControl>
                       <Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-enabled" />

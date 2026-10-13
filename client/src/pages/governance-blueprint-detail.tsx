@@ -55,7 +55,7 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 const customerScopeModeCopy: Record<CustomerScopePolicyMode, string> = {
   visibility_only: "Reports CustomerScope issues only. Does not affect score, readiness, or automation blocking.",
   score_only: "May affect governance/data-management score. Does not affect automation readiness or automation blocking.",
-  readiness: "May mark objects as not automation-ready. Does not recommend block_automation.",
+  readiness: "May mark objects as not Governance Ready. Does not recommend block_automation.",
   enforce: "Evaluation recommends block_automation. Actual blocking depends on Automation Inventory governance enforcement settings.",
 };
 

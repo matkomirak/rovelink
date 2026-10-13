@@ -418,10 +418,10 @@ export default function AutomationInventoryDetail() {
             <CardHeader className="pb-3">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5 text-green-500" />
-                <CardTitle>Allowed Automation Inventory</CardTitle>
+                <CardTitle>Automation Eligible Inventory</CardTitle>
               </div>
               <CardDescription>
-                Assets that passed the gate and are safe to automate
+                Targets included by the latest inventory check. Execution Allowed is decided again for a specific run; eligibility is not a playbook safety guarantee.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -482,7 +482,7 @@ export default function AutomationInventoryDetail() {
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5" />
                   <div className="text-sm text-muted-foreground">
-                    To allow automation, assign tenant and role in the CMDB and add the automatable tag.
+                    Model customer assignment with a NetBox Tenant, resolve required CMDB findings, and set automation approval deliberately. Final execution still requires GATE checks.
                   </div>
                 </div>
               </div>
@@ -533,12 +533,12 @@ export default function AutomationInventoryDetail() {
                     data-testid={`core-rule-${rule.key}`}
                   >
                     <ShieldCheck className="h-4 w-4 text-green-500" />
-                    <span className="text-sm">{rule.label}</span>
+                    <span className="text-sm">{rule.key === "tenant" ? "Customer assignment (NetBox Tenant)" : rule.label}</span>
                   </div>
                 ))}
               </div>
               <p className="text-xs text-muted-foreground mt-2">
-                These rules cannot be disabled. VMs must have tenant, platform, primary IP, automatable=true, and active provider state.
+                These rules cannot be disabled. VMs must have a NetBox Tenant as the customer source, platform, primary IP, automatable=true, and active provider state.
               </p>
             </div>
 

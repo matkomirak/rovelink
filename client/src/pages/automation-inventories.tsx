@@ -132,7 +132,7 @@ export default function AutomationInventories() {
             Automation Inventories
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Prepare governed targets for automation. Configured Governance and GATE checks determine eligibility at execution; inventory setup alone does not grant readiness.
+            Prepare targets using known inventory and governance signals. Automation Eligible is not Execution Allowed: configured governance enforcement and GATE checks decide authorization for a specific run.
           </p>
         </div>
         {userRole === "admin" && (

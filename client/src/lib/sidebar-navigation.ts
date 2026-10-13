@@ -33,7 +33,7 @@ export const navigationSections: Array<{ label: string; items: SidebarNavigation
     { title: "Evaluation Runs", url: "/governance/evaluation-runs", icon: ClipboardCheck },
   ] },
   { label: "Automation", items: [
-    { title: "Automation Inventories", url: "/automation-inventories", activeUrls: ["/inventories"], icon: Server },
+    { title: "Inventories", url: "/automation-inventories", activeUrls: ["/inventories"], icon: Server },
     { title: "Templates", url: "/templates", icon: FileText },
     { title: "Credentials", url: "/credentials", icon: Key },
     { title: "Projects", url: "/projects", icon: FolderGit2 },

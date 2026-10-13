@@ -535,7 +535,7 @@ export default function Providers() {
                             name="tenants"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Tenants (comma-separated)</FormLabel>
+                                <FormLabel>Customer hints (comma-separated)</FormLabel>
                                 <FormControl>
                                   <Input placeholder="Alpha,Beta" {...field} data-testid="input-tenants" />
                                 </FormControl>
@@ -875,7 +875,7 @@ export default function Providers() {
                       name="tenant_id"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Tenant ID</FormLabel>
+                          <FormLabel>Azure tenant ID</FormLabel>
                           <FormControl>
                             <Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" {...field} data-testid="input-tenant-id" />
                           </FormControl>

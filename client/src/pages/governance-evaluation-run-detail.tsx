@@ -133,7 +133,7 @@ export default function GovernanceEvaluationRunDetail() {
         </Button>
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Governance Evaluation</h1>
-          <p className="text-sm text-muted-foreground">Object-level scores, readiness, findings, and recommended actions.</p>
+          <p className="text-sm text-muted-foreground">Object-level governance scores, readiness, findings, and recommended actions. Governance Ready does not authorize execution; a specific automation run still requires GATE checks.</p>
           {run && <Link href={`/governance/blueprints/${run.blueprintId}`} className="mt-2 inline-block text-sm text-primary hover:underline">Back to blueprint: {blueprint?.name ?? run.blueprintId}</Link>}
         </div>
       </div>
@@ -218,7 +218,7 @@ export default function GovernanceEvaluationRunDetail() {
                     <TableHead>Object</TableHead>
                     <TableHead>IDs</TableHead>
                     <TableHead>Score</TableHead>
-                    <TableHead>Readiness</TableHead>
+                    <TableHead>Governance readiness</TableHead>
                     <TableHead>Actions</TableHead>
                     <TableHead>Findings</TableHead>
                   </TableRow>

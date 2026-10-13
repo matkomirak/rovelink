@@ -680,7 +680,7 @@ export default function CmdbDetail() {
             <DialogTitle>{refreshMutation.isSuccess ? "CMDB refresh completed" : refreshMutation.isError ? "CMDB refresh failed" : refreshMutation.isPending ? "Refreshing CMDB…" : "Refresh CMDB source?"}</DialogTitle>
             <DialogDescription>
               Read the latest virtual machines from {cmdb?.name ?? "this NetBox source"} into Rovelink's cached CMDB/reference inventory.
-              This does not write to NetBox or providers. NetBox tenants may update CustomerScopes and assignments.
+              This does not write to NetBox or providers. NetBox Tenant assignments may update CustomerScopes and customer assignments.
               No provider sync, drift comparison, Governance evaluation, or automation/GATE action will run.
             </DialogDescription>
           </DialogHeader>
@@ -806,7 +806,7 @@ export default function CmdbDetail() {
                               <div className="text-xs text-muted-foreground font-mono">{scope.externalId}</div>
                             </td>
                             <td className="px-4 py-3">
-                              <Badge variant="outline">{scope.strategy}</Badge>
+                              <Badge variant="outline">{scope.strategy === "tenant" ? "NetBox Tenant" : scope.strategy}</Badge>
                             </td>
                             <td className="px-4 py-3">
                               {scope.isolation ? <Badge variant="outline">{scope.isolation}</Badge> : <span className="text-muted-foreground/50">-</span>}

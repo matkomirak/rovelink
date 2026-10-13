@@ -1,5 +1,9 @@
 # Alpha Readiness Verification
 
+Historical record. The current launch/demo checks are documented separately in
+[2026-10-13 launch verification](alpha-launch-verification.md); the old counts
+and assignment-lifecycle limitations below describe that earlier snapshot.
+
 Verification date: 2026-10-05. Release candidate: current main after the
 Bridge-to-Rovelink branding cleanup. No release tag or visibility change was made.
 

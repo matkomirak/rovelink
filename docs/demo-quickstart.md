@@ -1,233 +1,150 @@
-# Alpha Demo Quickstart
+# Alpha demo quickstart
 
-**Govern first. Automate second.** Allow 5-10 minutes for the browser walkthrough
-after setup, downloads, and builds. Use a disposable database and synthetic data.
-Rovelink v0.1.0-alpha is not production-ready.
+**Govern first. Automate second.** This is an isolated v0.1.x alpha walkthrough,
+not a production deployment. Use synthetic data. Allow several minutes for initial
+NetBox migrations/builds, then about 5–10 minutes for the browser flow.
 
-For the recommended first public walkthrough, start with [Demo scenarios](demo-scenarios.md).
-The steps below describe the separate development/governance demo.
+## 1. Start the self-contained stack
 
-## Recommended NetBox modeling for MSPs
-
-Use **one NetBox Tenant per customer**, and assign customer objects to that
-Tenant. Rovelink imports each VM's NetBox Tenant as a **CustomerScope** and
-resolves its customer assignment. Provider hints are non-authoritative and
-cannot replace CMDB customer modeling. A Rovelink organization or Azure tenant
-is not the same thing as a customer.
-
-See [Recommended NetBox customer model](netbox-customer-model.md) for the
-Tenant -> CustomerScope -> Business Customer concept map and follow-up demo.
-The empty-NetBox first demo intentionally starts before customer/reference
-modeling; add customer assignments manually in NetBox when exploring that
-next step.
-
-## 1. Start Locally
-
-Prerequisites: Git, Node.js 20.19+, npm, and a reachable development Postgres
-database. Optional local NetBox needs Docker Desktop with Linux containers.
-Run commands from the repository root. These examples use PowerShell;
-Linux/macOS users use `npm` instead of `npm.cmd` and `cp` instead of `Copy-Item`.
+Prerequisites: Git, Node.js 20.19+/npm, Docker Desktop with Linux containers
+(or Docker Engine/Compose). Run from the repository root:
 
 ```powershell
-npm.cmd ci
-Copy-Item .env.example .env
+npm.cmd run demo:setup
+docker compose --env-file .env.demo -f docker-compose.demo.yml config --quiet
+docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --build
+docker compose --env-file .env.demo -f docker-compose.demo.yml ps
 ```
 
-Edit the private `.env`: set a working `DATABASE_URL`, `DATABASE_CLIENT=pg`,
-separate random `SESSION_SECRET` and `JWT_SECRET`, and an `ENCRYPTION_KEY` of
-exactly 64 random hex characters. Set a strong `BOOTSTRAP_ADMIN_PASSWORD`, or
-leave it blank for one-time generated credentials. Keep `ROVELINK_DEMO_DATA=false`
-until deliberately seeding. Never commit environment files or credentials.
+Use `npm` on Linux/macOS. Wait until services are healthy. The compose project
+has its own databases, network, Redis/cache and worker; it does not reset normal
+app data. Existing demo volumes retain data: a previously used demo is not empty.
 
-Apply the schema and bootstrap the login, then start the dev server:
+| Browser | URL | User | Password in private `.env.demo` |
+| --- | --- | --- | --- |
+| Rovelink | http://localhost:5100 | `admin` | `DEMO_ADMIN_PASSWORD` |
+| NetBox | http://localhost:8100 | `demo-admin` | `DEMO_NETBOX_ADMIN_PASSWORD` |
+
+Generated passwords are local-only. Setup preserves `.env.demo`, prints no
+passwords, and does not reset existing users. Keep it private. Use a separate
+browser profile/incognito session for normal and demo apps because `auth_token`
+cookies are shared by hostname, not port. See [demo scenarios](demo-scenarios.md)
+for alternate ports, troubleshooting and fresh-project verification.
+
+## 2. Connect an empty NetBox reference source
+
+1. Log into NetBox as `demo-admin`. Open **Admin > API Tokens** and create a
+   token for that local user. A read-only token is sufficient for refresh/drift;
+   the optional explicit import below needs a write-enabled local demo token.
+2. Copy the raw token privately. If NetBox shows a full `Bearer` value, remove
+   the prefix. Never include tokens in screenshots, logs or public reports.
+3. In Rovelink, open **CMDBs > Add CMDB**, choose NetBox and name it `Demo NetBox`.
+   Base URL: **`http://netbox:8080`**, without `/api`. Paste only the raw token;
+   do not prepend `Bearer` or `Token`. Save the account, then test its connection
+   from the CMDB list's test button.
+4. Open its detail page, click **Refresh**, confirm **Refresh CMDB**, and verify
+   zero imported VMs. This reads NetBox into the cached reference state and may
+   update CustomerScopes from NetBox Tenant; it executes no automation or writeback.
+
+`localhost:8100` is the browser URL; `netbox:8080` is the service address inside
+the demo network. `host.docker.internal` is for a different NetBox on the host,
+not this internal connection. A fresh NetBox has zero VMs by design.
+
+## 3. Add offline runtime inventory and compare
 
 ```powershell
-node --env-file=.env ./node_modules/drizzle-kit/bin.cjs push
-node --env-file=.env --import=tsx server/seed.ts
-npx --no-install cross-env NODE_ENV=development node --env-file=.env --import=tsx server/index.ts
+docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true app npm run db:seed:demo-providers
 ```
 
-These explicitly load `.env`; the first two run the same operations as `db:push`
-and `db:seed`. The current `dev` script uses a Unix environment assignment, so use
-the cross-platform launch above on Windows. Review schema-push prompts; use only
-a disposable DB. Open [local login](http://localhost:5000/login).
-Generated credentials are in the private `bootstrap-credentials.txt`; delete it
-after login and change the password. Seeding does not reset an existing user.
+Open **Providers**, open each account and click **Sync Cached Inventory**:
 
-### Docker Alternative
+| Provider account | Expected cached objects |
+| --- | --- |
+| Demo Proxmox | 4 VMs |
+| Demo Azure | 14 objects: 4 VMs, 4 NICs, 2 VNets, 3 subnets, 1 public IP |
+| Demo Generic/Fake | 4 VMs |
 
-Use [Local Development](../LOCAL-DEVELOPMENT.md) for the bundled app/database:
+All are `fake` providers. There are no live Azure/Proxmox calls or credentials.
+Provider customer hints do not create CustomerScopes or authoritative assignments.
+
+Open **Drift > Drift Reports** (`/reports/drift`), select Demo NetBox and a demo
+provider, and run a VM comparison. Repeat for each provider. Each has four runtime
+VMs and zero reference VMs, so expect four `unmatched_provider` items. The Azure
+networks remain visible in runtime inventory but are not VM drift targets.
+Open item details and show analysis-only/no writeback/no GATE-impact wording.
+
+## 4. Optional: add selected reference VMs explicitly
+
+This is an opt-in **write to disposable NetBox**, separate from discovery/drift.
+Use a write-enabled local demo token on the selected CMDB. List available names:
 
 ```powershell
-docker compose up -d --build
-docker compose ps
+docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true app npm run demo:import:proxmox
 ```
 
-Startup waits for Postgres, pushes the schema, and bootstraps the admin. Configure
-private Compose overrides before starting. Do not use a host-only `DATABASE_URL`
-from `.env`: omit it to use Compose's internal DB connection. The DB is not
-published for host seed commands. Use the container seed command below instead.
-The unchanged local-only bootstrap defaults are documented in Local Development;
-there is no universal login for an already initialized database.
-
-## 2. Prepare Reference Data
-
-For the full walkthrough, provision a **disposable local NetBox** using
-[Local NetBox](../LOCAL-NETBOX.md). Set its private `.env.netbox` values and API
-token, then run the existing optional seed from the host:
+Replace `PASTE_CMDB_ID` with the ID from the CMDB page URL and choose exact names
+from the list (for the seeded fixture: `alpha-web-001,gamma-app-002`):
 
 ```powershell
-Copy-Item .env.netbox.example .env.netbox
-# Edit .env.netbox before starting; do not overwrite an existing private file.
-docker compose -p rovelink-netbox --env-file .env.netbox -f docker-compose.netbox.yml up -d
-# Wait for NetBox login/API to be available and configure NETBOX_URL/NETBOX_TOKEN.
-npm.cmd run netbox:seed:demo
+docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true -e "ROVELINK_DEMO_CMDB_ID=PASTE_CMDB_ID" -e "ROVELINK_DEMO_VM_NAMES=alpha-web-001,gamma-app-002" app npm run demo:import:proxmox
 ```
 
-This optional command **writes synthetic VMs to NetBox**; never target a real CMDB.
-The default example VM names are `demo-vm-001` through `demo-vm-020`.
+The importer permits only the internal `http://netbox:8080` connection and offline
+Demo Proxmox data. It creates fictional ACME GmbH, cluster/platform, selected VMs,
+interfaces and IPs. Existing named VMs are preserved; partial API failures need
+manual inspection before retry. It does not run automatically.
 
-In Rovelink, select the demo organization and add a NetBox account under **CMDBs**.
-Use a base URL such as `https://netbox.example.com`, without `/api` at the end.
-If Rovelink runs in Docker and NetBox runs on the host at `http://localhost:8000`,
-set the CMDB connection URL to `http://host.docker.internal:8000`.
-Inside the Rovelink container, `localhost` points to that container, not the host.
-Your browser and seed scripts running directly on the host can still use
-`http://localhost:8000`.
+In NetBox, verify the two VMs have **Tenant: ACME GmbH**. In Rovelink, refresh
+the CMDB, open a VM's Customer Assignment, and verify **CustomerScope: ACME GmbH**
+and **Derived from: NetBox Tenant**. For MSPs use one NetBox Tenant per customer;
+see [the customer model](netbox-customer-model.md).
 
-Enter the raw NetBox API token only, for example `nbt_xxx` (a placeholder).
-Do not paste a `Bearer` or `Token` prefix into the token field.
+## 5. Evaluate governance and inspect reports
 
-Verify the connection from Rovelink before proceeding. Do not solve a connection
-failure by exposing the demo stack publicly.
+Open **Governance > Blueprints**, create the standard NetBox VM blueprint for
+Demo NetBox, open it, and click **Run Evaluation**. Select the source and run.
+Successful evaluation closes the dialog and redirects to the new run inspection.
+Inspect source, blueprint, object count, findings, and the link back to the blueprint.
 
-Open **Governance > Run Evaluation** to load/materialize the configured CMDB's
-NetBox inventory source. Select it and use **Sync/Refresh cached VMs** in the
-launcher. Verify a nonzero cached count. This imports reference VMs and tenant
-assignments into Rovelink; it does not write back to NetBox. The object browser's
-Refresh button reloads its view, not the source cache.
+Customer assignment should be present. The importer does not approve automation
+or supply every required role/owner/provider-state value, so Needs attention is
+expected. For a useful mixed report, deliberately enrich **one** VM in disposable
+NetBox and leave the other incomplete:
 
-## 3. Seed CustomerScope Scenarios
+- Assign a VM-capable Role, such as fictional `demo-web`.
+- Under **Customization > Custom Fields**, associate these fields with Virtual
+  Machine: `automatable` (Boolean), `provider_state` (Text), `technical_owner`
+  (Text), and `service_owner` (Text).
+- Edit that VM: `automatable=true`, `provider_state=active`, and fictional owners
+  `Demo Engineering` / `Demo Service`. Preserve its Tenant, platform and primary IP.
 
-The seed needs an existing organization, NetBox CMDB account, and linked NetBox
-inventory source. It can fill missing local cached VMs, but does not provision
-the CMDB connection. Run in another terminal while the app remains running.
+Refresh the CMDB and run evaluation again. Inspect actual findings/scores;
+Governance Ready is a blueprint result, not Execution Allowed. Open **Reports >
+Governance Readiness** and compare Ready versus Needs attention.
 
-For a host app, enable the seed for this process only:
+Open **Automation > Inventories** if you want inventory signals:
+create a linked NetBox inventory and inspect the recorded eligibility/policy.
+That inventory operation is separate from the read-only report. Then open
+**Reports > Automation Readiness**. Ready = 0/Unknown is intentional while current
+execution GATE authorization, users and credentials are not verified there.
+An empty report is valid before creating inventory. Do not execute a playbook to
+populate the demo. The isolated stack keeps the local runner disabled.
 
-```powershell
-npx --no-install cross-env ROVELINK_DEMO_DATA=true node --env-file=.env --import=tsx server/scripts/seed-customer-scope-demo.ts
-```
+## 6. Demonstrate a manual change
 
-For the bundled Docker database:
+Remove one VM's NetBox Tenant manually, refresh the CMDB, and reevaluate.
+Expect a customer-assignment finding. Restore it and repeat; the finding should
+clear. Separately change an existing primary IPv4 value in NetBox, refresh, and
+rerun Proxmox drift. Inspect the changed reference/runtime field difference.
 
-```powershell
-docker compose exec -e ROVELINK_DEMO_DATA=true app npm run db:seed:demo-customer-scopes
-```
+Reports are historical until refreshed/rerun. CMDB refresh does not purge upstream
+deletions. Missing reference IPs can be skipped by drift; runtime IPv6/reference
+power-state limitations mean an initially imported VM may already have drift.
+See [demo scenarios](demo-scenarios.md) for the full interpretation.
 
-These invoke the existing `db:seed:demo-customer-scopes` script. With multiple
-orgs/sources, explicitly set `ROVELINK_DEMO_ORG_ID` and `ROVELINK_DEMO_CMDB_ID`
-to local IDs from your demo; for Docker, supply each with another `-e` argument.
-Without overrides the script uses the default organization and prefers a
-local/docker/demo-named NetBox CMDB. Check its printed source before continuing.
+## Development and launch material
 
-Expect four fictional CustomerScopes and five assignment scenarios: healthy,
-not ready, block recommendation, explicit unassigned, and not evaluated. Three
-sample evaluations are fixtures, **not evidence of a live evaluator run**.
-The seed is opt-in/idempotent and writes Rovelink demo DB records, not NetBox.
-It creates a draft demo blueprint/version but does not activate it.
-
-## 4. Browser Demo Checklist
-
-1. Log in and open **Dashboard**. Stay in the organization used by the seed.
-2. Open **Providers**, create a **Fake (Generator)** account, and open its detail.
-   Click **Sync Cached Inventory** in **Inventory Objects**. This is separate
-   from live/generated VM preview and legacy CMDB pipeline actions.
-3. Inspect cached object type cards, search/filter the objects, and open a detail
-   sheet. Local object IDs identify cache rows; provider IDs are display context.
-   CustomerScope candidates must say hints, not authoritative assignments.
-4. Open the prepared **CMDB**. Inspect cached VMs, Customer Scopes and their
-   governance summary columns. Open a VM's Customer Assignment; Unassigned is
-   an attention state, not Internal. Check the seeded not-evaluated scenario.
-5. Open **Governance** and view sample evaluation findings/readiness. To prove
-   live evaluation separately, create the standard source-bound NetBox VM
-   blueprint (or explicitly activate a suitable version), then run evaluation
-   against cached VMs. New policy versions remain inactive until activated.
-   Live results can replace the demo summaries; inspect fixtures first.
-6. Open **Drift Reports** at `/reports/drift`. Select the prepared CMDB and fake
-   provider, run a VM comparison, and inspect the summary and an item detail:
-   confidence, candidate IDs, signals, field differences, and findings.
-7. Confirm the page explains **analysis only**: no CMDB/provider writeback,
-   no Governance readiness change, and no Automation GATE impact. No remediation
-   or auto-fix action should be offered.
-8. Open **Automation Inventories**, **Templates**, and **Runs** to show the
-   automation foundation. Empty lists are acceptable in a fresh demo. Do not
-   execute an unreviewed playbook just to populate a screen.
-9. Open the account menu and log out; confirm return to `/login`.
-
-## Expected Results and Limits
-
-- Fake provider objects and hint candidates are visible after cached sync.
-- CustomerScopes/assignments and sample governance summaries appear after seed.
-- Older unassigned rows may remain beside newer dedicated demo assignments.
-  CustomerScope summary rows can overlap; do not sum them as an authoritative
-  customer partition. Assignment lifecycle/reporting cleanup is future work.
-- A completed drift run and item rows appear. Independently seeded reference
-  and fake datasets may be unmatched; matching or a particular drift count is
-  not guaranteed. Unmatched/ambiguous results are valid report outcomes.
-- Provider inventory is observed runtime state, not CMDB truth. CustomerScope
-  is a source-local customer/environment boundary, not the app organization.
-- Blueprint enforce recommends blocking; actual blocking depends on Automation
-  Inventory governance enforcement. Drift never supplies that authority.
-
-Use fake data for the first run. Azure/Proxmox require sensitive real credentials
-and isolated test infrastructure; use them carefully, not for this basic demo.
-Proxmox normalized inventory is VM-only. No production-readiness claim is made.
-
-Use the [smoke checklist](smoke-test.md) to record validation. There is no single
-end-to-end demo command or automated browser smoke script; account/source setup
-and browser checks are manual. Do not publish screenshots with identifiers or
-secrets. Existing public-release history concerns remain in the
-[sanitization audit](public-sanitization-audit.md).
-
-## Fake Azure runtime inventory demo
-
-Under **Providers**, add a **Fake** provider named **Demo Azure** and select
-**Azure demo inventory (4 VMs + networks)**. Save it, open its inventory page,
-and use **Sync Cached Inventory**. The API equivalent is a fake provider with config
-`{"variant":"azure","scenario":"azure"}` and
-`POST /api/providers/<provider-id>/inventory/sync` using your login cookie.
-
-This fixed scenario generates four VMs (`acme-web-01`, `acme-db-01`,
-`contoso-app-01`, `orphan-runtime-01`), four NICs, two VNets, three subnets,
-and one public IP from the documentation range (`192.0.2.10`). ARM-like IDs
-use placeholder subscriptions ending in `0001` and `0002`. ACME and Contoso
-are fictional demo customers. Seed and VM count do not change this scenario.
-Objects retain provider type `fake` and metadata `demoProfile: azure`.
-
-No Azure credentials or live API calls are needed. Sync only stores observed
-runtime inventory and provider customer candidate hints in Rovelink. It does
-not write to NetBox or providers, create CustomerScopes or assignments, or
-change Governance readiness or Automation GATE. Existing fake variants stay unchanged.
-
-Use this provider as runtime inventory in **Drift Reports**. Match results
-depend on your existing NetBox reference: no reference data is created. If
-reference VMs have the same names/IPs, they can match; `orphan-runtime-01` is
-intended to be unmatched, and the stopped `acme-db-01` can demonstrate status
-drift against an active reference. Without matching reference VMs, all four
-will appear only in provider inventory. Relationships remain empty; NIC links
-are recorded in metadata through the existing Azure normalizer.
-
-## Demo scenarios
-
-The recommended first public demo is the self-contained empty-NetBox stack.
-It needs no real Azure/Proxmox credentials. With provider runtime VMs and zero
-NetBox reference VMs, expect `unmatched_provider` drift: missing CMDB
-documentation is the intended result.
-
-See [Demo scenarios](demo-scenarios.md) for commands, private demo credentials, manual
-NetBox token creation, the three-provider walkthrough, expected results, and
-troubleshooting. It also covers existing host NetBox through
-`host.docker.internal` and optional real-provider exploration.
-
-For the explicit offline Proxmox-to-NetBox reference follow-up, see [Customer-style demo](demo-scenarios.md#customer-style-follow-up-demo-explicit-proxmox-reference-import). This is an opt-in demo write, never automatic provider sync.
+Host-development/normal-stack instructions and the separate CustomerScope fixture
+seed are in [Local Development](../LOCAL-DEVELOPMENT.md). Fixture evaluations are
+not proof of a live governance run. For recording, use [the two-minute script](demo-video-script.md).
+Before publication, complete [the launch checklist](public-alpha-checklist.md).

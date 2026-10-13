@@ -1,5 +1,12 @@
 # Local Development
 
+For the public-alpha walkthrough, use the self-contained [demo quickstart](docs/demo-quickstart.md).
+This page also describes development workflows that can execute playbooks or write
+to disposable NetBox. Governance Ready is a blueprint evaluation result;
+Automation Eligible is an inventory signal; Execution Allowed is a specific run's
+GATE decision. See [Concepts](docs/concepts.md). Provider hints never replace
+CustomerScope assignments derived from NetBox Tenant.
+
 For a focused first-run story, follow the [alpha demo quickstart](docs/demo-quickstart.md)
 and [smoke checklist](docs/smoke-test.md). This page retains the detailed workflows.
 
@@ -158,10 +165,10 @@ not real customer records. The seed creates or updates these local demo scenario
 - An explicit Unassigned pseudo-scope assignment.
 
 `ACME GmbH` represents a healthy customer: the VM is evaluated, has a high
-governance score, and is automation ready.
+governance score, and is Governance Ready in the stored evaluation. This is not Execution Allowed.
 
 `Customer B` represents a customer with a governance issue: the VM is evaluated
-but not automation ready.
+but not Governance Ready.
 
 `Customer C` represents a policy escalation: the evaluation recommends
 `block_automation`. Actual blocking still depends on Automation Inventory
@@ -203,7 +210,7 @@ Use this short flow for a CustomerScope MSP pilot walkthrough:
 6. Explain policy modes:
    - `visibility_only`: reports CustomerScope issues only.
    - `score_only`: may affect governance/data-management score.
-   - `readiness`: may mark an object not automation ready.
+   - `readiness`: may mark an object not Governance Ready.
    - `enforce`: recommends `block_automation`.
 7. Show evaluation findings and automation readiness.
 8. Explain the enforcement distinction:

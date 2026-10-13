@@ -9,10 +9,15 @@
 | Provider customer hints | Non-authoritative tags, pools, and candidate names. They are not CustomerScope assignments. |
 | Drift | A stored comparison of reference and runtime VMs. Missing reference VMs yield unmatched provider results; drift does not update either source or Governance/GATE. |
 | Governance | An explicit evaluation of reference completeness, ownership, and customer assignment against a versioned blueprint. |
-| Automation readiness / GATE | Readiness is an evaluation result; configured execution-time GATE checks remain authoritative. Creating inventory or completing onboarding does not authorize automation. |
+| Governance Ready | A stored reference object satisfies the active blueprint's readiness rules. It is a policy result over cached data, not a guarantee of current source accuracy or execution safety. |
+| Automation Eligible | Known inventory/readiness signals support preparing a target for automation. Missing or unknown signals must be reviewed. Inventory inclusion does not authorize a run. |
+| Execution Allowed | The final GATE decision for a specific automation action/run. Execution-time checks and configured inventory governance enforcement remain authoritative. |
 
-The normal path is **CMDB/reference → provider/runtime → drift → governance →
-automation preparation**. Dashboard Getting started links to each step and only
+The product model is **CMDB/reference → governance readiness → inventory eligibility →
+automation runs → run results**, with provider/runtime discovery and drift used
+to compare reference documentation with observed infrastructure. The Dashboard
+onboarding walkthrough introduces sources and drift before automation preparation;
+that navigation order is not an authorization flow. Getting started only
 reads progress. Its milestones are not freshness or security guarantees. An empty
 reference cache can be a successful demo import; it remains Ready in the stepper.
 
@@ -21,6 +26,13 @@ per customer, imported as a CustomerScope. Rovelink organizations and Azure
 identity tenants are separate concepts. Provider hints never replace CMDB truth.
 Refresh imports reference VMs and assignments but does not evaluate Governance.
 Run governance explicitly to replace historical findings. Drift is analysis-only.
+
+Reports are posture dashboards: `/reports` shows both, `/reports/governance`
+shows Governance Readiness, and `/reports/automation` shows Automation Readiness.
+Drift remains a separate sidebar section. The [Automation Readiness Report](automation-readiness-report.md)
+keeps unproven execution readiness **Unknown**. Ready = 0 is intentional in this
+alpha because current execution authorization, connection users, and credentials
+are not verified there. Reports never prepare or execute automation.
 
 CustomerScope policies and inventory enforcement settings determine the effects
 of findings. A visibility-only policy reports issues without itself affecting

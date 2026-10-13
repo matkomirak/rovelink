@@ -91,7 +91,7 @@ docker compose --env-file .env.demo -f docker-compose.demo.yml exec netbox /opt/
 
 On the CMDB detail page, **Refresh** opens a confirmation dialog. Confirming
 **Refresh CMDB** reads NetBox VMs into Rovelink's reference cache and may update
-CustomerScopes/assignments from NetBox tenants. It does not write to NetBox or
+CustomerScopes/assignments from NetBox Tenant. It does not write to NetBox or
 providers, evaluate Governance, run drift, or trigger automation. The dialog
 shows running, success (import and assignment counts), or a safe failure message.
 An empty NetBox refresh succeeds with zero imported VMs and a latest-import
@@ -255,7 +255,7 @@ docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_
 Copy the desired exact names and the CMDB ID from its Rovelink page URL:
 
 ```powershell
-docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true -e ROVELINK_DEMO_CMDB_ID=<cmdb-id> -e ROVELINK_DEMO_VM_NAMES=<first-name>,<second-name> app npm run demo:import:proxmox
+docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true -e "ROVELINK_DEMO_CMDB_ID=PASTE_CMDB_ID" -e "ROVELINK_DEMO_VM_NAMES=PASTE_FIRST_NAME,PASTE_SECOND_NAME" app npm run demo:import:proxmox
 ```
 
 The command uses only the seeded offline Proxmox fixture. It creates a demo
@@ -275,7 +275,10 @@ retrying. This small demo helper is not a reconciliation tool.
    a customer-assignment finding for that VM, not a generic tenant requirement.
 6. Restore the Tenant, then change one primary IP in NetBox, refresh, and rerun
    drift. The stored new comparison should show an IP difference for the match.
-7. Inspect governance readiness and Dashboard GATE status. Onboarding completion
+7. Inspect **Reports > Governance Readiness**, **Reports > Automation Readiness**,
+   and Dashboard recorded GATE eligibility. Governance Ready, Automation Eligible,
+   and Execution Allowed are separate signals. Ready = 0 in Automation Readiness
+   is intentional while execution readiness cannot be proven. Onboarding completion
    does not authorize automation. GATE enforcement is controlled by existing
    inventory settings and execution checks, not drift. The isolated stack keeps
    its local runner disabled; this walkthrough does not execute remediation.

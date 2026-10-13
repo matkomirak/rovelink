@@ -1,6 +1,11 @@
 # Automation Readiness Report
 
-Open **Reports** to find Automation Readiness below Governance Readiness. Inventory names and **View inventory** open the existing inventory detail page. Refresh report rereads stored data; it does not sync inventories or execute automation.
+Open **Reports > Automation Readiness** (`/reports/automation`). The existing `/reports` page also shows it below Governance Readiness. Inventory names and **View inventory** open the existing inventory detail page. Refresh report rereads stored data; it does not sync inventories or execute automation.
+
+**Rovelink does not mark targets Ready unless readiness can be proven.** Unknown
+means required governance, inventory, or execution signals cannot yet be verified.
+Ready = 0 is expected in this alpha, not a failed report. Governance Ready,
+Automation Eligible, and Execution Allowed are distinct; see [Concepts](concepts.md).
 
 The first version deliberately distinguishes inventory signals from authorization:
 

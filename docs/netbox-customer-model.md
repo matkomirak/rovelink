@@ -73,8 +73,10 @@ the current refresh upserts records. Inspect the VM's current assignment rather
 than treating the mere existence of a CustomerScope record as customer ownership.
 
 Stored evaluation findings are historical until you run a new evaluation. A
-customer assignment being present does **not** alone make a VM automation-ready:
+customer assignment being present does **not** alone make a VM Governance Ready or grant Execution Allowed:
 other data, ownership, blueprint requirements, and existing GATE checks still apply.
+Governance Ready, Automation Eligible, and Execution Allowed are distinct signals;
+see [Concepts](concepts.md). A provider hint never supplies any of those permissions.
 The separate CustomerScope policy defaults to visibility-only; configured policy
 modes and explicit required-data rules determine score/readiness effects.
 

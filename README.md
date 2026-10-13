@@ -2,279 +2,171 @@
 
 **Govern first. Automate second.**
 
-Rovelink is a governance-first automation control plane for infrastructure and MSP teams.
-It connects documented CMDB/reference state, observed provider/runtime state,
-governance, drift reporting, and automation readiness.
+Rovelink is a governance-first infrastructure control plane for infrastructure
+teams and MSPs. It connects documented CMDB reference state with observed provider
+runtime state, evaluates reference quality, and prepares automation with explicit
+inventory eligibility and execution-time GATE checks.
 
-## Status: v0.1.0-alpha
+## Public alpha
 
-This is an **early alpha**, intended for local evaluation, demos, and development.
-It is **not production-ready**. APIs, database schemas, and UI may change.
-There is no production or commercial-readiness guarantee. This alpha label describes
-the release scope; package metadata may still use an older version.
+The current v0.1.x alpha is for isolated local evaluation and synthetic demos.
+**It is not production-ready and has no warranty.** APIs and schemas may change.
+Do not expose the local Compose stacks publicly or connect the demo to production.
+The existing release tag is `v0.1.0-alpha`; package metadata is not the release label.
 
-Use disposable demo data and isolated test environments. Do not expose the default
-local stack to the internet or connect it to production infrastructure.
+## Why it exists
 
-## What Rovelink Does
+A successful job does not prove the rest of an estate is safe to automate. Missing
+customer assignments, ownership, addresses, approval, and stale reference data
+need to be visible before execution. Rovelink asks: what do we know about these
+targets, what needs attention, and which signals are still unknown?
 
-- **Git-backed Ansible projects:** sync public HTTPS repositories and discover playbooks in server-managed checkouts.
-- **Automation:** manage inventories and job templates, run Ansible locally or against reachable Linux SSH targets, and inspect run output. SSH private-key credentials are encrypted at rest.
-- **Cached CMDB inventory:** import and browse NetBox VMs as documented/reference objects, including customer assignments.
-- **Governance:** version and explicitly activate blueprints, evaluate cached objects, and report scores, findings, recommendations, and automation readiness.
-- **Reports:** review governance posture and [automation inventory readiness signals](docs/automation-readiness-report.md). Unknown execution readiness is shown explicitly; reports do not authorize or execute automation.
-- **CustomerScope:** represent customer/environment boundaries for MSP workflows, separately from Rovelink's organization security boundary.
-- **Provider inventory:** cache observed runtime objects from fake/demo, Azure, and Proxmox sources. Provider customer candidates remain hints only.
-- **Drift Reports:** manually compare cached reference VMs with cached provider VMs and inspect matches, ambiguous/unmatched objects, and IP, OS, or power-state differences.
+## Core concepts
 
-The sidebar groups **Governance Readiness** and **Automation Readiness** under **Reports**. **Drift Reports** stays in its own **Drift** section. **Blueprints** and **Evaluation Runs** are under **Governance**, while **Automation Runs** is under **Automation**. The existing `/reports` page still shows both readiness dashboards.
+| Concept | Meaning |
+| --- | --- |
+| Reference state | Documented NetBox/CMDB data cached in Rovelink. |
+| Runtime state | Provider-observed infrastructure, or deterministic offline demo inventory. |
+| CustomerScope | Rovelink's normalized customer boundary, derived from NetBox Tenant for the recommended MSP model. |
+| Governance Ready | A recorded reference object meets the blueprint's readiness rules; this does not authorize execution. |
+| Automation Eligible | Known inventory/readiness signals support preparing a target; unknown signals still need review. |
+| Execution Allowed | The final GATE decision for a specific automation action/run. |
+| Drift | Differences between cached reference and runtime state; analysis only. |
 
-## Scope and Limitations
+For MSPs, use **one NetBox Tenant per customer** and assign VMs directly to it.
+Rovelink imports Tenant → CustomerScope → customer assignment. Rovelink organizations
+are application security boundaries; Azure tenants are identity boundaries.
+Provider tags and customer hints are non-authoritative.
+See [Concepts](docs/concepts.md) and [NetBox customer modeling](docs/netbox-customer-model.md).
 
-Rovelink is not a CMDB replacement, an AWX replacement, or a provider writeback tool.
-It uses reference data and observed runtime data to inform governance and automation.
+## Try the self-contained demo
 
-- No automatic remediation or drift-based GATE enforcement is implemented.
-- Drift is analysis only: it does not update CMDBs, providers, Governance readiness, or Automation GATE decisions.
-- Normalized provider inventory sync does not write to providers or CMDBs. Provider CustomerScope candidates do not create authoritative assignments.
-- Governance evaluates cached data and does not write evaluation state to NetBox. Refresh caches before interpreting results as current.
-- These read-only boundaries do **not** cover every legacy feature. Explicit CMDB pipelines and the optional NetBox demo seed contain CMDB write operations; keep them confined to disposable test systems.
-- Proxmox normalized inventory is VM-only. Azure and Proxmox integrations are early implementations, not production-certified integrations.
-- NetBox VMs are the supported reference objects for the current governance and drift flows. i-doit is not part of the open alpha pilot; existing adapter code does not establish supported pilot coverage.
-- AWX/Ansible Automation Platform execution, private or SSH Git repositories, embedded Git credentials, and SSH key passphrases are outside the current MVP.
-- Drift matching is conservative and heuristic. VM names alone are not strong identity; ambiguous and unmatched results require human review.
-
-## Architecture
-
-The application uses React/Vite, an Express TypeScript API, and Drizzle ORM with
-Postgres. Authentication uses HttpOnly cookies.
-
-| Area | Role |
-|---|---|
-| CMDB/reference inventory | Cached NetBox VMs describe documented state. |
-| Provider/runtime inventory | Normalized infrastructure objects describe observed state. |
-| CustomerScope | Source-local customer/environment assignments; organizations remain the application security boundary. |
-| Governance | Versioned blueprints evaluate reference objects and produce findings, scores, and readiness. |
-| Automation | Git projects, credentials, inventories, and templates execute through Automation GATE checks. |
-| Drift reporting | Manual comparisons report differences between cached reference and runtime VMs. |
-
-CustomerScope policy defaults to `visibility_only`. Explicit blueprint modes can
-affect score (`score_only`), readiness (`readiness`), or recommend blocking (`enforce`).
-Blueprint enforce recommends blocking; Automation Inventory governance enforcement
-settings decide whether automation actually blocks. Provider hints and drift reports
-do not become GATE authority.
-
-## Provider Support
-
-This table describes the **normalized cached inventory sync** path, not legacy
-provider previews or CMDB pipelines.
-
-| Provider | Alpha support |
-|---|---|
-| Fake/demo | Supported; deterministic demo inventory and customer hints. |
-| Azure | Normalized inventory sync supported for VMs, NICs, VNets, subnets, and public IPs; read-only discovery. |
-| Proxmox | VM-only normalized inventory sync supported; read-only listing. |
-| VMware vCenter | Normalized sync not enabled; legacy collector/preview code exists. |
-| AWS / GCP | Normalized sync not enabled; future work. Fake variants do not constitute live provider support. |
-
-## Quickstart
-
-### Prerequisites
-
-- Node.js 20.19+ and npm for host development and validation.
-- A reachable PostgreSQL database, or Docker Desktop with Linux containers for the bundled local Postgres/app stack.
-- Git. Host Ansible execution additionally needs `ansible-playbook` and SSH tooling; the app container includes these tools.
-- Optional local NetBox for reference inventory; see [Local NetBox](LOCAL-NETBOX.md).
-
-Use a base URL such as `https://netbox.example.com`, without `/api` at the end.
-If Rovelink runs in Docker and NetBox runs on the host at `http://localhost:8000`,
-set the CMDB connection URL to `http://host.docker.internal:8000`.
-Inside the Rovelink container, `localhost` points to that container, not the host.
-Your browser and seed scripts running directly on the host can still use
-`http://localhost:8000`.
-
-Enter the raw NetBox API token only, for example `nbt_xxx` (a placeholder).
-Do not paste a `Bearer` or `Token` prefix into the token field.
-
-
-### Docker Local Stack
-
-From the repository root:
+Prerequisites: Git, Node.js 20.19+ with npm, and Docker Desktop/Linux containers
+(or Docker Engine with Compose). From the repository root in PowerShell:
 
 ```powershell
-docker compose up -d --build
-docker compose ps
+npm.cmd run demo:setup
+docker compose --env-file .env.demo -f docker-compose.demo.yml config --quiet
+docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --build
+docker compose --env-file .env.demo -f docker-compose.demo.yml exec -e ROVELINK_DEMO_DATA=true app npm run db:seed:demo-providers
 ```
 
-Open [the local login page](http://localhost:5000/login). Compose waits for the
-database, applies the schema, and seeds the bootstrap admin automatically.
-Local bootstrap credentials and overrides are documented in
-[Local Development](LOCAL-DEVELOPMENT.md).
+Use `npm` on Linux/macOS. Wait for healthy services; initial NetBox migrations,
+image downloads, and builds can take several minutes.
 
-**Local use only:** the current Compose configuration uses known demo secrets,
-enables the local runner, and publishes port 5000 on host loopback only.
-Keep it on a trusted, isolated machine with network access restricted.
-It is not a production deployment template.
+| Browser | URL | Login | Private password location |
+| --- | --- | --- | --- |
+| Rovelink | http://localhost:5100 | `admin` | `.env.demo`: `DEMO_ADMIN_PASSWORD` |
+| NetBox | http://localhost:8100 | `demo-admin` | `.env.demo`: `DEMO_NETBOX_ADMIN_PASSWORD` |
 
-Compose reads a root `.env` if present. For the bundled database, leave
-`DATABASE_URL` unset so Compose uses its internal connection, or provide a valid
-container-reachable URL. Do not copy the example's placeholder connection string
-into a Docker setup unchanged.
+`demo:setup` generates local-only secrets and preserves an existing `.env.demo`.
+Never commit or share that file. From the Rovelink container, connect NetBox at
+**`http://netbox:8080`**, without `/api`. Create a local NetBox API token manually
+and paste only its raw value; omit `Bearer`/`Token` prefixes.
 
-### Host Development
+The walkthrough starts with **empty NetBox reference inventory** and three fake
+providers: 4 Proxmox VMs, 14 Azure objects (including 4 VMs), and 4 generic VMs.
+Sync their cached inventory in the UI. Empty reference state produces intentional
+`unmatched_provider` drift. An optional, explicit demo-only Proxmox import then
+adds selected reference VMs so you can demonstrate customer assignment,
+governance findings, and manual changes. No real provider credentials are needed.
 
-Install the locked dependencies and create a private environment file:
+Follow the [demo quickstart](docs/demo-quickstart.md) for the complete flow and
+[demo scenarios](docs/demo-scenarios.md) for expected results and limitations.
+The isolated demo disables the local automation runner; the walkthrough executes
+no playbooks or remediation. Use separate browser profiles when running normal
+and demo apps together: cookies belong to hostnames, not ports.
+
+## Demo video and screenshots
+
+A [two-minute script and shot list](docs/demo-video-script.md) is ready for recording.
+The video is not recorded or published yet; add its link only after review for
+secrets and fictional identifiers. Record the real UI, including Unknown readiness.
+
+## Current capabilities
+
+- Cached NetBox VM reference browsing, CustomerScopes and customer assignments.
+- Versioned governance blueprints, explicit evaluations, findings and run inspection.
+- Governance and conservative Automation Readiness dashboards.
+- Cached normalized provider discovery: fake/demo; early Azure VMs/NICs/VNets/subnets/public IPs; early Proxmox VM-only inventory.
+- Manual VM drift comparison and item inspection, including unmatched/ambiguous results.
+- Automation inventories, templates, public HTTPS Git projects, encrypted SSH credentials, and local Ansible execution when explicitly enabled outside the isolated demo.
+- HttpOnly cookie authentication and organization-scoped application data.
+
+Sidebar: **Navigation** → Dashboard; **Reports** → Governance Readiness and
+Automation Readiness; **Drift** → Drift Reports; **Inputs** → Providers, CMDBs,
+Sync Flows; **Governance** → Blueprints and Evaluation Runs; **Automation** →
+Inventories, Templates, Credentials, Projects, Automation Runs;
+**System** → Notifications and Settings.
+
+`/reports` retains both dashboards; `/reports/governance` and
+`/reports/automation` open each individually. Drift stays at `/reports/drift`.
+
+## Current limitations
+
+- Governance and reports read stored/cached data. Refresh sources and rerun evaluations/comparisons after changes.
+- Automation Readiness does not verify current GATE authorization, connection users, or credentials. **Ready = 0 is intentional**; insufficient execution evidence is Unknown, not permission to execute.
+- Linked inventory counts exclude source VMs blocked during inventory sync. Targets can occur in more than one inventory/blueprint group.
+- Provider hints and drift never grant execution authority. Governance blocking recommendations affect execution only through configured inventory governance enforcement and existing GATE checks.
+- Discovery, governance evaluation, reference refresh, reports, and drift do not write back. Legacy explicit CMDB pipelines and opt-in demo scripts do contain CMDB writes; confine them to disposable systems.
+- CMDB refresh upserts VMs but does not purge upstream deletions. Current refresh replaces obsolete customer assignments for each refreshed VM; historical scopes and separate seeded fixtures can still overlap summaries.
+- Drift matching is heuristic; VM names alone are not strong identity. Missing reference fields can be skipped; NetBox cached power state and reference IPv6 comparison are limited.
+- i-doit is outside the supported pilot. VMware/AWS/GCP normalized live sync, AWX/AAP execution, private/SSH Git repositories, embedded Git credentials, and SSH-key passphrases are outside this MVP.
+- Azure/Proxmox integrations are early implementations, not production-certified integrations. The demo proves offline fixtures, not live cloud coverage.
+
+## Architecture and development
+
+React/Vite frontend → Express TypeScript API → Drizzle/Postgres storage.
+Integrations populate separate reference and runtime caches; blueprints evaluate
+reference objects. Configured GATE checks remain authoritative for execution.
+CustomerScope defaults to visibility-only; blueprint policy and required-data
+rules determine scoring/readiness effects.
+
+For the normal development app (port 5000), optional host NetBox (port 8000),
+Git projects, and runner setup, see [Local Development](LOCAL-DEVELOPMENT.md)
+and [Local NetBox](LOCAL-NETBOX.md). Host NetBox from Docker uses
+`http://host.docker.internal:8000`; the isolated demo uses `http://netbox:8080`.
 
 ```powershell
 npm.cmd ci
-Copy-Item .env.example .env
-```
-
-On Linux/macOS, use `npm ci` and `cp .env.example .env`. Edit `.env` locally:
-
-| Variable | Setup |
-|---|---|
-| `DATABASE_URL` | Connection to your provisioned development Postgres database. |
-| `DATABASE_CLIENT` | Set to `pg` for ordinary Postgres; omitted selects the Neon client. |
-| `SESSION_SECRET`, `JWT_SECRET` | Separate randomly generated secrets. |
-| `ENCRYPTION_KEY` | Random 32-byte key encoded as exactly 64 hex characters; replace the zero placeholder. |
-| `BOOTSTRAP_ADMIN_PASSWORD` | Strong local password, or blank to generate one-time credentials. |
-
-The Compose database is not exposed to host commands by default. Provision a
-host-reachable database for this workflow. Generate secret values locally; keep
-the encryption key stable for existing encrypted records.
-
-The commands below explicitly load `.env`. The schema command applies the same
-Drizzle push operation as `npm run db:push`; the seed runs the same script as
-`npm run db:seed`. Use a disposable database, since alpha schema pushes may
-require review of database changes.
-
-```powershell
-node --env-file=.env ./node_modules/drizzle-kit/bin.cjs push
-node --env-file=.env --import=tsx server/seed.ts
-npx --no-install cross-env NODE_ENV=development node --env-file=.env --import=tsx server/index.ts
-```
-
-These commands also work on Linux/macOS. The explicit `cross-env` launch avoids
-the current Unix-style environment assignment in `npm run dev` on Windows.
-Open [the local login page](http://localhost:5000/login).
-If bootstrap generated a password, retrieve it privately from
-`bootstrap-credentials.txt`, delete that file after login, and change the password.
-Seeding does not reset an existing user.
-
-### Validation
-
-From another terminal:
-
-```powershell
 npm.cmd run check
 npm.cmd test
 npm.cmd run build
 npm.cmd audit --omit=dev
 ```
 
-Use `npm` instead of `npm.cmd` on Linux/macOS. The default test suite does not
-replace a fresh-database integration test or a browser smoke test.
+The default tests do not replace fresh-demo/browser verification. The existing
+PostCSS build warning is non-fatal. The public-alpha checks and evidence are in
+[the launch checklist](docs/public-alpha-checklist.md).
 
-## Demo Walkthrough
+## Next directions
 
-Use the [alpha demo quickstart](docs/demo-quickstart.md) for exact setup/seed
-commands and the [smoke checklist](docs/smoke-test.md) to record verification.
+Priorities include fresher/stable readiness signals, clearer inventory coverage,
+a Drift Overview dashboard, broader integration validation, and repeatable smoke
+automation. These are directions, not shipped capabilities or delivery promises.
 
-Allow **5-10 minutes after setup**, excluding image downloads, builds, and local
-NetBox provisioning. Use a disposable database and synthetic data throughout.
+## Documentation
 
-1. Start the Docker stack and log in. Follow [Local Development](LOCAL-DEVELOPMENT.md) to start optional local NetBox, populate its demo VMs, configure a NetBox CMDB/source, and import cached VMs. The optional `netbox:seed:demo` script writes synthetic data to that local NetBox; do not run it against a real CMDB.
-2. Seed CustomerScope demo scenarios for the prepared local source:
+- [Demo quickstart](docs/demo-quickstart.md) and [demo scenarios](docs/demo-scenarios.md)
+- [Concepts](docs/concepts.md) and [NetBox customer model](docs/netbox-customer-model.md)
+- [Automation Readiness Report](docs/automation-readiness-report.md)
+- [Local Development](LOCAL-DEVELOPMENT.md) and [Governance MVP](GOVERNANCE-MVP.md)
+- [Demo video script](docs/demo-video-script.md) and [website copy](docs/website-copy.md)
+- [Public-alpha checklist](docs/public-alpha-checklist.md)
 
-   ```powershell
-   docker compose exec -e ROVELINK_DEMO_DATA=true app npm run db:seed:demo-customer-scopes
-   ```
+## Security and contributing
 
-   The opt-in script populates local assignments and sample evaluation results.
-   For multiple sources, set `ROVELINK_DEMO_CMDB_ID` and `ROVELINK_DEMO_ORG_ID`
-   as described in Local Development. Seeded results are demo fixtures, not
-   evidence of a live policy evaluation.
+Use dedicated test credentials and trusted playbooks. Supported credential paths
+encrypt secrets at rest with AES-256-GCM; that does not replace access controls
+or an independent security review. Never commit `.env`, credentials, private keys,
+`.local/`, runtime data, databases, logs, or unredacted screenshots.
 
-3. Under **Providers**, create a **Fake (Generator)** account. Open its detail page and click **Sync Cached Inventory** in **Inventory Objects**. This is the normalized local cache path; avoid legacy sync/pipeline write actions.
-4. Under **CMDBs**, open the prepared source. Inspect cached VMs, Customer Scopes, governance summaries, and a VM's Customer Assignment. Explicit Unassigned is an attention state, not an internal customer.
-5. Open **Governance**, inspect a source-bound blueprint and its active version, then run or view a cached VM evaluation. Policy edits create inactive versions; evaluations use the active version until explicitly changed.
-6. Open **Drift Reports** at `/reports/drift`. Select the NetBox CMDB and fake provider, then run a VM comparison. The comparison reads the existing caches.
-7. Inspect match confidence, ambiguous/unmatched objects, findings, and field differences. Independent demo datasets may produce unmatched objects; this is expected and does not prove a matching failure.
-8. Explain the boundary: **drift is analysis only**. It does not update CMDBs, providers, Governance readiness, or Automation GATE decisions. Provider customer candidates are hints, not authoritative CustomerScope assignments.
-
-For more detail, see [Governance MVP](GOVERNANCE-MVP.md) and
-[Local Development](LOCAL-DEVELOPMENT.md).
-
-## Security
-
-- Keep real credentials in a private `.env` or appropriate secret store. Never commit `.env`, bootstrap credentials, `.local/`, logs, local databases, or runtime state. Ignore rules protect common local artifacts; still inspect staged files.
-- Provider/CMDB credentials and SSH keys are sensitive. Supported credential paths encrypt secrets at rest using AES-256-GCM; encryption is not a substitute for access controls or an independent security review.
-- Preserve HttpOnly cookie authentication and organization isolation. CustomerScope is a source-specific customer/environment boundary, not an application tenant.
-- Execute only trusted playbooks and use dedicated test credentials and targets. Automation GATE is a required control, not a guarantee that a playbook is safe.
-- Follow [SECURITY.md](SECURITY.md) for private vulnerability reporting. Maintainers must enable and verify the reporting channel before public release; do not post sensitive details in public issues.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
-Use the validation commands above and preserve authentication, org isolation,
-and Automation GATE boundaries. Maintainers can use the
-[public alpha checklist](docs/public-alpha-checklist.md) before release.
+Follow [SECURITY.md](SECURITY.md) for private reporting. Maintainers must establish
+a private reporting channel as part of the manual visibility transition and
+verify GitHub private vulnerability reporting before announcing the alpha.
+Do not post sensitive vulnerability details publicly. See [CONTRIBUTING.md](CONTRIBUTING.md)
+and [AGENTS.md](AGENTS.md); preserve cookie authentication, org isolation and GATE.
 
 ## License
 
-Rovelink is licensed under the [MIT License](LICENSE), matching the existing
-package license declaration. Third-party dependencies retain their own licenses.
-
-## Fake Azure runtime inventory demo
-
-Under **Providers**, add a **Fake** provider named **Demo Azure** and select
-**Azure demo inventory (4 VMs + networks)**. Save it, open its inventory page,
-and use **Sync Cached Inventory**. The API equivalent is a fake provider with config
-`{"variant":"azure","scenario":"azure"}` and
-`POST /api/providers/<provider-id>/inventory/sync` using your login cookie.
-
-This fixed scenario generates four VMs (`acme-web-01`, `acme-db-01`,
-`contoso-app-01`, `orphan-runtime-01`), four NICs, two VNets, three subnets,
-and one public IP from the documentation range (`192.0.2.10`). ARM-like IDs
-use placeholder subscriptions ending in `0001` and `0002`. ACME and Contoso
-are fictional demo customers. Seed and VM count do not change this scenario.
-Objects retain provider type `fake` and metadata `demoProfile: azure`.
-
-No Azure credentials or live API calls are needed. Sync only stores observed
-runtime inventory and provider customer candidate hints in Rovelink. It does
-not write to NetBox or providers, create CustomerScopes or assignments, or
-change Governance readiness or Automation GATE. Existing fake variants stay unchanged.
-
-Use this provider as runtime inventory in **Drift Reports**. Match results
-depend on your existing NetBox reference: no reference data is created. If
-reference VMs have the same names/IPs, they can match; `orphan-runtime-01` is
-intended to be unmatched, and the stopped `acme-db-01` can demonstrate status
-drift against an active reference. Without matching reference VMs, all four
-will appear only in provider inventory. Relationships remain empty; NIC links
-are recorded in metadata through the existing Azure normalizer.
-
-## Demo scenarios
-
-The recommended first public demo is the self-contained empty-NetBox stack.
-It needs no real Azure/Proxmox credentials. With provider runtime VMs and zero
-NetBox reference VMs, expect `unmatched_provider` drift: missing CMDB
-documentation is the intended result.
-
-See [Demo scenarios](docs/demo-scenarios.md) for commands, private demo credentials, manual
-NetBox token creation, the three-provider walkthrough, expected results, and
-troubleshooting. It also covers existing host NetBox through
-`host.docker.internal` and optional real-provider exploration.
-
-## Recommended NetBox modeling for MSPs
-
-Use **one NetBox Tenant per customer**, and assign customer objects to that
-Tenant. Rovelink imports each VM's NetBox Tenant as a **CustomerScope** and
-resolves its customer assignment. Provider hints are non-authoritative and
-cannot replace CMDB customer modeling. A Rovelink organization or Azure tenant
-is not the same thing as a customer.
-
-See [Recommended NetBox customer model](docs/netbox-customer-model.md) for the terminology table,
-ACME GmbH example, object-type support, and refresh/evaluation workflow.
-
-For a short product glossary and the Dashboard onboarding path, see [Concepts](docs/concepts.md).
+[MIT](LICENSE), without warranty. Third-party dependencies retain their own licenses.

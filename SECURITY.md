@@ -18,11 +18,17 @@ requests. Use GitHub's **Security > Report a vulnerability** on this repository
 when private vulnerability reporting is enabled. This sends a private report to
 the maintainers.
 
-**Maintainer setup required before public release:** enable and verify GitHub
-private vulnerability reporting. If that button is unavailable, a private
-reporting channel has not been confirmed. Maintainers must enable it or add a
-monitored private security contact here. Do not post sensitive details publicly
-while waiting for that channel. No security email is currently published.
+**Maintainer setup required for public release:** establish and verify a private
+reporting channel during the manual launch transition. GitHub documents private
+vulnerability reporting for public repositories; while this repo is private,
+the control may not be available. If so, add a monitored private contact before
+changing visibility, then enable/verify GitHub reporting after the transition
+and before announcing the alpha. This policy does not claim that either channel
+has been verified. Do not post sensitive details publicly while waiting.
+No security email is currently published.
+
+See [GitHub's configuration instructions](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
+and the [manual launch checklist](docs/public-alpha-checklist.md).
 
 Include the affected commit/version, affected area, impact, and minimal steps
 to reproduce with synthetic data. Describe any proposed mitigation.

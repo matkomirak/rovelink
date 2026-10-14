@@ -48,6 +48,7 @@ import pipelineMappingRoutes from "./routes/pipeline-mappings";
 import providerDiscoveryRoutes from "./routes/provider-discovery";
 import automationInventoryRoutes from "./routes/automation-inventories";
 import gateRoutes from "./routes/gate";
+import { createGateDecisionRouter } from "./routes/gate-decision";
 import templateRoutes from "./routes/templates";
 import runsRoutes from "./routes/runs";
 import notificationRoutes from "./routes/notifications";
@@ -752,6 +753,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/providers", authMiddleware, requireOrgContext, providerDiscoveryRoutes);
   app.use("/api/inventories", authMiddleware, requireOrgContext, automationInventoryRoutes);
   app.use("/api/gate", authMiddleware, requireOrgContext, gateRoutes);
+  app.use("/api/v1/gate", authMiddleware, requireOrgContext, createGateDecisionRouter());
   app.use("/api/templates", authMiddleware, requireOrgContext, templateRoutes);
   app.use("/api/runs", authMiddleware, requireOrgContext, runsRoutes);
   app.use("/api/notifications", authMiddleware, requireOrgContext, notificationRoutes);

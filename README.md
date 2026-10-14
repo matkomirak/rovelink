@@ -141,9 +141,12 @@ PostCSS build warning is non-fatal. The public-alpha checks and evidence are in
 
 ## Next directions
 
-Priorities include fresher/stable readiness signals, clearer inventory coverage,
-a Drift Overview dashboard, broader integration validation, and repeatable smoke
-automation. These are directions, not shipped capabilities or delivery promises.
+The roadmap centers on the decision engine and conservative Pre-flight GATE API,
+execution decision snapshots, controlled AWX/RHAAP adapters, drift/readiness
+evidence, command hardening, runtime ingestion validation, durable workers,
+Vault/credential integration and approval workflows. Enterprise adapters and
+durable snapshots/workers remain planned; broader provider coverage follows
+validated evidence and access controls. These are directions, not delivery promises.
 
 ## Documentation
 

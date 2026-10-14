@@ -16,6 +16,12 @@ const issues = {
   readiness_unknown: { label: "Execution readiness unknown", severity: "info" },
 } as const;
 
+export function assessInventoryHostSignals(host: { address: unknown; governanceReady: boolean | null }) {
+  const addressPresent = typeof host.address === "string" && !!host.address.trim();
+  return { addressPresent, governanceBlocked: host.governanceReady === false,
+    governanceReady: host.governanceReady === true, needsAttention: !addressPresent || host.governanceReady === false };
+}
+
 /** Read-only inventory signals, never an execution authorization or GATE evaluation.
  * Cached linked inventories exclude blocked source VMs. File/script host details
  * and run-time credentials/users are not available in this projection.
@@ -38,7 +44,7 @@ export function summarizeAutomationReadiness(orgId: string, inputs: ReadinessInv
       globalCounts.set(key, (globalCounts.get(key) ?? 0) + count);
     };
     for (const host of hosts) {
-      const addressPresent = typeof host.address === "string" && !!host.address.trim();
+      const { addressPresent } = assessInventoryHostSignals(host);
       if (addressPresent) addressPresentCount++;
       else add("missing_address");
       if (host.governanceReady === true) governanceReadyCount++;

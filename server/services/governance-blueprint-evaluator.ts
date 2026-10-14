@@ -130,7 +130,8 @@ const ACTION_ORDER: RecommendedGovernanceAction[] = [
 
 export function evaluateGovernanceObject(
   object: NormalizedGovernanceObject,
-  rawRules: GovernanceBlueprintRules
+  rawRules: GovernanceBlueprintRules,
+  evaluatedAt: Date = new Date(),
 ): GovernanceEvaluationResult {
   const rules = governanceBlueprintRulesSchema.parse(rawRules);
   const customerScopePolicy = getEffectiveCustomerScopeGovernancePolicy(rules);
@@ -222,7 +223,7 @@ export function evaluateGovernanceObject(
   });
 
   const baseGovernanceScore = roundScore((baseDataManagementScore + ownershipScore) / 2);
-  const customerScopePolicyViolations = getCustomerScopePolicyViolations(object, customerScopePolicy);
+  const customerScopePolicyViolations = getCustomerScopePolicyViolations(object, customerScopePolicy, evaluatedAt);
   const dataManagementScore = applyCustomerScopeScoreOnlyPenalty(
     baseDataManagementScore,
     customerScopePolicy,
@@ -316,7 +317,8 @@ function applyCustomerScopeScoreOnlyPenalty(
 
 function getCustomerScopePolicyViolations(
   object: NormalizedGovernanceObject,
-  policy: CustomerScopeGovernancePolicy
+  policy: CustomerScopeGovernancePolicy,
+  evaluatedAt: Date,
 ): Set<string> {
   const violations = new Set<string>();
   if (policy.mode !== "score_only" && policy.mode !== "readiness" && policy.mode !== "enforce") return violations;
@@ -329,6 +331,11 @@ function getCustomerScopePolicyViolations(
   if (policy.requireCustomerScopeAssignment && assignments.length === 0) {
     violations.add("requireCustomerScopeAssignment");
   }
+  const scopeIds = new Set(assignments.map(assignment => {
+    const value = isRecord(assignment) ? assignment : {};
+    return stringValue(value.customerScopeId);
+  }).filter(Boolean));
+  if (policy.maxAllowedCustomerScopeCount !== null && scopeIds.size > policy.maxAllowedCustomerScopeCount) violations.add("maxAllowedCustomerScopeCount");
 
   for (const assignment of assignments) {
     const record = isRecord(assignment) ? assignment : {};
@@ -337,6 +344,13 @@ function getCustomerScopePolicyViolations(
     const customerScope = isRecord(record.customerScope) ? record.customerScope : null;
     const customerScopeId = stringValue(record.customerScopeId);
     const hasCustomerScope = Boolean(customerScope || customerScopeId);
+
+    if (policy.requireProviderDerivedAssignment && record.derivedFrom !== "provider") violations.add("requireProviderDerivedAssignment");
+    if (policy.staleAssignmentMaxAgeDays !== null) {
+      const syncedAt = record.lastSyncedAt ? new Date(record.lastSyncedAt as string).getTime() : NaN;
+      const age = evaluatedAt.getTime() - syncedAt;
+      if (!Number.isFinite(age) || age < 0 || age > policy.staleAssignmentMaxAgeDays * 86400000) violations.add("staleAssignmentMaxAgeDays");
+    }
 
     if (!relationship || !CUSTOMER_ASSIGNMENT_RELATIONSHIPS.has(relationship)) continue;
 

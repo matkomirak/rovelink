@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, timestamp, jsonb, boolean, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
+import { preflightActionsSchema } from "./preflight-policy";
 import { z } from "zod";
 import type {
   GovernanceBlueprintRules,
@@ -1372,12 +1373,14 @@ export const DEFAULT_GOVERNANCE_ENFORCEMENT_POLICY: GovernanceEnforcementPolicy 
 };
 
 export const eligibilityPolicySchema = z.object({
+  preflightActions: preflightActionsSchema.optional(),
   requireRole: z.boolean().default(false),
   requireContacts: z.boolean().default(false),
   governance: governanceEnforcementPolicySchema.default(DEFAULT_GOVERNANCE_ENFORCEMENT_POLICY),
 }).strict();
 
 export const eligibilityPolicyPatchSchema = z.object({
+  preflightActions: preflightActionsSchema.optional(),
   requireRole: z.boolean().optional(),
   requireContacts: z.boolean().optional(),
   governance: governanceEnforcementPolicyPatchSchema.optional(),

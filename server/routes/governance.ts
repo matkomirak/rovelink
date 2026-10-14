@@ -181,6 +181,8 @@ function toCachedNetboxVm(sourceId: string, vm: unknown): InsertNetboxVm {
       _netboxRole: isRecord(record.role)
         ? stringValue(record.role.name) ?? stringValue(record.role.slug) ?? null
         : stringValue(record.role) ?? null,
+      // Native status is needed to verify cached technical eligibility without a live call.
+      _netboxStatus: isRecord(record.status) ? stringValue(record.status.value) ?? null : stringValue(record.status) ?? null,
     },
     tags: Array.isArray(record.tags)
       ? record.tags.map((tag) => (

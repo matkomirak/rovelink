@@ -1,5 +1,10 @@
 # Rovelink concepts
 
+Rovelink is a governance and pre-flight decision layer for growing MSPs and
+infrastructure teams. It helps operators understand what is ready, what needs
+attention, and what remains unknown before automation is attempted. The product
+philosophy is **Govern first. Automate second.**
+
 | Concept | Practical meaning |
 | --- | --- |
 | Reference state / CMDB | Documented intended/reference data, cached from NetBox in Rovelink. |

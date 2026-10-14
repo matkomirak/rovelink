@@ -47,10 +47,11 @@ bootstrap credentials, local data or screenshots containing credentials.
   public repositories; if unavailable while private, add a monitored private
   contact before changing visibility. Do not invent a contact or advertise an
   unverified channel.
-- [ ] Record the two-minute video from the prepared synthetic demo, review every
-  frame for secrets, publish it, and replace the README/website placeholder with
-  a real link. A script is not a completed video.
-- [ ] Update the actual website with reviewed copy and working demo/repository/video CTAs.
+- [x] Record the two-minute video from the prepared synthetic demo, review every
+  frame for secrets, and add the reviewed captioned export to the landing-page
+  package. A script is not a completed video.
+- [ ] Deploy the updated website and verify the public demo/repository/video CTAs
+  against the final production URL.
 - [ ] Review visibility consequences and retained Actions logs/artifacts in GitHub.
   Historical screenshot exposure was previously accepted; investigate only new
   evidence rather than implying that acceptance removed history.

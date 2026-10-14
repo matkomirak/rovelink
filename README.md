@@ -1,11 +1,14 @@
 # Rovelink
 
-**Govern first. Automate second.**
+**Know what's ready to automate. Before you automate.**
 
-Rovelink is a governance-first pre-flight decision layer for infrastructure automation.
-It helps infrastructure teams and MSPs connect documented CMDB reference state with
-observed provider runtime state, evaluate reference quality, and prepare automation with explicit
-inventory eligibility and execution-time GATE checks.
+Product philosophy: **Govern first. Automate second.**
+
+Rovelink is an open-source, self-hosted governance and pre-flight decision layer
+for growing MSPs and infrastructure teams. It connects documented NetBox/CMDB
+reference state with observed provider runtime state, highlights missing ownership
+and incomplete operational information, evaluates governance readiness and drift,
+and supports conservative action-specific decisions before controlled automation.
 
 ## Public alpha
 
@@ -79,9 +82,11 @@ and demo apps together: cookies belong to hostnames, not ports.
 
 ## Demo video and screenshots
 
-A [two-minute script and shot list](docs/demo-video-script.md) is ready for recording.
-The video is not recorded or published yet; add its link only after review for
-secrets and fictional identifiers. Record the real UI, including Unknown readiness.
+The repository includes a reviewed, captioned two-minute public-alpha walkthrough
+in [`website/assets`](website/assets), embedded as the main product demo on the
+static landing page at [`website/index.html`](website/index.html). Its source flow
+follows the [two-minute script and shot list](docs/demo-video-script.md) and uses
+only the isolated local demo with synthetic data.
 
 ## Current capabilities
 
@@ -153,14 +158,14 @@ validated evidence and access controls. These are directions, not delivery promi
 - [Demo quickstart](docs/demo-quickstart.md) and [demo scenarios](docs/demo-scenarios.md)
 - [Concepts](docs/concepts.md) and [NetBox customer model](docs/netbox-customer-model.md)
 - [Automation Readiness Report](docs/automation-readiness-report.md)
+- [Enforcement boundary](docs/enforcement-boundary.md) and [Pre-flight GATE API](docs/gate-decision-api.md)
+- [Decision snapshots](docs/execution-decision-snapshots.md) and [worker/queue plan](docs/worker-queue-architecture.md)
+- [Command hardening](docs/command-execution-hardening.md) and [ingestion validation](docs/ingestion-validation.md)
 - [Local Development](LOCAL-DEVELOPMENT.md) and [Governance MVP](GOVERNANCE-MVP.md)
 - [Demo video script](docs/demo-video-script.md) and [website copy](docs/website-copy.md)
 - [Public-alpha checklist](docs/public-alpha-checklist.md)
 
 ## Security and contributing
-- [Enforcement boundary](docs/enforcement-boundary.md) and [Pre-flight GATE API](docs/gate-decision-api.md)
-- [Decision snapshots](docs/execution-decision-snapshots.md) and [worker/queue plan](docs/worker-queue-architecture.md)
-- [Command hardening](docs/command-execution-hardening.md) and [ingestion validation](docs/ingestion-validation.md)
 
 Use dedicated test credentials and trusted playbooks. Supported credential paths
 encrypt secrets at rest with AES-256-GCM; that does not replace access controls

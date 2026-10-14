@@ -1,31 +1,39 @@
 # Website copy for the public alpha
 
-Prepared copy only; nothing is deployed, published or made public by this task.
+Prepared for the local static landing page in `website/`. Nothing is deployed by
+this document or by the repositioning change.
 
-## Hero
+## Primary positioning
 
-**Govern first. Automate second.**
+**Know what's ready to automate. Before you automate.**
 
-Rovelink helps infrastructure teams and MSPs compare CMDB reference data with
-provider runtime state, evaluate governance readiness, and prepare automation
-with explicit inventory eligibility and execution-time GATE checks.
+Supporting line: **Turn infrastructure inventory into actionable readiness
+decisions.**
 
-## Why Rovelink
+Rovelink helps growing MSPs and infrastructure teams connect CMDB reference data
+with infrastructure providers, find missing ownership and incomplete VM
+information, evaluate governance policies, and understand what needs attention
+before automation runs.
 
-- Understand reference quality before preparing infrastructure automation.
-- Model customers through NetBox Tenant → Rovelink CustomerScope.
-- Compare documented VMs with observed runtime inventory and inspect drift.
-- See Ready, Needs attention and Unknown without treating them as execution permission.
-- Try the workflow locally with fake providers and no cloud credentials.
+Product philosophy: **Govern first. Automate second.**
 
-## How it works
+## Audience and value
 
-1. Connect NetBox and refresh cached reference VMs/customer assignments.
-2. Discover provider runtime inventory separately; customer hints stay non-authoritative.
-3. Evaluate an active blueprint and inspect governance findings.
-4. Compare reference/runtime state and review readiness dashboards.
-5. Prepare automation through inventories, templates and credentials; a specific
-   execution still requires GATE checks and trusted playbooks.
+- Growing MSPs managing multiple customers and infrastructure sources.
+- Infrastructure and DevOps teams adopting NetBox-driven automation.
+- Teams that need governance readiness, actionable findings, customer-aware
+  visibility, drift analysis, and conservative pre-flight decisions.
+
+## First-value workflow
+
+1. Connect NetBox and a supported provider.
+2. Evaluate ownership, required information, and relevance with a blueprint.
+3. Review readiness reports and findings.
+4. Correct information in its source system, then refresh and evaluate again.
+5. Use current evidence to guide controlled automation workflows.
+
+Discovery and drift are analysis-only. They do not automatically repair NetBox or
+provider state.
 
 ## Current alpha capabilities
 
@@ -43,13 +51,37 @@ and Automation Readiness stays at Ready = 0. Drift is analysis only. Provider hi
 never replace CMDB customer assignments. Caches/results require explicit refreshes
 and reruns; integrations are not production-certified.
 
+The action-specific pre-flight API can return `allow` only for a narrowly verified
+local Linux/SSH path under explicit policy. It can also return `block` or `unknown`.
+It does not launch jobs or persist approval snapshots.
+
+## Integration status
+
+- **Available:** NetBox reference integration; built-in Ansible for limited,
+  controlled use; public HTTPS Git and SSH foundation.
+- **Experimental / alpha:** normalized read-only Azure and Proxmox provider visibility.
+- **Planned:** target-bound AWX/RHAAP adapters, normalized VMware visibility,
+  i-doit, ServiceNow, AWS, GCP, and broader adapters.
+
 ## Calls to action
 
 - **Try the local demo** → [demo quickstart](demo-quickstart.md).
 - **View GitHub repository** → [Rovelink on GitHub](https://github.com/matkomirak/rovelink).
   Enable this public CTA only after the maintainer changes visibility and tests access.
-- **Watch the two-minute demo** → recording/link pending. Use
-  [the prepared script](demo-video-script.md); do not publish a broken video button.
+- **Watch the two-minute demo** → embedded on the landing page from the reviewed,
+  captioned public-alpha export in `website/assets`.
+
+## Public alpha announcement
+
+**Rovelink v0.1.1-alpha is public.**
+
+Govern first. Automate second.
+
+It connects CMDB reference data, provider runtime state, governance evaluation,
+drift analysis, and conservative automation readiness into one local demo.
+
+This is an early public alpha, not production-ready yet, but the core product
+story is now demoable.
 
 ## Footer disclaimer
 
@@ -64,7 +96,8 @@ automation. Built-in Ansible is intended for local demos, short tests, migration
 and lightweight controlled environments. It remains available, but is not the
 recommended enterprise-scale execution architecture. The enterprise direction is
 controlled external AWX/RHAAP/webhook adapters with decision snapshots, scoped
-credentials and durable workers; the existing AWX connector is MVP-level.
+credentials and durable workers. A legacy MVP-level AWX connector exists, but it
+is not the target-bound enterprise adapter described by that roadmap.
 
 Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
 manual administrative access can bypass an application-layer gate. See the

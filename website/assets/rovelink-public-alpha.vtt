@@ -1,0 +1,73 @@
+WEBVTT
+
+00:00:00.400 --> 00:00:04.494
+Rovelink helps infrastructure teams govern first and automate second.
+
+00:00:08.400 --> 00:00:12.248
+Missing customer assignments, ownership, and approval create uncertainty.
+
+00:00:12.248 --> 00:00:17.057
+Rovelink makes those gaps visible, connecting documented CMDB reference state
+
+00:00:17.057 --> 00:00:19.462
+with observed provider runtime state.
+
+00:00:20.400 --> 00:00:26.448
+NetBox is the reference source. This local demo uses fake Proxmox, Azure, and
+
+00:00:26.448 --> 00:00:30.636
+generic providers for runtime inventory. Provider customer hints are
+
+00:00:30.636 --> 00:00:32.962
+candidates, never authoritative customer assignments.
+
+00:00:35.400 --> 00:00:40.479
+Use one NetBox Tenant per customer. Rovelink imports that boundary as a
+
+00:00:40.479 --> 00:00:44.711
+CustomerScope. Here, the demo virtual machine has an authoritative customer
+
+00:00:44.711 --> 00:00:46.827
+assignment derived from NetBox Tenant.
+
+00:00:50.400 --> 00:00:54.057
+Governance blueprints evaluate cached reference objects for customer
+
+00:00:54.057 --> 00:00:58.171
+assignment, role, ownership, and readiness metadata. Findings explain what
+
+00:00:58.171 --> 00:01:03.200
+needs attention. Governance Ready is a policy result, not permission to
+
+00:01:03.200 --> 00:01:03.657
+execute.
+
+00:01:05.400 --> 00:01:09.181
+The Governance Readiness Report summarizes the latest completed evaluations.
+
+00:01:09.181 --> 00:01:14.221
+This demo has one ready object and three needing attention. After changing
+
+00:01:14.221 --> 00:01:17.162
+NetBox, refresh the cache and evaluate again.
+
+00:01:20.400 --> 00:01:24.785
+Automation Readiness stays conservative. Ready remains zero when execution
+
+00:01:24.785 --> 00:01:29.170
+signals cannot be verified. Inventory eligibility and execution authorization
+
+00:01:29.170 --> 00:01:34.042
+are different. A specific automation run still requires GATE checks.
+
+00:01:35.400 --> 00:01:39.530
+Drift reports reveal differences between reference and runtime. Here, a
+
+00:01:39.530 --> 00:01:44.072
+virtual machine is documented as running but observed as stopped. These
+
+00:01:44.072 --> 00:01:48.202
+reports are analysis only, with no automatic writeback or remediation.
+
+00:01:50.400 --> 00:01:57.213
+No automation executed here. Rovelink. Govern first. Automate second.

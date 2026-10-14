@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rovelink — Infrastructure Governance &amp; Automation Readiness</title>
+<meta name="description" content="Open-source, self-hosted infrastructure governance for growing MSPs. Connect NetBox and infrastructure providers, evaluate readiness, identify drift, and prepare for controlled automation.">
+<meta property="og:title" content="Rovelink — Infrastructure Governance &amp; Automation Readiness">
+<meta property="og:description" content="Know what's ready to automate before you automate. NetBox-first governance, drift visibility, and conservative pre-flight decisions for growing MSPs.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/rovelink-public-alpha-poster.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #F7F6F2;
+    --bg2:       #EFEEE9;
+    --bg3:       #E5E3DC;
+    --ink:       #1A1916;
+    --ink2:      #4A4840;
+    --ink3:      #7A7870;
+    --accent:    #1D5C3A;
+    --accent2:   #2A7A50;
+    --accent-lt: #D4EBE0;
+    --border:    #D6D4CC;
+    --mono:      'DM Mono', monospace;
+    --serif:     'Instrument Serif', serif;
+    --sans:      'DM Sans', sans-serif;
+    --radius:    6px;
+    --max:       1120px;
+  }
+
+  html { scroll-behavior: smooth; }
+  :focus-visible { outline:3px solid var(--accent); outline-offset:4px; border-radius:6px; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── NAV ── */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(247,246,242,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    max-width: var(--max); margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 60px;
+  }
+  .logo {
+    font-family: var(--mono); font-weight: 500;
+    font-size: 1.05rem; color: var(--ink);
+    text-decoration: none; letter-spacing: -0.02em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-mark {
+    width: 26px; height: 26px;
+    background: var(--accent); border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-mark svg { width: 14px; height: 14px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; }
+  nav-links { display: flex; gap: 2rem; }
+  .nav-links { list-style: none; display: flex; gap: 2rem; align-items: center; }
+  .nav-links a { font-size: 0.875rem; color: var(--ink2); text-decoration: none; font-weight: 400; transition: color .15s; }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-gh {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 0.8rem; font-weight: 500;
+    color: var(--accent); text-decoration: none;
+    border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 5px 12px; transition: background .15s, color .15s;
+  }
+  .nav-gh:hover { background: var(--accent); color: #fff; }
+  .nav-gh svg { width: 14px; height: 14px; }
+
+  /* ── HERO ── */
+  .hero {
+    max-width: var(--max); margin: 0 auto;
+    padding: 7rem 2rem 5rem;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 5rem; align-items: center;
+  }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent-lt); color: var(--accent);
+    font-family: var(--mono); font-size: 0.75rem; font-weight: 500;
+    border-radius: 100px; padding: 4px 12px; margin-bottom: 1.5rem;
+    border: 1px solid #b0d9c6;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  h1 {
+    font-family: var(--serif); font-size: 3.5rem; line-height: 1.1;
+    font-weight: 400; letter-spacing: -0.02em; margin-bottom: 1.25rem;
+    color: var(--ink);
+  }
+  h1 em { font-style: italic; color: var(--accent2); }
+  .hero-sub {
+    font-size: 1.1rem; color: var(--ink2); line-height: 1.65;
+    max-width: 480px; margin-bottom: 2.5rem; font-weight: 300;
+  }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #fff;
+    font-family: var(--mono); font-size: 0.875rem; font-weight: 500;
+    padding: 11px 22px; border-radius: var(--radius);
+    text-decoration: none; transition: background .15s, transform .1s;
+    border: 1px solid transparent;
+  }
+  .btn-primary:hover { background: var(--accent2); transform: translateY(-1px); }
+  .btn-secondary {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: transparent; color: var(--ink);
+    font-family: var(--mono); font-size: 0.875rem; font-weight: 500;
+    padding: 11px 22px; border-radius: var(--radius);
+    text-decoration: none; border: 1px solid var(--border);
+    transition: border-color .15s, transform .1s, background .15s;
+  }
+  .btn-secondary:hover { border-color: var(--ink2); background: var(--bg2); transform: translateY(-1px); }
+  .btn-icon { width: 16px; height: 16px; flex-shrink: 0; }
+
+  /* ── HERO VISUAL ── */
+  .hero-visual {
+    background: var(--ink); border-radius: 10px;
+    padding: 0; overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 1px 0 rgba(255,255,255,0.08) inset;
+  }
+  .terminal-bar {
+    background: #2A2826; padding: 10px 14px;
+    display: flex; align-items: center; gap: 7px;
+    border-bottom: 1px solid #3A3835;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot-r { background: #E25651; }
+  .dot-y { background: #E3A04F; }
+  .dot-g { background: #4FAE5B; }
+  .terminal-title { font-family: var(--mono); font-size: 0.72rem; color: #666360; margin-left: auto; }
+  .terminal-body { padding: 20px; font-family: var(--mono); font-size: 0.8rem; line-height: 1.8; }
+  .t-dim  { color: #555350; }
+  .t-gray { color: #888580; }
+  .t-grn  { color: #4FAE5B; }
+  .t-blu  { color: #5B9BD5; }
+  .t-ylw  { color: #E3A04F; }
+  .t-red  { color: #E25651; }
+  .t-wht  { color: #D8D5D0; }
+  .t-prompt { color: #4FAE5B; }
+
+  /* ── STRIP ── */
+  .strip {
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    background: var(--bg2); padding: 1rem 2rem;
+    overflow: hidden;
+  }
+  .strip-inner {
+    max-width: var(--max); margin: 0 auto;
+    display: flex; gap: 3rem; align-items: center; flex-wrap: wrap;
+  }
+  .strip-label { font-family: var(--mono); font-size: 0.72rem; color: var(--ink3); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.06em; }
+  .strip-items { display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: center; }
+  .strip-item { font-family: var(--mono); font-size: 0.8rem; color: var(--ink2); display: flex; align-items: center; gap: 7px; }
+  .strip-item::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--border); display: block; }
+
+  /* ── SECTION ── */
+  section { max-width: var(--max); margin: 0 auto; padding: 5rem 2rem; }
+  .section-label {
+    font-family: var(--mono); font-size: 0.72rem; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem;
+  }
+  h2 {
+    font-family: var(--serif); font-size: 2.4rem; font-weight: 400;
+    line-height: 1.15; letter-spacing: -0.02em; margin-bottom: 1rem; color: var(--ink);
+  }
+  h2 em { font-style: italic; }
+  .section-sub { font-size: 1.05rem; color: var(--ink2); max-width: 560px; font-weight: 300; margin-bottom: 3rem; }
+
+  /* ── PROBLEM / SOLUTION ── */
+  .problem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: start; }
+  .problem-list { list-style: none; display: flex; flex-direction: column; gap: 1.25rem; }
+  .problem-list li {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 16px 18px; background: var(--bg2);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 0.9rem; color: var(--ink2); line-height: 1.55;
+  }
+  .problem-list li .icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+  .solution-list { list-style: none; display: flex; flex-direction: column; gap: 1.25rem; }
+  .solution-list li {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 16px 18px; background: #EBF5EF;
+    border: 1px solid #b0d9c6; border-radius: var(--radius);
+    font-size: 0.9rem; color: #1A3D28; line-height: 1.55;
+  }
+  .solution-list li .icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── FEATURES ── */
+  .features-bg { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .features-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    margin-top: 0;
+  }
+  .feature-card {
+    background: var(--bg); padding: 2rem;
+    display: flex; flex-direction: column; gap: 0.75rem;
+  }
+  .feature-icon {
+    width: 36px; height: 36px; border-radius: 7px;
+    background: var(--accent-lt); border: 1px solid #b0d9c6;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .feature-icon svg { width: 18px; height: 18px; stroke: var(--accent); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .feature-card h3 { font-size: 0.95rem; font-weight: 600; color: var(--ink); }
+  .feature-card p { font-size: 0.875rem; color: var(--ink2); line-height: 1.6; }
+  .feature-tag { font-family: var(--mono); font-size: 0.7rem; color: var(--accent); margin-top: auto; }
+
+  /* ── HOW IT WORKS ── */
+  .how-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 5rem; align-items: start; }
+  .steps { display: flex; flex-direction: column; gap: 0; }
+  .step { display: flex; gap: 1.25rem; position: relative; padding-bottom: 2rem; }
+  .step:last-child { padding-bottom: 0; }
+  .step-num-col { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+  .step-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--ink); color: #fff;
+    font-family: var(--mono); font-size: 0.75rem; font-weight: 500;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .step-line { width: 1px; flex: 1; background: var(--border); margin-top: 6px; }
+  .step:last-child .step-line { display: none; }
+  .step-body { padding-top: 4px; }
+  .step-body h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.3rem; }
+  .step-body p { font-size: 0.875rem; color: var(--ink2); line-height: 1.6; }
+
+  .pipeline-visual {
+    background: var(--ink); border-radius: 10px; padding: 1.5rem;
+    font-family: var(--mono); font-size: 0.78rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.12);
+  }
+  .pipeline-title { color: #555350; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1.25rem; }
+  .pipeline-row { display: flex; align-items: center; gap: 0; margin-bottom: 0.5rem; }
+  .p-box {
+    padding: 8px 14px; border-radius: 5px; font-size: 0.75rem; white-space: nowrap;
+  }
+  .p-provider { background: #1e2d3d; color: #5B9BD5; border: 1px solid #2a3d52; }
+  .p-gate    { background: #2a1f0e; color: #E3A04F; border: 1px solid #3d2e12; }
+  .p-cmdb    { background: #12281a; color: #4FAE5B; border: 1px solid #1a3824; }
+  .p-ansible { background: #1f1f2e; color: #9B8EE3; border: 1px solid #2d2a45; }
+  .p-arrow   { color: #3A3835; padding: 0 8px; font-size: 1rem; }
+  .p-block   { background: #2d1212; color: #E25651; border: 1px solid #451a1a; }
+  .p-allow   { background: #122d1a; color: #4FAE5B; border: 1px solid #1a4525; }
+  .p-indent  { margin-left: 20px; }
+  .p-label   { color: #555350; font-size: 0.7rem; margin: 0.75rem 0 0.4rem; }
+  .p-sep     { border: none; border-top: 1px solid #2A2826; margin: 1rem 0; }
+
+  /* ── STACK ── */
+  .stack-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .stack-pill {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 100px;
+    padding: 7px 16px; font-family: var(--mono); font-size: 0.8rem; color: var(--ink2);
+  }
+  .stack-pill-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ── PROVIDERS ── */
+  .providers-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+  .provider-card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  .provider-card h3 { font-size: 0.9rem; font-weight: 600; }
+  .provider-card p { font-size: 0.8rem; color: var(--ink2); }
+  .provider-status {
+    font-family: var(--mono); font-size: 0.68rem; display: inline-flex;
+    align-items: center; gap: 5px; margin-top: auto;
+    padding-top: 0.75rem;
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .s-stable { color: var(--accent); }
+  .s-stable .status-dot { background: var(--accent); }
+  .s-planned { color: var(--ink3); }
+  .s-planned .status-dot { background: var(--ink3); }
+
+  /* ── GATE HIGHLIGHT ── */
+  .gate-section {
+    background: var(--ink); color: #D8D5D0;
+    border-radius: 10px; padding: 3rem;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center;
+  }
+  .gate-section h2 { color: #fff; }
+  .gate-section .section-label { color: #4FAE5B; }
+  .gate-section p { color: #888580; font-size: 0.95rem; line-height: 1.7; margin-bottom: 1rem; }
+  .gate-rules { list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+  .gate-rules li {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 0.82rem; color: #888580;
+  }
+  .gate-rules li::before { content: '✓'; color: #4FAE5B; font-weight: 700; }
+
+  .gate-visual { display: flex; flex-direction: column; gap: 1rem; }
+  .gv-row { display: flex; align-items: center; gap: 10px; }
+  .gv-vm {
+    background: #2A2826; border: 1px solid #3A3835; border-radius: 5px;
+    padding: 8px 14px; font-family: var(--mono); font-size: 0.75rem; color: #888580;
+    min-width: 120px;
+  }
+  .gv-vm span { display: block; font-size: 0.68rem; color: #555350; margin-top: 2px; }
+  .gv-arrow { color: #3A3835; font-size: 0.9rem; }
+  .gv-result-pass {
+    background: #122d1a; border: 1px solid #1a4525; border-radius: 5px;
+    padding: 8px 14px; font-family: var(--mono); font-size: 0.75rem; color: #4FAE5B;
+  }
+  .gv-result-block {
+    background: #2d1212; border: 1px solid #451a1a; border-radius: 5px;
+    padding: 8px 14px; font-family: var(--mono); font-size: 0.75rem; color: #E25651;
+  }
+  .gv-label { font-family: var(--mono); font-size: 0.68rem; color: #3A3835; }
+
+  /* ── INSTALL ── */
+  .install-box {
+    background: var(--ink); border-radius: 8px; padding: 1.5rem 2rem;
+    font-family: var(--mono); font-size: 0.88rem;
+  }
+  .install-box .t-prompt { user-select: none; }
+  .install-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border); background: var(--bg2);
+    padding: 2.5rem 2rem;
+  }
+  .footer-inner {
+    max-width: var(--max); margin: 0 auto;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;
+  }
+  .footer-left { display: flex; flex-direction: column; gap: 0.3rem; }
+  .footer-logo { font-family: var(--mono); font-size: 0.9rem; color: var(--ink); font-weight: 500; }
+  .footer-tagline { font-size: 0.8rem; color: var(--ink3); }
+  .footer-links { display: flex; gap: 1.5rem; }
+  .footer-links a { font-size: 0.82rem; color: var(--ink2); text-decoration: none; transition: color .15s; }
+  .footer-links a:hover { color: var(--ink); }
+  .footer-copy { font-size: 0.78rem; color: var(--ink3); font-family: var(--mono); }
+
+  /* ── DIVIDER FULL ── */
+  .full-border { border-top: 1px solid var(--border); }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .hero-left > * { animation: fadeUp .55s ease both; }
+  .hero-left > *:nth-child(1) { animation-delay: .05s; }
+  .hero-left > *:nth-child(2) { animation-delay: .12s; }
+  .hero-left > *:nth-child(3) { animation-delay: .2s; }
+  .hero-left > *:nth-child(4) { animation-delay: .28s; }
+  .hero-visual { animation: fadeUp .55s .35s ease both; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; gap: 3rem; padding-top: 4rem; }
+    h1 { font-size: 2.6rem; }
+    .problem-grid, .how-grid, .gate-section { grid-template-columns: 1fr; gap: 2rem; }
+    .providers-grid { grid-template-columns: repeat(2, 1fr); }
+    .features-grid { grid-template-columns: 1fr; }
+    .install-grid { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+  }
+</style>
+<style>
+  /* 2026 SaaS visual refresh */
+  :root {
+    --bg:#070b12; --bg2:#0b111b; --bg3:#111a28; --ink:#f4f7fb;
+    --ink2:#a9b4c5; --ink3:#6f7d91; --accent:#45e0a8; --accent2:#63a9ff;
+    --accent-lt:rgba(69,224,168,.11); --border:rgba(154,175,205,.14);
+    --radius:16px; --max:1180px; --serif:'DM Sans',sans-serif;
+  }
+  html, body { overflow-x:hidden; }
+  body { background:var(--bg); }
+  body::before { content:""; position:fixed; inset:0; z-index:-2; pointer-events:none;
+    background:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+    background-size:64px 64px; mask-image:linear-gradient(to bottom,black,transparent 75%); }
+  body::after { content:""; position:fixed; width:900px; height:700px; left:50%; top:-380px; transform:translateX(-50%); z-index:-1; pointer-events:none;
+    background:radial-gradient(circle,rgba(57,136,255,.18),rgba(69,224,168,.07) 38%,transparent 70%); filter:blur(20px); }
+  nav { background:rgba(7,11,18,.72); border-color:var(--border); backdrop-filter:blur(20px) saturate(150%); }
+  .nav-inner { height:72px; }
+  .logo-mark { background:linear-gradient(135deg,var(--accent),#3186ff); box-shadow:0 0 28px rgba(69,224,168,.25); }
+  .nav-gh { color:var(--ink); border-color:var(--border); background:rgba(255,255,255,.04); padding:8px 14px; }
+  .nav-gh:hover { background:var(--ink); color:var(--bg); }
+  .hero { min-height:720px; padding-top:7rem; padding-bottom:7rem; gap:4rem; }
+  .hero-badge { background:rgba(69,224,168,.08); color:#7af3c8; border-color:rgba(69,224,168,.25); padding:7px 13px; }
+  .badge-dot { box-shadow:0 0 0 5px rgba(69,224,168,.1),0 0 16px var(--accent); animation:pulse 2s infinite; }
+  h1 { font-size:clamp(3.2rem,5.4vw,5.15rem); line-height:.98; letter-spacing:-.055em; font-weight:600; }
+  h1 em,h2 em { font-style:normal; background:linear-gradient(100deg,#78f2ca 5%,#70abff 80%); -webkit-background-clip:text; color:transparent; }
+  .hero-sub { font-size:1.12rem; max-width:560px; color:var(--ink2); }
+  .btn-primary,.btn-secondary { border-radius:10px; padding:13px 20px; transition:.25s ease; }
+  .btn-primary { color:#05100c; background:linear-gradient(120deg,#7af3c8,#45e0a8); box-shadow:0 10px 35px rgba(69,224,168,.18); }
+  .btn-primary:hover { background:linear-gradient(120deg,#91f7d4,#5ce8b6); transform:translateY(-3px); box-shadow:0 15px 45px rgba(69,224,168,.28); }
+  .btn-secondary { border-color:var(--border); background:rgba(255,255,255,.035); color:var(--ink); }
+  .btn-secondary:hover { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.28); transform:translateY(-3px); }
+  .hero-visual { overflow:visible; background:linear-gradient(145deg,rgba(17,26,40,.95),rgba(8,13,22,.98)); border:1px solid rgba(126,162,210,.18); border-radius:24px; box-shadow:0 35px 90px rgba(0,0,0,.5),0 0 80px rgba(60,125,255,.08); position:relative; }
+  .hero-visual::before { content:""; position:absolute; inset:-1px; border-radius:24px; background:linear-gradient(120deg,rgba(69,224,168,.38),transparent 35%,rgba(83,145,255,.3)); z-index:-1; filter:blur(1px); }
+  .terminal-bar { border-radius:24px 24px 0 0; background:rgba(255,255,255,.025); border-color:var(--border); padding:14px 18px; }
+  .terminal-title { color:var(--ink3); }
+  .flow-board { padding:28px; min-height:435px; display:flex; flex-direction:column; justify-content:center; gap:18px; position:relative; }
+  .flow-kicker { font:500 .66rem var(--mono); text-transform:uppercase; letter-spacing:.14em; color:var(--ink3); }
+  .flow-sources,.flow-targets { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
+  .flow-node { border:1px solid var(--border); background:rgba(255,255,255,.035); border-radius:11px; padding:12px 8px; text-align:center; font:500 .74rem var(--mono); color:var(--ink2); position:relative; transition:.25s ease; }
+  .flow-node:hover { transform:translateY(-3px); border-color:rgba(99,169,255,.55); color:var(--ink); background:rgba(99,169,255,.09); }
+  .flow-gate { padding:22px; border-radius:16px; border:1px solid rgba(69,224,168,.35); background:linear-gradient(135deg,rgba(69,224,168,.14),rgba(63,130,255,.09)); text-align:center; box-shadow:inset 0 0 35px rgba(69,224,168,.04),0 0 35px rgba(69,224,168,.08); }
+  .flow-gate strong { display:block; font-size:1.15rem; letter-spacing:-.02em; }
+  .flow-gate span { font:400 .68rem var(--mono); color:#85f2cc; }
+  .flow-line { height:28px; width:1px; margin:0 auto; background:linear-gradient(var(--accent2),var(--accent)); position:relative; }
+  .flow-line::after { content:""; position:absolute; width:7px; height:7px; border-radius:50%; left:-3px; background:white; box-shadow:0 0 14px var(--accent); animation:flow 1.8s linear infinite; }
+  .flow-status { display:flex; justify-content:space-between; align-items:center; padding-top:2px; font:400 .66rem var(--mono); color:var(--ink3); }
+  .flow-status b { color:#73edc1; font-weight:500; }
+  .strip,.features-bg,.full-border { background:rgba(11,17,27,.72)!important; border-color:var(--border); }
+  .strip { padding:1.25rem 2rem; }
+  section { padding-top:7rem; padding-bottom:7rem; }
+  .section-label { color:#70e8bd; }
+  h2 { font-size:clamp(2.5rem,4vw,4rem); line-height:1.04; letter-spacing:-.045em; font-weight:600; }
+  .problem-list li,.solution-list li,.feature-card,.provider-card,.pipeline-visual,.install-box { background:linear-gradient(145deg,rgba(17,26,40,.9),rgba(10,16,26,.92)); border-color:var(--border); }
+  .solution-list li { color:var(--ink2); }
+  .problem-list li,.solution-list li { border-radius:14px; padding:18px 20px; transition:.25s ease; }
+  .problem-list li:hover,.solution-list li:hover { transform:translateX(5px); border-color:rgba(99,169,255,.35); }
+  .features-grid { background:transparent; border:0; gap:16px; overflow:visible; grid-template-columns:repeat(6,1fr); }
+  .feature-card { grid-column:span 2; border:1px solid var(--border); border-radius:18px; min-height:245px; transition:transform .3s ease,border-color .3s ease,box-shadow .3s ease; }
+  .feature-card:nth-child(1),.feature-card:nth-child(4) { grid-column:span 3; }
+  .feature-card:hover,.provider-card:hover { transform:translateY(-8px); border-color:rgba(69,224,168,.42); box-shadow:0 24px 55px rgba(0,0,0,.3),0 0 30px rgba(69,224,168,.06); }
+  .feature-icon { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,rgba(69,224,168,.15),rgba(67,134,255,.11)); border-color:rgba(69,224,168,.22); transition:transform .3s ease; }
+  .feature-card:hover .feature-icon { transform:rotate(-7deg) scale(1.08); }
+  .gate-section { border-radius:28px; padding:clamp(2rem,5vw,4.5rem); background:radial-gradient(circle at 90% 10%,rgba(61,133,255,.15),transparent 35%),linear-gradient(145deg,#111b2a,#080d15); border:1px solid var(--border); box-shadow:0 35px 90px rgba(0,0,0,.35); }
+  .gate-visual { border:1px solid var(--border); background:rgba(3,7,12,.8); border-radius:18px; }
+  .pipeline-visual { border-radius:20px; box-shadow:0 25px 65px rgba(0,0,0,.28); }
+  .p-box { border-radius:9px!important; }
+  .providers-grid { gap:16px; }
+  .provider-card { position:relative; overflow:hidden; border-radius:18px; padding:1.7rem; transition:.3s ease; }
+  .provider-card::before { content:attr(data-logo); display:grid; place-items:center; width:48px; height:48px; margin-bottom:2rem; border-radius:13px; font:600 1rem var(--mono); color:white; background:linear-gradient(135deg,#2674dc,#5aaaff); box-shadow:0 12px 30px rgba(38,116,220,.22); }
+  .provider-card:nth-child(2)::before { background:linear-gradient(135deg,#7596dc,#364f91); }
+  .provider-card:nth-child(3)::before { background:linear-gradient(135deg,#ef8337,#c95521); }
+  .provider-card:nth-child(4)::before { background:linear-gradient(135deg,#ffb347,#e8751a); }
+  .stats-wrap { max-width:var(--max); margin:0 auto; padding:0 2rem 7rem; }
+  .stats-panel { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--border); border-radius:20px; overflow:hidden; background:rgba(13,20,31,.78); box-shadow:0 24px 70px rgba(0,0,0,.22); }
+  .stat { padding:2rem; border-right:1px solid var(--border); }
+  .stat:last-child { border:0; }
+  .stat-value { font-size:2.25rem; font-weight:600; letter-spacing:-.05em; color:var(--ink); }
+  .stat-value span { color:var(--accent); }
+  .stat-label { font:.7rem var(--mono); color:var(--ink3); text-transform:uppercase; letter-spacing:.08em; margin-top:.25rem; }
+  .install-grid { grid-template-columns:1fr; gap:0; }
+  .install-choice { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:14px; padding:5px; width:max-content; max-width:100%; background:rgba(255,255,255,.035); border:1px solid var(--border); border-radius:12px; }
+  .install-tab { border:0; border-radius:8px; background:transparent; color:var(--ink3); padding:9px 14px; font:500 .75rem var(--mono); cursor:pointer; }
+  .install-tab.active { color:#07100d; background:var(--accent); }
+  .install-grid>div { display:none; }
+  .install-grid>div.active { display:block; animation:fadeUp .35s ease both; }
+  .install-box { max-width:780px; min-height:310px; border-radius:18px; padding:1.7rem; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+  .blueprint-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-top:2.5rem; }
+  .blueprint-card { position:relative; padding:2rem; min-height:220px; border:1px solid var(--border); border-radius:18px; background:linear-gradient(145deg,rgba(17,26,40,.9),rgba(10,16,26,.92)); transition:.3s ease; }
+  .blueprint-card:hover { transform:translateY(-6px); border-color:rgba(69,224,168,.42); box-shadow:0 22px 50px rgba(0,0,0,.28); }
+  .blueprint-index { font:500 .68rem var(--mono); color:var(--accent); letter-spacing:.12em; margin-bottom:1.4rem; }
+  .blueprint-card h3 { font-size:1.15rem; margin-bottom:.65rem; }
+  .blueprint-card p { color:var(--ink2); font-size:.9rem; }
+  .score-scale { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-top:1.5rem; }
+  .score-scale span { padding:7px; text-align:center; border-radius:7px; background:rgba(255,255,255,.045); font:.68rem var(--mono); color:var(--ink3); }
+  .score-scale span:last-child { background:rgba(69,224,168,.15); color:#78f2ca; }
+  .report-panel { padding:1.5rem; border:1px solid var(--border); border-radius:18px; background:rgba(3,7,12,.72); }
+  .report-head { display:flex; justify-content:space-between; gap:1rem; padding-bottom:1.1rem; border-bottom:1px solid var(--border); }
+  .report-object { font:500 .78rem var(--mono); color:var(--ink); }
+  .report-score { font:600 1.7rem var(--sans); color:var(--accent); }
+  .relevance-meter { display:grid; grid-template-columns:1fr auto; gap:.65rem 1rem; margin:1.2rem 0; font:.72rem var(--mono); color:var(--ink2); }
+  .meter-dots { display:flex; gap:4px; }
+  .meter-dots i { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px rgba(69,224,168,.25); }
+  .report-finding { border-left:2px solid #ffb45d; padding:.8rem 1rem; margin-top:1rem; background:rgba(255,180,93,.06); color:var(--ink2); font-size:.8rem; }
+  .action-badge { display:inline-flex; margin-top:1rem; padding:7px 10px; border-radius:8px; background:rgba(226,86,81,.12); border:1px solid rgba(226,86,81,.3); color:#ff8c88; font:500 .67rem var(--mono); }
+  .roadmap-note { margin-top:2.5rem; padding:1.5rem; border:1px solid rgba(99,169,255,.28); border-radius:16px; background:rgba(99,169,255,.07); color:var(--ink2); font-size:.9rem; line-height:1.7; }
+  .roadmap-note strong { color:var(--ink); }
+  .status-planned { color:#8fbaff!important; }
+  .announcement { max-width:var(--max); margin:0 auto; padding:0 2rem 2rem; }
+  .announcement-inner { display:grid; grid-template-columns:auto 1fr; gap:1.25rem; align-items:start; padding:1.35rem 1.5rem; border:1px solid rgba(69,224,168,.25); border-radius:16px; background:linear-gradient(135deg,rgba(69,224,168,.09),rgba(99,169,255,.06)); }
+  .announcement-badge { white-space:nowrap; padding:6px 9px; border-radius:7px; background:var(--accent); color:#04100c; font:600 .66rem var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+  .announcement-copy strong { display:block; margin-bottom:.25rem; font-size:1rem; color:var(--ink); }
+  .announcement-copy p { color:var(--ink2); font-size:.88rem; line-height:1.65; }
+  .demo-section { padding-top:5rem; }
+  .demo-header { display:grid; grid-template-columns:1.2fr .8fr; gap:3rem; align-items:end; margin-bottom:2.5rem; }
+  .demo-header .section-sub { margin-bottom:0; }
+  .demo-meta { display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+  .demo-meta span { padding:7px 10px; border:1px solid var(--border); border-radius:999px; color:var(--ink3); background:rgba(255,255,255,.025); font:500 .66rem var(--mono); }
+  .demo-frame { position:relative; overflow:hidden; border:1px solid rgba(110,159,225,.24); border-radius:24px; background:#03070c; box-shadow:0 35px 100px rgba(0,0,0,.48),0 0 60px rgba(62,132,255,.08); }
+  .demo-frame::before { content:""; position:absolute; inset:-1px; z-index:-1; border-radius:24px; background:linear-gradient(120deg,rgba(69,224,168,.45),transparent 38%,rgba(99,169,255,.34)); }
+  .demo-video { display:block; width:100%; height:auto; aspect-ratio:16/9; background:#03070c; object-fit:contain; }
+  .demo-caption { display:flex; justify-content:space-between; gap:1rem; padding:1rem 1.2rem; border-top:1px solid var(--border); color:var(--ink3); font:.68rem var(--mono); }
+  .hero-eyebrow { color:var(--accent); font:500 .72rem var(--mono); letter-spacing:.08em; text-transform:uppercase; margin-bottom:1rem; }
+  .hero-kicker { margin:.2rem 0 1rem; color:var(--ink); font-size:1.12rem; font-weight:500; }
+  .hero-badges { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:1.5rem; }
+  .hero-badges span { padding:6px 10px; border:1px solid var(--border); border-radius:999px; color:var(--ink2); background:rgba(255,255,255,.025); font:500 .67rem var(--mono); }
+  .github-link { display:inline-flex; align-items:center; padding:10px 4px; color:var(--ink2); font:500 .78rem var(--mono); text-decoration:none; }
+  .github-link:hover { color:var(--ink); }
+  .hero-demo-cta .btn-icon { display:none; }
+  .outcome-strip { max-width:var(--max); margin:0 auto; padding:0 2rem 5rem; display:grid; grid-template-columns:repeat(3,1fr); gap:1px; }
+  .outcome { padding:1.5rem; border:1px solid var(--border); background:rgba(12,19,30,.72); }
+  .outcome:first-child { border-radius:16px 0 0 16px; }
+  .outcome:last-child { border-radius:0 16px 16px 0; }
+  .outcome strong { display:block; margin-bottom:.45rem; color:var(--ink); font-size:.95rem; }
+  .outcome span { color:var(--ink2); font-size:.83rem; line-height:1.55; }
+  .example-panel { margin-top:1.5rem; padding:1.25rem; border:1px solid rgba(99,169,255,.25); border-radius:14px; background:rgba(99,169,255,.06); }
+  .example-panel small { display:block; margin-bottom:.55rem; color:#91baff; font:500 .65rem var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .example-panel strong { font-size:1.1rem; }
+  .architecture-flow { display:grid; grid-template-columns:1fr auto 1.3fr auto 1fr; gap:12px; align-items:stretch; margin-top:2.5rem; }
+  .architecture-node { padding:1.5rem; border:1px solid var(--border); border-radius:16px; background:linear-gradient(145deg,rgba(17,26,40,.92),rgba(10,16,26,.94)); }
+  .architecture-node strong { display:block; margin-bottom:.65rem; }
+  .architecture-node p { color:var(--ink2); font-size:.82rem; line-height:1.55; }
+  .architecture-node.core { border-color:rgba(69,224,168,.34); background:linear-gradient(145deg,rgba(69,224,168,.11),rgba(99,169,255,.07)); }
+  .architecture-arrow { display:grid; place-items:center; color:var(--accent); font:500 1.2rem var(--mono); }
+  .boundary-note { margin-top:1.5rem; color:var(--ink3); font-size:.8rem; line-height:1.65; }
+  .boundary-note a { color:var(--accent); }
+  .integration-group { margin-top:2.25rem; }
+  .integration-group h3 { margin-bottom:1rem; font:500 .72rem var(--mono); color:var(--ink3); text-transform:uppercase; letter-spacing:.1em; }
+  .status-chip { display:inline-flex; margin-top:1rem; padding:5px 8px; border-radius:7px; font:500 .65rem var(--mono); }
+  .status-available { color:#78f2ca; background:rgba(69,224,168,.1); border:1px solid rgba(69,224,168,.2); }
+  .status-alpha { color:#91baff; background:rgba(99,169,255,.1); border:1px solid rgba(99,169,255,.2); }
+  .status-planned-chip { color:#d0a9ff; background:rgba(177,110,255,.1); border:1px solid rgba(177,110,255,.2); }
+  footer { background:#05080d; border-color:var(--border); }
+  .reveal { opacity:0; transform:translateY(24px); transition:opacity .7s ease,transform .7s ease; }
+  .reveal.visible { opacity:1; transform:none; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 8px rgba(69,224,168,0),0 0 20px var(--accent); } }
+  @keyframes flow { from { top:0; opacity:0 } 20% { opacity:1 } to { top:24px; opacity:0 } }
+  @media(max-width:860px){ .hero{min-height:auto}.features-grid{grid-template-columns:1fr}.feature-card,.feature-card:nth-child(1),.feature-card:nth-child(4){grid-column:auto}.stats-panel{grid-template-columns:1fr 1fr}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--border)}.blueprint-grid{grid-template-columns:1fr}.demo-header{grid-template-columns:1fr;gap:1rem}.demo-meta{justify-content:flex-start}.announcement-inner{grid-template-columns:1fr}.outcome-strip{grid-template-columns:1fr;gap:0}.outcome:first-child{border-radius:16px 16px 0 0}.outcome:last-child{border-radius:0 0 16px 16px}.architecture-flow{grid-template-columns:1fr}.architecture-arrow{transform:rotate(90deg);min-height:28px} }
+  @media(max-width:540px){ .stats-panel{grid-template-columns:1fr}.stat{border-right:0;border-bottom:1px solid var(--border)!important}.flow-sources,.flow-targets{grid-template-columns:1fr}.hero{padding-left:1.2rem;padding-right:1.2rem}.flow-board{padding:20px} }
+  @media(prefers-reduced-motion:reduce){ html{scroll-behavior:auto}.hero-left>*,.hero-visual,.badge-dot,.flow-line::after,.reveal{animation:none!important;transition:none!important;opacity:1;transform:none} }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="logo">
+      <div class="logo-mark">
+        <svg viewBox="0 0 14 14"><path d="M2 7h10M7 2l5 5-5 5"/></svg>
+      </div>
+      rovelink
+    </a>
+    <ul class="nav-links">
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#demo">Demo</a></li>
+      <li><a href="#readiness">Readiness</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#integrations">Integrations</a></li>
+      <li><a href="#install">Install</a></li>
+    </ul>
+    <a href="https://github.com/matkomirak/rovelink" class="nav-gh">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div style="max-width:var(--max);margin:0 auto;">
+  <div class="hero">
+    <div class="hero-left">
+      <div class="hero-eyebrow">For growing MSPs and infrastructure teams</div>
+      <div class="hero-badges"><span>Open source</span><span>Self-hosted</span><span>NetBox-first</span><span>Public alpha</span></div>
+      <h1>Know what's ready to automate.<br><em>Before you automate.</em></h1>
+      <p class="hero-kicker">Turn infrastructure inventory into actionable readiness decisions.</p>
+      <p class="hero-sub">Rovelink connects CMDB reference data with infrastructure providers so growing MSPs can find missing ownership, incomplete VM information, governance gaps, and drift before automation runs. <strong>Govern first. Automate second.</strong></p>
+      <div class="cta-row">
+        <a href="#demo" class="btn-primary hero-demo-cta">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          Watch the 2-minute demo
+        </a>
+        <a href="#install" class="btn-secondary">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+          Get started
+        </a>
+        <a href="https://github.com/matkomirak/rovelink" class="github-link">GitHub repository →</a>
+      </div>
+    </div>
+
+    <div class="hero-visual">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div>
+        <div class="dot dot-y"></div>
+        <div class="dot dot-g"></div>
+        <div class="terminal-title">rovelink · provider sync</div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-wht">rovelink sync --provider azure --cmdb netbox</span></div>
+        <div class="t-dim">─────────────────────────────────────</div>
+        <div><span class="t-gray">▶ Scanning Azure subscription...</span></div>
+        <div><span class="t-grn">✓</span> <span class="t-gray">Found 142 virtual machines</span></div>
+        <div><span class="t-gray">▶ Running Automation GATE...</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-grn">  PASS</span> <span class="t-gray">web-prod-01</span> <span class="t-dim">tenant=acme role=webserver automatable=true</span></div>
+        <div><span class="t-grn">  PASS</span> <span class="t-gray">db-prod-02</span>  <span class="t-dim">tenant=acme role=database automatable=true</span></div>
+        <div><span class="t-red">  BLOCK</span> <span class="t-gray">test-vm-47</span>   <span class="t-dim">reason: no tenant assigned</span></div>
+        <div><span class="t-red">  BLOCK</span> <span class="t-gray">rogue-03</span>    <span class="t-dim">reason: automatable=false</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-gray">▶ Evaluating</span> <span class="t-grn">illustrative assets</span> <span class="t-gray">against governance rules...</span></div>
+        <div><span class="t-gray">▶ Preparing a conservative readiness decision...</span></div>
+        <div><span class="t-grn">✓</span> <span class="t-gray">Exceptions remain visible.</span> <span class="t-ylw">No automatic remediation.</span></div>
+        <div><span class="t-dim">─────────────────────────────────────</span></div>
+        <div><span class="t-grn">✓ Sync complete</span> <span class="t-gray">in 4.2s</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- INTEGRATES WITH -->
+<div class="strip">
+  <div class="strip-inner">
+    <span class="strip-label">Works with</span>
+    <div class="strip-items">
+      <span class="strip-item">NetBox</span>
+      <span class="strip-item">Governance readiness</span>
+      <span class="strip-item">Drift analysis</span>
+      <span class="strip-item">Built-in Ansible</span>
+      <span class="strip-item">Azure · alpha</span>
+      <span class="strip-item">Proxmox · alpha</span>
+      <span class="strip-item">Git</span>
+      <span class="strip-item">SSH</span>
+    </div>
+  </div>
+</div>
+
+<!-- PUBLIC ALPHA ANNOUNCEMENT -->
+<aside class="announcement" aria-label="Public alpha announcement">
+  <div class="announcement-inner">
+    <span class="announcement-badge">v0.1.1-alpha</span>
+    <div class="announcement-copy">
+      <strong>Rovelink v0.1.1-alpha is public. Govern first. Automate second.</strong>
+      <p>It connects CMDB reference data, provider runtime state, governance evaluation, drift analysis, and conservative automation readiness in one local demo. This is an early public alpha—not production-ready yet—but the core product story is now demoable.</p>
+    </div>
+  </div>
+</aside>
+
+<!-- PRODUCT DEMO -->
+<section id="demo" class="demo-section">
+  <div class="demo-header">
+    <div>
+      <div class="section-label">Product demo</div>
+      <h2>See Rovelink<br><em>in 2 minutes</em></h2>
+      <p class="section-sub">Follow the governance-first workflow from CMDB reference data and observed runtime state through evaluation, readiness, and drift analysis.</p>
+    </div>
+    <div class="demo-meta" aria-label="Demo details">
+      <span>PUBLIC ALPHA</span>
+      <span>LOCAL DEMO</span>
+      <span>SYNTHETIC DATA</span>
+    </div>
+  </div>
+  <div class="demo-frame">
+    <video class="demo-video" controls preload="metadata" playsinline poster="assets/rovelink-public-alpha-poster.jpg" aria-label="Two-minute Rovelink public alpha product demo">
+      <source src="assets/rovelink-public-alpha-captioned.mp4" type="video/mp4">
+      <track kind="captions" src="assets/rovelink-public-alpha.vtt" srclang="en" label="English" default>
+      Your browser does not support embedded video. <a href="assets/rovelink-public-alpha-captioned.mp4">Download the Rovelink product demo</a>.
+    </video>
+    <div class="demo-caption"><span>Rovelink public alpha walkthrough</span><span>No production systems · no live credentials</span></div>
+  </div>
+</section>
+
+<!-- PROBLEM / SOLUTION -->
+<section id="problem">
+  <div class="problem-grid">
+    <div>
+      <div class="section-label">The problem</div>
+      <h2>Your automation<br>doesn't know what it<br><em>shouldn't touch</em></h2>
+      <ul class="problem-list" style="margin-top:1.5rem">
+        <li><span class="icon">⚠</span>VMs spin up in the cloud but never land in the CMDB — yet Ansible still reaches them.</li>
+        <li><span class="icon">⚠</span>Provider data and CMDB data drift apart within days. Nobody knows which version is true.</li>
+        <li><span class="icon">⚠</span>Ansible inventories built from providers include ungoverned, unassigned, or decommissioned machines.</li>
+        <li><span class="icon">⚠</span>No single platform connects provider discovery, CMDB governance, and automation in one flow.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="section-label">The solution</div>
+      <h2>A decision layer for workflows<br>routed through it:<br><em>govern first, automate second</em></h2>
+      <ul class="solution-list" style="margin-top:1.5rem">
+        <li><span class="icon">✓</span>Rovelink combines configured reference and runtime data into an explainable readiness view.</li>
+        <li><span class="icon">✓</span>The pre-flight GATE returns allow, block, or unknown for supported action paths.</li>
+        <li><span class="icon">✓</span>Configured GATE checks filter local inventory targets. Reports and drift do not write back to the CMDB.</li>
+        <li><span class="icon">✓</span>One UI to manage providers, CMDBs, pipelines, and automation — with full run history.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<div class="features-bg full-border">
+  <section id="features" style="padding-bottom:4rem">
+    <div class="section-label">Features</div>
+    <h2>Everything the gap between<br>your cloud and your CMDB needs</h2>
+    <p class="section-sub">Built by someone who ran this infrastructure for 8 years. Every feature solves a real problem.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>Automation GATE</h3>
+        <p>A conservative pre-flight decision layer for workflows that explicitly route through Rovelink.</p>
+        <div class="feature-tag">allow · block · unknown</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/></svg>
+        </div>
+        <h3>Multi-provider discovery</h3>
+        <p>Use NetBox as the reference system and evaluate early Azure or Proxmox runtime inputs. VMware support remains planned.</p>
+        <div class="feature-tag">netbox · azure alpha · proxmox alpha</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <h3>Bridge Data Pipelines</h3>
+        <p>Visual pipeline builder to map provider fields to CMDB fields. Dry-run before commit. Rules engine for transformation and validation.</p>
+        <div class="feature-tag">mapping editor · dry-run</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h8M4 18h8"/><circle cx="17" cy="17" r="3"/><path d="M20.5 20.5l-1.5-1.5"/></svg>
+        </div>
+        <h3>Ansible / AWX integration</h3>
+        <p>Lightweight local Ansible for demos, short tests, migrations and small controlled environments. The AWX connector is MVP-level; controlled enterprise adapters are planned.</p>
+        <div class="feature-tag">awx · websocket · real-time</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+        </div>
+        <h3>Multi-CMDB support</h3>
+        <p>NetBox-first reference data with analysis-only drift reporting. Additional CMDB adapters remain planned.</p>
+        <div class="feature-tag">netbox-first · analysis-only</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        </div>
+        <h3>Security by default</h3>
+        <p>AES-256-GCM secret encryption at rest. JWT with HttpOnly cookies. RBAC with admin, operator, and viewer roles. Zero secrets in logs.</p>
+        <div class="feature-tag">aes-256 · jwt · rbac</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- AUTOMATION GATE HIGHLIGHT -->
+<section>
+  <div class="gate-section">
+    <div>
+      <div class="section-label">The Automation GATE</div>
+      <h2>A block is not<br>a failure.<br><em>It's the system working.</em></h2>
+      <p>Rovelink evaluates supported actions before execution and returns an explainable allow, block, or unknown result. It is authoritative only for workflows that call the decision layer.</p>
+      <p>Known blockers stop the supported path. Missing or stale evidence remains unknown.</p>
+      <ul class="gate-rules">
+        <li>Active tenant assigned in CMDB</li>
+        <li>Role assigned in CMDB</li>
+        <li>automatable = true explicitly set</li>
+      </ul>
+    </div>
+    <div class="gate-visual">
+      <div class="pipeline-title">gate evaluation · live</div>
+      <div class="gv-row">
+        <div class="gv-vm">web-prod-01<span>azure · eastus</span></div>
+        <div class="gv-arrow">→</div>
+        <div class="gv-result-pass">✓ PASS — enters inventory</div>
+      </div>
+      <div class="gv-row">
+        <div class="gv-vm">db-prod-02<span>azure · westeu</span></div>
+        <div class="gv-arrow">→</div>
+        <div class="gv-result-pass">✓ PASS — enters inventory</div>
+      </div>
+      <div class="gv-row">
+        <div class="gv-vm">test-vm-47<span>proxmox · local</span></div>
+        <div class="gv-arrow">→</div>
+        <div class="gv-result-block">✗ BLOCK — no tenant</div>
+      </div>
+      <div class="gv-row">
+        <div class="gv-vm">legacy-db<span>vcenter · dc1</span></div>
+        <div class="gv-arrow">→</div>
+        <div class="gv-result-block">✗ BLOCK — automatable=false</div>
+      </div>
+      <div class="gv-row">
+        <div class="gv-vm">rogue-box<span>azure · eastus</span></div>
+        <div class="gv-arrow">→</div>
+        <div class="gv-result-block">✗ BLOCK — not in CMDB</div>
+      </div>
+      <div style="font-family:var(--mono);font-size:0.7rem;color:#3A3835;margin-top:0.5rem;">Illustrative evaluation only. No automatic CMDB write-back.</div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<div class="full-border" style="background:var(--bg2);">
+<section id="how">
+  <div class="section-label">How it works</div>
+  <h2>From cloud to CMDB<br>to Ansible — <em>in one flow</em></h2>
+  <div class="how-grid" style="margin-top:3rem">
+    <div class="steps">
+      <div class="step">
+        <div class="step-num-col"><div class="step-num">1</div><div class="step-line"></div></div>
+        <div class="step-body">
+          <h3>Connect your providers</h3>
+          <p>Connect supported sources. Azure and Proxmox normalized inputs are early alpha; VMware visibility remains planned.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num-col"><div class="step-num">2</div><div class="step-line"></div></div>
+        <div class="step-body">
+          <h3>Connect your CMDB</h3>
+          <p>Use NetBox reference data to identify gaps, drift, missing ownership, and governance exceptions.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num-col"><div class="step-num">3</div><div class="step-line"></div></div>
+        <div class="step-body">
+          <h3>GATE runs — always</h3>
+          <p>Supported workflows can request a pre-flight decision. Known blockers stop that path; incomplete evidence stays visible as unknown.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num-col"><div class="step-num">4</div><div class="step-line"></div></div>
+        <div class="step-body">
+          <h3>Ansible gets a clean inventory</h3>
+          <p>Local inventory preparation applies configured checks. Enterprise adapters must bind decisions to actual targets; the existing AWX connector does not prove that enforcement.</p>
+        </div>
+      </div>
+    </div>
+    <div class="pipeline-visual">
+      <div class="pipeline-title">data flow</div>
+      <div class="p-label">Providers</div>
+      <div class="pipeline-row"><div class="p-box p-provider">Azure</div><div class="p-arrow">→</div></div>
+      <div class="pipeline-row p-indent"><div class="p-box p-provider">Proxmox</div><div class="p-arrow">→</div></div>
+      <div class="pipeline-row p-indent"><div class="p-box p-provider">vCenter</div><div class="p-arrow">→</div></div>
+      <hr class="p-sep">
+      <div class="p-label">Automation GATE</div>
+      <div class="pipeline-row">
+        <div class="p-box p-gate">tenant? ✓ &nbsp; role? ✓ &nbsp; automatable? ✓</div>
+      </div>
+      <div class="pipeline-row" style="margin-top:8px;gap:8px">
+        <div class="p-box p-allow">PASS →</div>
+        <div class="p-box p-block">BLOCK ✗ → written to CMDB</div>
+      </div>
+      <hr class="p-sep">
+      <div class="p-label">Sync targets</div>
+      <div class="pipeline-row" style="gap:8px">
+        <div class="p-box p-cmdb">NetBox</div>
+        <div class="p-box p-cmdb">Drift report</div>
+        <div class="p-box p-cmdb">Readiness view</div>
+      </div>
+      <hr class="p-sep">
+      <div class="p-label">Automation</div>
+      <div class="pipeline-row" style="gap:8px">
+        <div class="p-box p-ansible">AWX</div>
+        <div class="p-box p-ansible">Ansible CLI</div>
+        <div class="p-box p-ansible">Controlled path</div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- PROVIDERS -->
+<section id="providers">
+  <div class="section-label">Provider support</div>
+  <h2>Where your VMs live,<br><em>Rovelink finds them</em></h2>
+  <p class="section-sub">Clearly separated current, experimental, and planned integration paths.</p>
+  <div class="providers-grid">
+    <div class="provider-card">
+      <h3>Microsoft Azure</h3>
+      <p>Early normalized, read-only provider input for public-alpha evaluation.</p>
+      <div class="provider-status s-planned"><div class="status-dot"></div>Experimental alpha</div>
+    </div>
+    <div class="provider-card">
+      <h3>VMware vCenter</h3>
+      <p>Normalized live provider visibility remains outside the current MVP.</p>
+      <div class="provider-status s-planned"><div class="status-dot"></div>Planned</div>
+    </div>
+    <div class="provider-card">
+      <h3>Proxmox VE</h3>
+      <p>Early normalized, read-only provider input for public-alpha evaluation.</p>
+      <div class="provider-status s-planned"><div class="status-dot"></div>Experimental alpha</div>
+    </div>
+    <div class="provider-card">
+      <h3>AWS EC2</h3>
+      <p>EC2 instance discovery across regions. Tags, VPCs, security groups. Pluggable via the provider registry pattern.</p>
+      <div class="provider-status s-planned"><div class="status-dot"></div>Planned</div>
+    </div>
+  </div>
+</section>
+
+<!-- STACK -->
+<div class="full-border" style="background:var(--bg2);">
+<section>
+  <div class="section-label">Built with</div>
+  <h2>A stack you can<br><em>actually self-host</em></h2>
+  <p class="section-sub">No cloud dependencies. One docker-compose up and you're running. PostgreSQL for persistence, no Redis, no message broker.</p>
+  <div class="stack-row">
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#3178c6"></div>TypeScript</div>
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#61dafb"></div>React 18</div>
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#38bdf8"></div>Tailwind CSS</div>
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#336791"></div>PostgreSQL</div>
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#f97316"></div>Express.js</div>
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#66aa44"></div>Drizzle ORM</div>
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#888"></div>WebSocket</div>
+    <div class="stack-pill"><div class="stack-pill-dot" style="background:#0db7ed"></div>Docker</div>
+  </div>
+</section>
+</div>
+
+<!-- INSTALL -->
+<section id="install">
+  <div class="section-label">Get started</div>
+  <h2>Up and running<br><em>in under 5 minutes</em></h2>
+  <p class="section-sub">One docker-compose file. No cloud account required. Works on any Linux host.</p>
+  <div class="install-grid">
+    <div>
+      <p style="font-size:0.85rem;color:var(--ink2);margin-bottom:1rem;font-weight:500;">Option A — Docker (recommended)</p>
+      <div class="install-box">
+        <div><span class="t-dim"># Clone the repo</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">git clone https://github.com/matkomirak/rovelink</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">cd rovelink</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-dim"># Configure</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">cp .env.example .env</span></div>
+        <div><span class="t-dim"># Edit .env — set your secrets</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-dim"># Start</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">docker compose up -d</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-grn">✓</span> <span class="t-gray">Running at http://localhost:5000</span></div>
+      </div>
+    </div>
+    <div>
+      <p style="font-size:0.85rem;color:var(--ink2);margin-bottom:1rem;font-weight:500;">Option B — Bare metal (Ubuntu 22.04+)</p>
+      <div class="install-box">
+        <div><span class="t-dim"># Clone</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">git clone https://github.com/matkomirak/rovelink /opt/rovelink</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">cd /opt/rovelink</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-dim"># Legacy installer retired — follow UBUNTU-QUICKSTART.md</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">cp .env.example .env</span></div>
+        <div><span class="t-dim"># Provision local Postgres and set private .env values first</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-dim"># Install, apply schema, and seed</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">npm ci</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">node --env-file=.env ./node_modules/drizzle-kit/bin.cjs push</span></div>
+        <div><span class="t-prompt">$</span> <span class="t-wht">node --env-file=.env --import=tsx server/seed.ts</span></div>
+        <div><span class="t-dim"># Start development server as documented in UBUNTU-QUICKSTART.md</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-grn">✓</span> <span class="t-gray">Credentials are displayed once during setup. Store them securely.</span></div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:2rem;display:flex;gap:12px;flex-wrap:wrap">
+    <a href="https://github.com/matkomirak/rovelink" class="btn-primary">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      Star on GitHub
+    </a>
+    <a href="https://github.com/matkomirak/rovelink/blob/main/DEPLOY.md" class="btn-secondary">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      Full deployment guide
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-left">
+      <div class="footer-logo">rovelink</div>
+      <div class="footer-tagline">Govern first. Automate second.</div>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/matkomirak/rovelink">GitHub</a>
+      <a href="https://github.com/matkomirak/rovelink/blob/main/DEPLOY.md">Docs</a>
+      <a href="https://github.com/matkomirak/rovelink/issues">Issues</a>
+      <a href="https://github.com/matkomirak/rovelink/blob/main/LICENSE">MIT License</a>
+    </div>
+    <div class="footer-copy">MIT © 2025–2026 Rovelink contributors</div>
+  </div>
+</footer>
+
+<script>
+  const heroVisual = document.querySelector('.hero-visual');
+  heroVisual.innerHTML = `
+    <div class="terminal-bar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="terminal-title">governance blueprint / VM</div></div>
+    <div class="flow-board">
+      <div class="flow-kicker">Inputs / provider + CMDB data</div>
+      <div class="flow-sources"><div class="flow-node">Azure</div><div class="flow-node">NetBox</div><div class="flow-node">Proxmox</div></div>
+      <div class="flow-line"></div>
+      <div class="flow-gate"><strong>Governance Blueprint</strong><span>Data & Management · Ownership · Relevance</span></div>
+      <div class="flow-line"></div>
+      <div class="report-panel" style="padding:1rem">
+        <div class="report-head"><span class="report-object">Governance report</span><strong class="report-score">82%</strong></div>
+        <div class="flow-status" style="padding-top:.8rem"><span>Missing service owner</span><span>Audit relevance 3/3</span></div>
+      </div>
+      <div class="flow-line"></div>
+      <div class="flow-gate" style="border-color:rgba(226,86,81,.34);background:rgba(226,86,81,.08)"><strong>Automation GATE</strong><span style="color:#ff8c88">BLOCK — missing service owner</span></div>
+    </div>`;
+
+  const strip = document.querySelector('.strip');
+  const stats = document.createElement('div');
+  stats.className = 'stats-wrap reveal';
+  stats.innerHTML = `<div class="stats-panel">
+    <div class="stat"><div class="stat-value" style="font-size:1.35rem">NetBox</div><div class="stat-label">Reference state first</div></div>
+    <div class="stat"><div class="stat-value">3</div><div class="stat-label">Allow · block · unknown</div></div>
+    <div class="stat"><div class="stat-value" style="font-size:1.35rem">Analysis</div><div class="stat-label">Drift without write-back</div></div>
+    <div class="stat"><div class="stat-value" style="font-size:1.35rem">Alpha</div><div class="stat-label">Transparent limitations</div></div>
+  </div>`;
+  strip.insertAdjacentElement('afterend', stats);
+
+  const problem = document.querySelector('#problem');
+  problem.innerHTML = `<div class="problem-grid">
+    <div><div class="section-label">The problem</div><h2>Your CMDB has data.<br><em>But does it have governance?</em></h2><ul class="problem-list" style="margin-top:1.5rem">
+      <li><span class="icon">01</span>VMs exist, but ownership is unclear.</li>
+      <li><span class="icon">02</span>CMDB fields are missing, stale, or manually maintained without accountability.</li>
+      <li><span class="icon">03</span>Teams cannot tell which objects matter for support, audit, billing, reporting, or compliance.</li>
+      <li><span class="icon">04</span>Automation often starts before governance is proven.</li>
+    </ul></div>
+    <div><div class="section-label">The model</div><h2>Define the blueprint.<br>Measure the gaps.<br><em>Enforce the result.</em></h2><ul class="solution-list" style="margin-top:1.5rem">
+      <li><span class="icon">01</span>Build Governance Blueprints for object types such as virtual machines.</li>
+      <li><span class="icon">02</span>Map provider and CMDB fields into a common governance model.</li>
+      <li><span class="icon">03</span>Score Data & Management, Ownership, and Relevance.</li>
+      <li><span class="icon">04</span>Use the Reporting Layer to report, enrich, validate, remediate, or block automation.</li>
+    </ul></div>
+  </div>`;
+
+  const blueprintSection = document.createElement('section');
+  blueprintSection.id = 'blueprints';
+  blueprintSection.innerHTML = `<div class="section-label">Governance Blueprints</div><h2>One model for what<br><em>good governance means</em></h2>
+    <p class="section-sub">A Governance Blueprint defines what a properly governed infrastructure object must contain, who owns it, why it matters, and what Rovelink should report or enforce.</p>
+    <div class="blueprint-grid">
+      <article class="blueprint-card"><div class="blueprint-index">01 / DATA & MANAGEMENT</div><h3>Know every field and its source</h3><p>Required fields, source of truth, and how each value is maintained: manual, Rovelink-synchronized, external, provider-imported, CMDB-owned, or unknown.</p></article>
+      <article class="blueprint-card"><div class="blueprint-index">02 / OWNERSHIP</div><h3>Make accountability explicit</h3><p>Technical owner, service owner, data owner, business owner, or operations team.</p></article>
+      <article class="blueprint-card"><div class="blueprint-index">03 / RELEVANCE</div><h3>Measure what matters</h3><p>Score each object from 0–3 for support, audit, billing, reporting, and compliance.</p><div class="score-scale"><span>0 none</span><span>1 low</span><span>2 medium</span><span>3 high</span></div></article>
+      <article class="blueprint-card"><div class="blueprint-index">04 / REPORTING</div><h3>Turn evidence into action</h3><p>Rovelink computes governance score, findings, recommended actions, and automation readiness from the blueprint evaluation.</p></article>
+    </div>
+    <div class="roadmap-note"><strong>Transparent roadmap:</strong> Rovelink is the governance-first pre-flight decision layer. Governance Blueprints and readiness reports exist today. The roadmap prioritizes the decision API, immutable snapshots, controlled AWX/RHAAP adapters, validated ingestion and durable workers.</div>`;
+  document.querySelector('.features-bg').before(blueprintSection);
+
+  const features = document.querySelector('#features');
+  features.innerHTML = `<div class="section-label">Platform capabilities</div><h2>From governance model<br>to <em>safe execution</em></h2><p class="section-sub">The product direction combines a measurable governance layer with Rovelink's existing execution foundation.</p><div class="features-grid">
+    ${[
+      ['◇','Governance Blueprints','Define the required data, ownership, relevance, and reporting model for each infrastructure object type.','core · measurable'],
+      ['↔','CMDB Field Mapping','Map provider and CMDB fields into blueprint fields using clear source-of-truth and management-mode rules.','netbox · idoit · servicenow'],
+      ['0–3','Relevance Scoring','Prioritize governance gaps by business and operational relevance instead of treating every missing field equally.','support · audit · billing'],
+      ['✓','Automation GATE','Block unsafe automation when objects fail blueprint rules, and explain exactly why.','enforce · block · explain'],
+      ['⌘','Lightweight Local Runner','Trusted Ansible for demos, short tests, migrations and small controlled environments. Enterprise adapters are planned.','local · controlled · alpha'],
+      ['⌾','Security by Default','Encrypted credentials, tenant isolation, safe errors, protected Git sync, and role-based access controls.','encryption · rbac · tenancy']
+    ].map(([icon,title,copy,tag])=>`<article class="feature-card"><div class="feature-icon" style="font:500 .7rem var(--mono);color:var(--accent)">${icon}</div><h3>${title}</h3><p>${copy}</p><div class="feature-tag">${tag}</div></article>`).join('')}
+  </div>`;
+
+  const governance = document.querySelector('.gate-section').closest('section');
+  governance.id = 'governance';
+  governance.innerHTML = `<div class="gate-section"><div><div class="section-label">Governance Reporting</div><h2>Not every missing field<br>has the <em>same risk.</em></h2><p>Rovelink does not only report that data is missing. It weighs findings by relevance: support, audit, billing, reporting, and compliance.</p><p>A missing service owner on a high-audit production VM is treated differently from a missing field on a low-relevance test machine.</p></div>
+    <div class="report-panel"><div class="report-head"><div><div class="flow-kicker">VM / GOVERNANCE REPORT</div><div class="report-object">customer-prod-db-01</div></div><div class="report-score">82%</div></div>
+      <div class="relevance-meter"><span>Data & Management</span><strong>78%</strong><span>Ownership</span><strong>66%</strong><span>Support</span><span class="meter-dots"><i></i><i></i><i></i></span><span>Audit</span><span class="meter-dots"><i></i><i></i><i></i></span><span>Billing</span><span class="meter-dots"><i></i><i></i></span><span>Reporting</span><span class="meter-dots"><i></i><i></i></span><span>Compliance</span><span class="meter-dots"><i></i><i></i><i></i></span></div>
+      <div class="report-finding"><strong>Finding:</strong> Missing service owner<br><strong>Recommended action:</strong> Report critical governance gap and block automation</div><div class="action-badge">BLOCK AUTOMATION</div>
+    </div></div>`;
+
+  const how = document.querySelector('#how');
+  how.innerHTML = `<div class="section-label">How it works</div><h2>Discover → Map → Blueprint<br><em>→ Report → Gate → Execute</em></h2><div class="how-grid" style="margin-top:3rem"><div class="steps">
+    ${[
+      ['1','Connect sources','Providers, CMDBs, Git projects, and automation targets.'],
+      ['2','Map fields','Map provider and CMDB fields into the governance blueprint.'],
+      ['3','Apply blueprint','Evaluate Data & Management, Ownership, and Relevance.'],
+      ['4','Report governance','Generate scores, findings, priorities, and recommended actions.'],
+      ['5','Enforce automation','Automation GATE allows or blocks execution based on governance readiness.']
+    ].map(([n,t,c])=>`<div class="step"><div class="step-num-col"><div class="step-num">${n}</div><div class="step-line"></div></div><div class="step-body"><h3>${t}</h3><p>${c}</p></div></div>`).join('')}
+    </div><div class="pipeline-visual"><div class="pipeline-title">governance evaluation flow</div><div class="p-label">Sources</div><div class="pipeline-row" style="gap:8px"><div class="p-box p-provider">Azure</div><div class="p-box p-provider">Proxmox</div><div class="p-box p-provider">vCenter</div><div class="p-box p-cmdb">NetBox</div></div><hr class="p-sep"><div class="p-label">Mapping</div><div class="p-box">provider.ip → primary_ip</div><div class="p-box" style="margin-top:8px">netbox.custom_fields.service_owner → service_owner</div><hr class="p-sep"><div class="p-label">Blueprint</div><div class="pipeline-row" style="gap:8px"><div class="p-box p-gate">Data & Management</div><div class="p-box p-gate">Ownership</div><div class="p-box p-gate">Relevance</div></div><hr class="p-sep"><div class="p-label">Report</div><div class="p-box p-cmdb">Score 82% · Missing service owner · Audit relevance 3</div><hr class="p-sep"><div class="p-label">Action</div><div class="p-box p-block">BLOCK automation — explain why</div></div></div>`;
+
+  const integrations = document.querySelector('#providers');
+  integrations.id = 'integrations';
+  integrations.innerHTML = `<div class="section-label">Integrations</div><h2>Connect the systems that describe<br>and <em>automate your infrastructure</em></h2><p class="section-sub">NetBox-first governance and pre-flight decisions; built-in Ansible remains a lightweight local runner.</p><div class="providers-grid">
+    ${[
+      ['NB','NetBox','First-class CMDB target for VM governance, field mapping, and automation readiness.','MVP focus',''],
+      ['AX','Ansible / AWX','Local trusted Ansible; MVP AWX connector. Controlled target-bound enterprise adapters are planned.','Lightweight execution',''],
+      ['GS','Git + SSH','Sync public Git repositories, discover playbooks, and execute over local or remote SSH.','Execution foundation',''],
+      ['PV','Azure / Proxmox / vCenter','Normalize infrastructure data from provider sources into governance evaluation.','Provider discovery','']
+    ].map(([mark,title,copy,status,cls])=>`<article class="provider-card" data-logo="${mark}"><h3>${title}</h3><p>${copy}</p><div class="provider-status s-stable ${cls}"><div class="status-dot"></div>${status}</div></article>`).join('')}
+    </div><div class="roadmap-note"><strong>Planned integrations:</strong> i-doit, ServiceNow, and AWS EC2. These are roadmap items and are intentionally separated from the current MVP foundation.</div>`;
+
+  const install = document.querySelector('#install');
+  install.querySelector('.section-label').textContent = 'Self-host Rovelink';
+  install.querySelector('h2').innerHTML = 'Self-host the governance<br><em>control plane</em>';
+  install.querySelector('.section-sub').textContent = 'Evaluate governance and pre-flight posture locally. Built-in Ansible is for demos, tests, migrations and small controlled environments; enterprise adapters are planned. Direct administrative access can bypass application-layer checks.';
+  const installGrid = document.querySelector('.install-grid');
+  const installNote = document.createElement('div');
+  installNote.className = 'roadmap-note';
+  installNote.innerHTML = '<strong>Next milestone:</strong> Governance Blueprint MVP—defining, measuring, and reporting CMDB governance before automation.';
+  installGrid.before(installNote);
+  const installPanels = [...installGrid.children];
+  installPanels.forEach((panel,i) => { panel.classList.toggle('active', i === 0); panel.setAttribute('role','tabpanel'); panel.id = `install-panel-${i}`; });
+  const choices = document.createElement('div');
+  choices.className = 'install-choice'; choices.setAttribute('role','tablist');
+  choices.innerHTML = `<button class="install-tab active" role="tab" aria-selected="true" data-panel="0">Docker</button><button class="install-tab" role="tab" aria-selected="false" data-panel="1">Ubuntu 22.04+</button>`;
+  installGrid.before(choices);
+  choices.addEventListener('click', e => { const tab=e.target.closest('.install-tab'); if(!tab)return; choices.querySelectorAll('.install-tab').forEach(t=>{t.classList.toggle('active',t===tab);t.setAttribute('aria-selected',t===tab)}); installPanels.forEach((p,i)=>p.classList.toggle('active',i===Number(tab.dataset.panel))); });
+
+  const revealItems = document.querySelectorAll('section, .feature-card, .provider-card, .blueprint-card, .stats-wrap');
+  revealItems.forEach(el => el.classList.add('reveal'));
+  const observer = new IntersectionObserver(entries => entries.forEach(entry => { if(!entry.isIntersecting)return; entry.target.classList.add('visible'); observer.unobserve(entry.target); }), {threshold:.1});
+  revealItems.forEach(el => observer.observe(el));
+</script>
+<script>
+  // MSP-focused public-alpha positioning. These refinements intentionally keep
+  // the existing visual system and reviewed media assets intact.
+  document.querySelector('.strip-label').textContent = 'NetBox-first · provider-aware';
+  document.querySelector('.strip-items').innerHTML = `
+    <span class="strip-item">NetBox reference state</span>
+    <span class="strip-item">Azure visibility · alpha</span>
+    <span class="strip-item">Proxmox visibility · alpha</span>
+    <span class="strip-item">Governance readiness</span>
+    <span class="strip-item">Drift analysis</span>`;
+
+  heroVisual.innerHTML = `
+    <div class="terminal-bar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="terminal-title">readiness overview / customer estate</div></div>
+    <div class="flow-board">
+      <div class="flow-kicker">REFERENCE + RUNTIME</div>
+      <div class="flow-sources"><div class="flow-node">NetBox</div><div class="flow-node">Azure</div><div class="flow-node">Proxmox</div></div>
+      <div class="flow-line"></div>
+      <div class="flow-gate"><strong>Governance readiness</strong><span>ownership · required data · customer assignment</span></div>
+      <div class="flow-line"></div>
+      <div class="report-panel" style="padding:1rem">
+        <div class="report-head"><span class="report-object">Illustrative estate report</span><strong class="report-score">12 VMs</strong></div>
+        <div class="flow-status" style="padding-top:.8rem"><span>7 ready</span><span>5 need attention</span></div>
+      </div>
+      <div class="flow-status"><span><b>● REVIEW</b> missing owners and drift</span><span>before automation</span></div>
+    </div>`;
+
+  const outcomeStrip = document.createElement('div');
+  outcomeStrip.className = 'outcome-strip reveal';
+  outcomeStrip.innerHTML = `
+    <div class="outcome"><strong>Built for growing MSPs</strong><span>See customer ownership and infrastructure readiness across multiple sources.</span></div>
+    <div class="outcome"><strong>Find what needs attention</strong><span>Surface missing owners, incomplete VM data, inconsistent assignments, and drift.</span></div>
+    <div class="outcome"><strong>Prepare controlled automation</strong><span>Use evidence and pre-flight decisions before supported execution paths run.</span></div>`;
+  document.querySelector('.announcement').insertAdjacentElement('afterend', outcomeStrip);
+
+  document.querySelector('#demo .section-sub').textContent = 'See how Rovelink connects infrastructure information, evaluates governance readiness, highlights missing data, and identifies what needs attention before automation.';
+
+  problem.innerHTML = `<div class="problem-grid">
+    <div><div class="section-label">The operational problem</div><h2>Your infrastructure is documented.<br><em>But is it ready for automation?</em></h2><ul class="problem-list" style="margin-top:1.5rem">
+      <li><span class="icon">01</span>Customer ownership is unclear across managed environments.</li>
+      <li><span class="icon">02</span>Required CMDB fields are incomplete or inconsistently maintained.</li>
+      <li><span class="icon">03</span>Provider runtime state and documented reference records disagree.</li>
+      <li><span class="icon">04</span>Automation inventories can include targets without enough readiness evidence.</li>
+      <li><span class="icon">05</span>Teams lack one consistent view of readiness across customers.</li>
+    </ul></div>
+    <div><div class="section-label">What Rovelink adds</div><h2>See what needs fixing<br><em>before automation.</em></h2><ul class="solution-list" style="margin-top:1.5rem">
+      <li><span class="icon">01</span>Connect NetBox reference information with supported provider observations.</li>
+      <li><span class="icon">02</span>Apply governance blueprints to ownership, required data, and customer assignment.</li>
+      <li><span class="icon">03</span>Review actionable findings, readiness reports, and analysis-only drift.</li>
+      <li><span class="icon">04</span>Correct information in the appropriate source system, refresh, and evaluate again.</li>
+      <li><span class="icon">05</span>Evaluate a specific automation request before controlled execution.</li>
+    </ul></div>
+  </div>`;
+
+  how.innerHTML = `<div class="section-label">First value workflow</div><h2>From infrastructure data<br><em>to actionable readiness</em></h2><p class="section-sub">A guided, self-hosted path for teams starting with NetBox and provider visibility.</p><div class="how-grid" style="margin-top:3rem"><div class="steps">
+    ${[
+      ['1','Connect','Connect NetBox and a supported infrastructure provider. Reference and runtime data remain distinct.'],
+      ['2','Evaluate','Use governance blueprints to check ownership, required information, and operational relevance.'],
+      ['3','Understand','Review readiness reports and identify which objects need attention.'],
+      ['4','Improve','Correct missing or inconsistent data in the appropriate source system, then refresh and evaluate again.'],
+      ['5','Prepare','Use readiness evidence and action-specific pre-flight decisions to guide controlled automation workflows.']
+    ].map(([n,t,c])=>`<div class="step"><div class="step-num-col"><div class="step-num">${n}</div><div class="step-line"></div></div><div class="step-body"><h3>${t}</h3><p>${c}</p></div></div>`).join('')}
+    </div><div class="pipeline-visual"><div class="pipeline-title">illustrative first report</div><div class="p-label">Customer estate</div><div class="p-box p-cmdb">12 VMs evaluated</div><hr class="p-sep"><div class="p-label">Readiness</div><div class="pipeline-row" style="gap:8px"><div class="p-box p-allow">7 ready</div><div class="p-box p-block">5 need attention</div></div><hr class="p-sep"><div class="p-label">Example findings</div><div class="p-box">Missing service owner · incomplete primary IP · customer assignment needs review</div><hr class="p-sep"><div class="p-label">Next action</div><div class="p-box p-gate">Fix the source record → refresh → evaluate again</div></div></div>`;
+
+  features.id = 'readiness';
+  features.innerHTML = `<div class="section-label">Practical outcomes</div><h2>Understand readiness.<br><em>Act on the evidence.</em></h2><p class="section-sub">Rovelink leads with visibility and decision support—not automatic remediation or infrastructure-wide control.</p><div class="features-grid">
+    ${[
+      ['01','Governance Readiness','Find incomplete CMDB information, missing ownership, and governance findings before preparing automation.','find gaps · prioritize fixes'],
+      ['02','CustomerScope','Understand customer assignment and apply customer-aware governance rules across a managed estate.','netbox tenant · customer context'],
+      ['03','Drift Reports','Compare documented reference state with observed infrastructure state. Drift is analysis-only and does not write back.','reference · runtime · analysis'],
+      ['04','Governance Blueprints','Define the information, ownership, relevance, and policies required for readiness.','versioned · measurable'],
+      ['05','Pre-flight GATE','Evaluate blocked, unknown, or narrowly eligible action requests from current evidence. The decision API does not launch jobs.','action-specific · fail closed'],
+      ['06','Lightweight Automation','Use built-in Ansible for demos, tests, migrations, and smaller controlled environments. AWX/RHAAP adapters are future work.','local ansible · controlled use']
+    ].map(([icon,title,copy,tag])=>`<article class="feature-card"><div class="feature-icon" style="font:500 .7rem var(--mono);color:var(--accent)">${icon}</div><h3>${title}</h3><p>${copy}</p><div class="feature-tag">${tag}</div></article>`).join('')}
+  </div>`;
+
+  blueprintSection.querySelector('.section-sub').textContent = 'Define what complete, owned, and operationally relevant infrastructure information looks like, then evaluate cached reference objects against that versioned policy.';
+  blueprintSection.querySelector('.roadmap-note').innerHTML = '<strong>Public-alpha boundary:</strong> Governance Blueprints and stored evaluations exist today. Findings inform reports and pre-flight evidence; they do not automatically repair CMDB data or provider state.';
+
+  governance.id = 'governance';
+  governance.innerHTML = `<div class="gate-section"><div><div class="section-label">Action-specific pre-flight</div><h2>A decision layer—not<br><em>universal enforcement.</em></h2><p>Rovelink evaluates readiness and authorization before automation is launched through supported controlled paths. Known blockers return <strong>block</strong>; missing, stale, unsupported, or ambiguous evidence returns <strong>unknown</strong>.</p><p>A narrowly verified local Linux/SSH request can return <strong>allow</strong> when every configured prerequisite passes. That result is bounded and short-lived; the current decision API does not launch the job.</p></div>
+    <div class="report-panel"><div class="report-head"><div><div class="flow-kicker">PREFLIGHT / EXAMPLE</div><div class="report-object">patch-linux-vm · customer scope ACME</div></div><div class="report-score" style="font-size:1rem">UNKNOWN</div></div>
+      <div class="relevance-meter"><span>Governance evidence</span><strong>ready</strong><span>Customer assignment</span><strong>verified</strong><span>Playbook + runner</span><strong>unverified</strong><span>Decision</span><strong>unknown</strong></div>
+      <div class="report-finding"><strong>Why:</strong> Required execution prerequisites are not proven.<br><strong>Result:</strong> Review configuration; no execution is launched.</div><div class="action-badge" style="color:#91baff;border-color:rgba(99,169,255,.3);background:rgba(99,169,255,.1)">DECISION ONLY</div>
+    </div></div>`;
+
+  const architecture = document.createElement('section');
+  architecture.id = 'architecture';
+  architecture.innerHTML = `<div class="section-label">Architecture</div><h2>Reference and runtime evidence,<br><em>turned into decisions</em></h2><p class="section-sub">Rovelink sits between the systems that describe infrastructure and the controlled workflows that act on it.</p>
+    <div class="architecture-flow">
+      <div class="architecture-node"><strong>Reference state</strong><p>NetBox VM records, ownership, customer assignment, and required operational data.</p></div><div class="architecture-arrow">→</div>
+      <div class="architecture-node core"><strong>Rovelink Governance & Readiness</strong><p>Governance evaluation · readiness reports · drift analysis · action-specific pre-flight decisions</p></div><div class="architecture-arrow">→</div>
+      <div class="architecture-node"><strong>Controlled automation</strong><p>Lightweight built-in Ansible today. Target-bound AWX/RHAAP and external adapters are planned.</p></div>
+    </div>
+    <div class="architecture-flow" style="grid-template-columns:1fr auto 1.3fr;margin-top:12px"><div class="architecture-node"><strong>Observed runtime state</strong><p>Supported provider inventory feeds comparison and drift evidence into Rovelink.</p></div><div class="architecture-arrow">→</div><div class="architecture-node core"><strong>No automatic correction</strong><p>Discovery and drift do not write fixes back to NetBox or infrastructure providers.</p></div></div>
+    <p class="boundary-note">Rovelink governs automation workflows routed through its supported execution paths. Direct administrative access and external execution systems can bypass application-layer checks unless controlled separately. <a href="https://github.com/matkomirak/rovelink/blob/main/docs/enforcement-boundary.md">Read the enforcement boundary →</a></p>`;
+  integrations.before(architecture);
+
+  integrations.innerHTML = `<div class="section-label">Integrations</div><h2>NetBox-first governance with<br><em>provider visibility</em></h2><p class="section-sub">Reference systems, provider observations, and execution paths are different capabilities. Their status is shown separately.</p>
+    <div class="integration-group"><h3>Available in the public alpha</h3><div class="providers-grid">
+      <article class="provider-card" data-logo="NB"><h3>NetBox</h3><p>Primary reference-state integration for cached VMs, customer assignment, governance evaluation, and readiness reporting.</p><span class="status-chip status-available">AVAILABLE · NETBOX-FIRST</span></article>
+      <article class="provider-card" data-logo="AN"><h3>Built-in Ansible</h3><p>Lightweight local execution for demos, tests, migrations, and smaller controlled environments when explicitly enabled.</p><span class="status-chip status-available">AVAILABLE · LIMITED SCOPE</span></article>
+      <article class="provider-card" data-logo="GS"><h3>Public Git + SSH</h3><p>Sync trusted public HTTPS repositories, discover playbooks, and use controlled local or remote SSH execution.</p><span class="status-chip status-available">AVAILABLE · PUBLIC ALPHA</span></article>
+    </div></div>
+    <div class="integration-group"><h3>Experimental provider visibility</h3><div class="providers-grid">
+      <article class="provider-card" data-logo="AZ"><h3>Azure</h3><p>Early normalized read-only discovery for selected infrastructure objects. Not production-certified.</p><span class="status-chip status-alpha">EXPERIMENTAL / ALPHA</span></article>
+      <article class="provider-card" data-logo="PX"><h3>Proxmox</h3><p>Early normalized read-only VM discovery. The demo also includes deterministic offline fixtures.</p><span class="status-chip status-alpha">EXPERIMENTAL / ALPHA</span></article>
+    </div></div>
+    <div class="integration-group"><h3>Planned—not current integrations</h3><div class="providers-grid">
+      <article class="provider-card" data-logo="AW"><h3>AWX / RHAAP</h3><p>Future target-bound external execution adapter direction. The current decision API does not launch AWX jobs.</p><span class="status-chip status-planned-chip">PLANNED</span></article>
+      <article class="provider-card" data-logo="VM"><h3>VMware vCenter</h3><p>Normalized live provider visibility is outside the current MVP.</p><span class="status-chip status-planned-chip">PLANNED</span></article>
+      <article class="provider-card" data-logo="+"><h3>Additional systems</h3><p>i-doit, ServiceNow, AWS, GCP, and broader adapters remain roadmap work.</p><span class="status-chip status-planned-chip">PLANNED</span></article>
+    </div></div>`;
+
+  install.querySelector('h2').innerHTML = 'Guided self-hosted<br><em>setup</em>';
+  install.querySelector('.section-sub').textContent = 'Run Rovelink in an operator-controlled environment using the documented Docker or Ubuntu path. Connect NetBox first, add supported provider visibility, and evaluate readiness before enabling controlled execution.';
+  installNote.innerHTML = '<strong>Public alpha:</strong> Not production-ready and no enterprise SLA or certification is implied. Self-hosting keeps application data in the environment you operate; protect credentials, restrict bypass paths, and review the deployment and security documentation.';
+
+  const demoSectionNode = document.querySelector('#demo');
+  outcomeStrip.insertAdjacentElement('afterend', demoSectionNode);
+</script>
+</body>
+</html>

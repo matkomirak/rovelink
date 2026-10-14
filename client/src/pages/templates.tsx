@@ -249,7 +249,7 @@ export default function Templates() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Job Templates</h1>
-          <p className="text-sm text-muted-foreground">Bind synced playbooks to inventories, limits, and runner settings</p>
+          <p className="text-sm text-muted-foreground">Prepare scoped automation actions. Built-in Ansible is for demos, short tests, migrations and small controlled environments.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -620,12 +620,12 @@ export default function Templates() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="local">Local (ansible-playbook)</SelectItem>
+                          <SelectItem value="local">Lightweight local Ansible</SelectItem>
                           <SelectItem value="awx">AWX / Controller</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormDescription>
-                        Local runs ansible-playbook on the Rovelink host. AWX delegates to an AWX job template.
+                        Local runs trusted playbooks on this host for demos, tests and small controlled environments. The AWX connector is MVP-level; target-bound enterprise adapters are planned.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

@@ -167,7 +167,7 @@ export default function Runs() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Automation Runs</h1>
-          <p className="text-sm text-muted-foreground">Monitor playbooks, provider syncs, and pipeline syncs in one place</p>
+          <p className="text-sm text-muted-foreground">Inspect recorded workflow results. Built-in Ansible is a lightweight runner; controlled enterprise adapters are planned.</p>
         </div>
         <div className="flex items-center gap-2">
           <Button

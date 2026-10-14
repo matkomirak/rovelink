@@ -132,7 +132,7 @@ export default function AutomationInventories() {
             Automation Inventories
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Prepare targets using known inventory and governance signals. Automation Eligible is not Execution Allowed: configured governance enforcement and GATE checks decide authorization for a specific run.
+            Prepare targets from cached governance signals. Eligibility is not execution permission; checks apply to routed workflows and do not restrict direct infrastructure access.
           </p>
         </div>
         {userRole === "admin" && (

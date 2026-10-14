@@ -72,7 +72,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold" data-testid="text-page-title">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Operational snapshot for projects, recorded GATE eligibility, and recent automation activity</p>
+        <p className="text-sm text-muted-foreground">Governance and pre-flight decision layer: recorded readiness and activity are evidence, not execution permission.</p>
       </div>
 
       <OnboardingProgress />

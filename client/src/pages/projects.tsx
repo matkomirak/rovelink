@@ -138,7 +138,7 @@ export default function Projects() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Projects</h1>
-          <p className="text-sm text-muted-foreground">Sync public HTTPS Git repositories and discover Ansible playbooks</p>
+          <p className="text-sm text-muted-foreground">Sync trusted playbooks for the lightweight local runner. Review repository code before execution.</p>
         </div>
         <Dialog open={open} onOpenChange={handleCloseDialog}>
           <DialogTrigger asChild>

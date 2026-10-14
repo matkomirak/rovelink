@@ -182,7 +182,7 @@ export default function Credentials() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Credentials</h1>
-          <p className="text-sm text-muted-foreground">Manage authentication credentials (references only)</p>
+          <p className="text-sm text-muted-foreground">Manage scoped execution credentials. SSH keys are encrypted; secret-manager references are not a connected Vault integration.</p>
         </div>
         <Dialog open={open} onOpenChange={handleCloseDialog}>
           <DialogTrigger asChild>

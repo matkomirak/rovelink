@@ -2,9 +2,9 @@
 
 **Govern first. Automate second.**
 
-Rovelink is a governance-first infrastructure control plane for infrastructure
-teams and MSPs. It connects documented CMDB reference state with observed provider
-runtime state, evaluates reference quality, and prepares automation with explicit
+Rovelink is a governance-first pre-flight decision layer for infrastructure automation.
+It helps infrastructure teams and MSPs connect documented CMDB reference state with
+observed provider runtime state, evaluate reference quality, and prepare automation with explicit
 inventory eligibility and execution-time GATE checks.
 
 ## Public alpha
@@ -155,6 +155,9 @@ automation. These are directions, not shipped capabilities or delivery promises.
 - [Public-alpha checklist](docs/public-alpha-checklist.md)
 
 ## Security and contributing
+- [Enforcement boundary](docs/enforcement-boundary.md) and [Pre-flight GATE API](docs/gate-decision-api.md)
+- [Decision snapshots](docs/execution-decision-snapshots.md) and [worker/queue plan](docs/worker-queue-architecture.md)
+- [Command hardening](docs/command-execution-hardening.md) and [ingestion validation](docs/ingestion-validation.md)
 
 Use dedicated test credentials and trusted playbooks. Supported credential paths
 encrypt secrets at rest with AES-256-GCM; that does not replace access controls
@@ -170,3 +173,17 @@ and [AGENTS.md](AGENTS.md); preserve cookie authentication, org isolation and GA
 ## License
 
 [MIT](LICENSE), without warranty. Third-party dependencies retain their own licenses.
+
+## Decision layer and execution boundary
+
+Rovelink is the governance-first pre-flight decision layer for infrastructure
+automation. Built-in Ansible is intended for local demos, short tests, migrations,
+and lightweight controlled environments. It remains available, but is not the
+recommended enterprise-scale execution architecture. The enterprise direction is
+controlled external AWX/RHAAP/webhook adapters with decision snapshots, scoped
+credentials and durable workers; the existing AWX connector is MVP-level.
+
+Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
+manual administrative access can bypass an application-layer gate. See the
+[enforcement boundary](docs/enforcement-boundary.md) for IAM/PAM, network controls and audited break-glass
+requirements. Reports and pre-flight evidence do not grant execution permission.

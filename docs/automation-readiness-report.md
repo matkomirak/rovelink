@@ -22,3 +22,17 @@ Connection users and credentials can be chosen when preparing a run and are not 
 Counts cover targets already in automation inventories. Linked inventory caches exclude source VMs blocked during sync, so these totals are not a count of every CMDB VM. A host belonging to multiple inventories counts once per inventory. Top issues count affected targets per issue and may overlap. The table also shows address presence, recorded governance readiness/unknown counts, and the last inventory refresh time.
 
 Use inventory detail to investigate, refresh source data and reevaluate governance when needed, then prepare execution through the normal automation workflow. Execution still performs its authoritative GATE checks. Reports do not change governance, GATE, credentials, CMDB data, provider data, or automation state.
+
+## Decision layer and execution boundary
+
+Rovelink is the governance-first pre-flight decision layer for infrastructure
+automation. Built-in Ansible is intended for local demos, short tests, migrations,
+and lightweight controlled environments. It remains available, but is not the
+recommended enterprise-scale execution architecture. The enterprise direction is
+controlled external AWX/RHAAP/webhook adapters with decision snapshots, scoped
+credentials and durable workers; the existing AWX connector is MVP-level.
+
+Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
+manual administrative access can bypass an application-layer gate. See the
+[enforcement boundary](enforcement-boundary.md) for IAM/PAM, network controls and audited break-glass
+requirements. Reports and pre-flight evidence do not grant execution permission.

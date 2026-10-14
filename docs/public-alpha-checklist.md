@@ -81,3 +81,24 @@ Publish **after the reviewed video and private-reporting setup**, not as a
 production release. Live integrations and actual automation execution were not
 part of the offline smoke test; unknown execution signals, retained deleted
 reference VMs, heuristic matching and limited IPv6/power-state comparison remain.
+
+## Decision layer and execution boundary
+
+- [ ] Review controlled access and bypass paths against the enforcement boundary.
+- [ ] Validate pre-flight evidence without interpreting unknown as authorization.
+- [ ] Require immutable decision/launch linkage and tenant-specific credentials
+  before claiming enterprise adapter enforcement.
+- [ ] Validate command inputs and ingestion summaries before extending adapters.
+- [ ] Implement leased durable workers and crash recovery before scaling execution.
+
+Rovelink is the governance-first pre-flight decision layer for infrastructure
+automation. Built-in Ansible is intended for local demos, short tests, migrations,
+and lightweight controlled environments. It remains available, but is not the
+recommended enterprise-scale execution architecture. The enterprise direction is
+controlled external AWX/RHAAP/webhook adapters with decision snapshots, scoped
+credentials and durable workers; the existing AWX connector is MVP-level.
+
+Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
+manual administrative access can bypass an application-layer gate. See the
+[enforcement boundary](enforcement-boundary.md) for IAM/PAM, network controls and audited break-glass
+requirements. Reports and pre-flight evidence do not grant execution permission.

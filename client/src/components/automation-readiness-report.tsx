@@ -25,7 +25,7 @@ export function AutomationReadinessDashboard() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-2"><CardTitle>Automation Readiness Report</CardTitle>
           <CardDescription>Shows which automation inventory targets are currently ready to automate and what needs attention before execution.</CardDescription>
-          <p className="text-xs text-muted-foreground">This report does not execute automation. It summarizes inventory and readiness signals.</p>
+          <p className="text-xs text-muted-foreground">Pre-flight posture only: unknown readiness does not authorize execution. Controlled enterprise adapters are planned.</p>
         </div>
         <Button variant="outline" onClick={() => refetch()} disabled={isFetching}><RefreshCw aria-hidden="true" className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />Refresh report</Button>
       </div>

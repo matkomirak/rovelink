@@ -64,3 +64,17 @@ the alpha does not provide a supported production deployment procedure.
 Use dedicated test accounts and targets. Do not test against systems you do not
 control or have permission to assess. Default local Compose settings are for
 isolated demos and must not be exposed as a production service.
+
+## Decision layer and execution boundary
+
+Rovelink is the governance-first pre-flight decision layer for infrastructure
+automation. Built-in Ansible is intended for local demos, short tests, migrations,
+and lightweight controlled environments. It remains available, but is not the
+recommended enterprise-scale execution architecture. The enterprise direction is
+controlled external AWX/RHAAP/webhook adapters with decision snapshots, scoped
+credentials and durable workers; the existing AWX connector is MVP-level.
+
+Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
+manual administrative access can bypass an application-layer gate. See the
+[enforcement boundary](docs/enforcement-boundary.md) for IAM/PAM, network controls and audited break-glass
+requirements. Reports and pre-flight evidence do not grant execution permission.

@@ -40,3 +40,17 @@ readiness; separate required-data rules can still affect the governance result.
 See [demo scenarios](demo-scenarios.md) for the empty-source walkthrough and
 limitations. Explicit CMDB write pipelines or demo scripts are separate,
 user-initiated operations, never a side effect of discovery or drift.
+
+## Decision layer and execution boundary
+
+Rovelink is the governance-first pre-flight decision layer for infrastructure
+automation. Built-in Ansible is intended for local demos, short tests, migrations,
+and lightweight controlled environments. It remains available, but is not the
+recommended enterprise-scale execution architecture. The enterprise direction is
+controlled external AWX/RHAAP/webhook adapters with decision snapshots, scoped
+credentials and durable workers; the existing AWX connector is MVP-level.
+
+Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
+manual administrative access can bypass an application-layer gate. See the
+[enforcement boundary](enforcement-boundary.md) for IAM/PAM, network controls and audited break-glass
+requirements. Reports and pre-flight evidence do not grant execution permission.

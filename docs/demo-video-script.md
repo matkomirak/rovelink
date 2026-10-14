@@ -41,3 +41,17 @@ No production-readiness, certification, live cloud coverage from fake fixtures,
 automatic writeback/remediation, or blanket execution approval. Job success is not
 estate readiness; governance score alone is not Execution Allowed. Add a video URL
 only after a reviewed recording exists.
+
+## Decision layer and execution boundary
+
+Rovelink is the governance-first pre-flight decision layer for infrastructure
+automation. Built-in Ansible is intended for local demos, short tests, migrations,
+and lightweight controlled environments. It remains available, but is not the
+recommended enterprise-scale execution architecture. The enterprise direction is
+controlled external AWX/RHAAP/webhook adapters with decision snapshots, scoped
+credentials and durable workers; the existing AWX connector is MVP-level.
+
+Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
+manual administrative access can bypass an application-layer gate. See the
+[enforcement boundary](enforcement-boundary.md) for IAM/PAM, network controls and audited break-glass
+requirements. Reports and pre-flight evidence do not grant execution permission.

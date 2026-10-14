@@ -8,8 +8,9 @@ direct SSH or administrative access to infrastructure, they can bypass any
 application-layer gate.
 
 The current local execution path evaluates cached target policy during inventory
-preparation. Reports and the first pre-flight API are conservative evidence, not
-execution permission. The existing AWX connector is an MVP launch/polling path;
+preparation. Reports remain conservative posture evidence. The pre-flight API can evaluate
+action-specific authorization under explicit grants, but its bounded allow result
+is not a reusable execution token and is not connected to launch routes. The existing AWX connector is an MVP launch/polling path;
 it does not establish target-bound enterprise enforcement or verify all external
 inventory changes. Future AWX/RHAAP/webhook adapters must bind decisions to their
 actual targets and recheck freshness before launch.
@@ -35,3 +36,9 @@ controlled environments. It runs trusted playbooks with the runner host's access
 it is not an enterprise sandbox. For enterprise execution, the planned strategy
 is pre-flight decisions in front of controlled AWX/RHAAP adapters, with snapshots,
 credential controls and durable workers.
+
+The decision-only API requires an exact role/action grant, allowed CustomerScope,
+current active blueprint evidence, verified inventory and local prerequisites,
+explicit freshness limits and consistent final rereads. An administrator has no
+implicit grant. Unsupported external adapters stay unknown. No decision snapshot
+or approval workflow was added. See [GATE semantics](gate-decision-api.md).

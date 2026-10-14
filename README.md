@@ -189,4 +189,25 @@ credentials and durable workers; the existing AWX connector is MVP-level.
 Checks apply to routed workflows. Direct SSH, provider-console, Terraform and
 manual administrative access can bypass an application-layer gate. See the
 [enforcement boundary](docs/enforcement-boundary.md) for IAM/PAM, network controls and audited break-glass
-requirements. Reports and pre-flight evidence do not grant execution permission.
+requirements. Reports do not authorize execution. A positive pre-flight decision is bounded to its target/action and is not an execution token.
+
+## Action-specific pre-flight decisions
+
+Governance Ready describes reference quality. Automation Eligible describes
+verified technical prerequisites. Execution Allowed additionally requires an
+explicit requester/action/CustomerScope grant and fresh, consistent evidence.
+The decision-only GATE API can now return allow for a narrowly verified local
+Linux/SSH path under an admin-managed inventory action policy. Missing grants,
+unsupported capabilities or incomplete evidence stay unknown; known blockers
+return block. No approval state is fabricated. Reports remain posture-only and
+Automation Readiness remains conservative, even when one action-specific request
+can be allowed.
+
+Every action policy sets explicit age limits and a bounded validity period; caller
+requests can only tighten freshness. Source/customer changes, blueprint versions,
+playbook pins and final rereads constrain the result. No snapshot is persisted and
+no runner is launched. Future adapters must revalidate immediately before launch;
+direct administrative access can bypass an application-layer gate. See the
+[complete GATE contract](docs/gate-decision-api.md) for configuration, reason codes, supported
+prerequisites and remaining TOCTOU risks. AWX/RHAAP integration and durable workers
+remain roadmap work.

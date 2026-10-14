@@ -45,3 +45,9 @@ redaction is best effort, not a guarantee for arbitrary application secrets.
 Environment hardening may require explicit operational configuration for custom
 Ansible setups. See [enforcement boundary](enforcement-boundary.md) and
 [worker plan](worker-queue-architecture.md).
+
+The decision-only pre-flight verifier also uses fixed argument arrays and
+`shell: false` for local Ansible version inspection and SSH known-host lookup.
+It suppresses probe output, passes the operational environment allowlist, validates
+the address/port, applies a five-second timeout, and never contacts a target or
+launches a playbook. Credential parsing is in-memory only.

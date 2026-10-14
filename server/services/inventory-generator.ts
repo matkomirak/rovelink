@@ -30,6 +30,7 @@ import { db } from "../db";
 import { automationInventories, normalizeEligibilityPolicy, type EligibilityPolicy } from "../../shared/schema";
 import { and, eq } from "drizzle-orm";
 import { applyGovernanceGateEnforcement } from "./governance-gate-enforcement";
+import { assertSafeConnectionUser, assertSafeExecutionSegment, isSafeInventoryAddress } from "./execution-inputs";
 
 export interface InventoryOptions {
   orgId: string;
@@ -63,9 +64,12 @@ export async function createInventoryForRunWithSnapshot(
   options: InventoryOptions
 ): Promise<InventoryResult> {
   const { orgId, runId } = options;
+  assertSafeExecutionSegment(orgId);
+  assertSafeExecutionSegment(runId);
   const ansibleUser = typeof options.ansibleUser === "string" && options.ansibleUser.trim()
     ? options.ansibleUser.trim()
     : null;
+  if (ansibleUser) assertSafeConnectionUser(ansibleUser);
   const ansiblePort = Number.isInteger(options.ansiblePort) && options.ansiblePort! > 0 && options.ansiblePort! <= 65535
     ? options.ansiblePort
     : null;
@@ -90,6 +94,7 @@ export async function createInventoryForRunWithSnapshot(
   const eligibilityPolicy = await loadInventoryEligibilityPolicy(orgId, options.inventoryId ?? null);
 
   const gateSnapshot: GateDecisionSnapshot[] = [];
+  const usedHostNames = new Set<string>();
   const allowedHosts: Array<{
     safeName: string;
     ip: string | null;
@@ -142,6 +147,17 @@ export async function createInventoryForRunWithSnapshot(
       ...enforcedDecision,
       evaluatedAt: new Date().toISOString(),
     };
+    const address = vm.ip?.split("/")[0] ?? vm.name;
+    const safeName = vm.name.replace(/[^A-Za-z0-9_\-.]/g, "_") || `vm_${vm.id.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    if (!isSafeInventoryAddress(address)) {
+      snapshot.allowed = false;
+      snapshot.reason = "Invalid inventory connection address";
+    }
+    if (snapshot.allowed && usedHostNames.has(safeName)) {
+      snapshot.allowed = false;
+      snapshot.reason = "Duplicate inventory host alias";
+    }
+    if (snapshot.allowed) usedHostNames.add(safeName);
     gateSnapshot.push(snapshot);
 
     // Also update the org-scoped gate store for UI transparency
@@ -153,20 +169,20 @@ export async function createInventoryForRunWithSnapshot(
       governanceObjectType: "netbox_vm",
       governanceObjectId: vm.id,
       sourceNetboxId: vm.netboxId,
-      allowed: enforcedDecision.allowed,
+      allowed: snapshot.allowed,
       missing: enforcedDecision.missing,
       evaluatedAt: new Date(),
-      reason: enforcedDecision.reason,
+      reason: snapshot.reason,
       failureType: enforcedDecision.failureType,
       governanceEnforcement: enforcedDecision.governanceEnforcement,
     });
 
-    if (enforcedDecision.allowed) {
+    if (snapshot.allowed) {
       // Strip CIDR notation if present (e.g., "10.0.0.1/24" → "10.0.0.1")
       const ip = vm.ip ? vm.ip.split("/")[0] : null;
       allowedHosts.push({
-        safeName: vm.name.replace(/[^A-Za-z0-9_\-.]/g, "_"),
-        ip,
+        safeName,
+        ip: ip ?? vm.name,
         governanceObjectType: "netbox_vm",
         governanceObjectId: vm.id,
         sourceNetboxId: vm.netboxId,
@@ -206,12 +222,12 @@ export async function createInventoryForRunWithSnapshot(
     lines.push("all:", "  hosts:");
 
     for (const host of allowedHosts) {
-      lines.push(`    ${host.safeName}:`);
+      lines.push(`    ${JSON.stringify(host.safeName)}:`);
       if (host.ip) {
-        lines.push(`      ansible_host: "${host.ip}"`);
+        lines.push(`      ansible_host: ${JSON.stringify(host.ip)}`);
       }
       if (ansibleUser) {
-        lines.push(`      ansible_user: "${ansibleUser}"`);
+        lines.push(`      ansible_user: ${JSON.stringify(ansibleUser)}`);
       }
       if (ansiblePort) {
         lines.push(`      ansible_port: ${ansiblePort}`);

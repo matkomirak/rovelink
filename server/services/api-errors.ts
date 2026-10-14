@@ -2,6 +2,7 @@ import type { Response } from "express";
 import { redactForLog } from "./secrets";
 
 const SECRET_TEXT_PATTERNS: Array<[RegExp, string]> = [
+  [/("?(?:password|token|secret|api[_-]?key)"?\s*:\s*)"[^"\r\n]*"/gi, '$1"[REDACTED]"'],
   [/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]"],
   [/Token\s+[A-Za-z0-9._~+/=-]+/gi, "Token [REDACTED]"],
   [/PVEAPIToken=[^\s"']+/gi, "PVEAPIToken=[REDACTED]"],

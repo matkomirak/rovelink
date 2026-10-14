@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { runnerEnvironment } from "./execution-inputs";
 import fs from "fs/promises";
 import dns from "dns/promises";
 import path from "path";
@@ -273,7 +274,10 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 async function runGit(args: string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("git", args, { shell: false });
+    const child = spawn("git", args, { shell: false, env: {
+      ...runnerEnvironment(process.env), GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: "https",
+      GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    } });
     let output = "";
 
     const append = (chunk: Buffer) => {

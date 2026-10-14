@@ -17,6 +17,7 @@ export async function resolveSafePlaybookPath(
   if (!playbookPath || typeof playbookPath !== "string") {
     throw new Error("Playbook path is required");
   }
+  if (/[\0\r\n;$`|&<>]/.test(playbookPath)) throw new Error("Unsupported playbook path characters");
 
   if (path.isAbsolute(playbookPath)) {
     throw new Error("Absolute playbook paths are not allowed");
@@ -66,6 +67,7 @@ export function validatePlaybookPathSyntax(playbookPath: string): void {
   if (!playbookPath || typeof playbookPath !== "string") {
     throw new Error("Playbook path is required");
   }
+  if (/[\0\r\n;$`|&<>]/.test(playbookPath)) throw new Error("Unsupported playbook path characters");
 
   if (path.isAbsolute(playbookPath)) {
     throw new Error("Absolute playbook paths are not allowed");

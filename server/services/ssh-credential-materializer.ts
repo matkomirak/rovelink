@@ -3,6 +3,7 @@ import path from "path";
 import type { Credential } from "@shared/schema";
 import { storage } from "../storage";
 import { decryptSecret } from "./secrets";
+import { assertSafeConnectionUser } from "./execution-inputs";
 
 export interface MaterializedSshCredential {
   privateKeyPath: string;
@@ -64,6 +65,7 @@ export async function materializeSshCredentialForRun(options: {
   if (!username) {
     throw new Error("SSH credential is missing username metadata.");
   }
+  assertSafeConnectionUser(username);
 
   const secretConfig = normalizeRecord(credential.secretConfig);
   const encryptedPrivateKey = typeof secretConfig.privateKey === "string" ? secretConfig.privateKey : "";

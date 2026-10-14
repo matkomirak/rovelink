@@ -11,6 +11,8 @@
 
 import { spawn } from "child_process";
 import { isLocalDevRuntime } from "./runtime-config";
+import { runnerEnvironment, validateExtraVars } from "./execution-inputs";
+import { getSafeErrorMessage } from "./api-errors";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -61,15 +63,7 @@ export class LocalRunner {
   }
 
   async execute(options: LocalRunOptions, onLog: (line: string) => void): Promise<LocalRunResult> {
-    const args: string[] = [...this.commandArgsPrefix, "-i", options.inventoryPath, options.playbookPath];
-
-    if (options.limitExpr) args.push("--limit", options.limitExpr);
-    if (options.checkMode) args.push("--check");
-    if (options.diffMode) args.push("--diff");
-    if (options.credentialPath) args.push("--private-key", options.credentialPath);
-    if (options.extraVars) {
-      args.push("--extra-vars", JSON.stringify(options.extraVars));
-    }
+    const args = [...this.commandArgsPrefix, ...buildLocalRunnerArgs(options)];
 
     return new Promise((resolve) => {
       const logs: string[] = [];
@@ -78,13 +72,14 @@ export class LocalRunner {
       let outputTruncated = false;
       let settled = false;
 
-      const env: NodeJS.ProcessEnv = { ...process.env, ANSIBLE_FORCE_COLOR: "0", ANSIBLE_NOCOLOR: "1" };
+      const env = runnerEnvironment(process.env);
       if (options.strictHostKeyChecking === false) {
         env.ANSIBLE_HOST_KEY_CHECKING = "False";
         env.ANSIBLE_SSH_ARGS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null";
       }
 
       const proc = spawn(this.command, args, {
+        shell: false,
         cwd: options.workingDirectory,
         env,
       });
@@ -97,6 +92,7 @@ export class LocalRunner {
       };
 
       const handleLine = (line: string) => {
+        line = getSafeErrorMessage(line, "[redacted output]");
         if (outputBytes >= this.maxOutputBytes) {
           if (!outputTruncated) {
             outputTruncated = true;
@@ -130,18 +126,14 @@ export class LocalRunner {
         finish({ status: "error", exitCode: -1, logs: logs.join("\n"), summary });
       }, this.timeoutMs);
 
-      proc.stdout.on("data", (chunk: Buffer) => {
-        chunk.toString().split("\n").filter(Boolean).forEach(handleLine);
-      });
-      proc.stderr.on("data", (chunk: Buffer) => {
-        chunk
-          .toString()
-          .split("\n")
-          .filter(Boolean)
-          .forEach((l) => handleLine(`[stderr] ${l}`));
-      });
+      const stdout = createRunnerOutputHandler(handleLine);
+      const stderr = createRunnerOutputHandler(line => handleLine(`[stderr] ${line}`));
+      proc.stdout.on("data", (chunk: Buffer) => stdout.write(chunk.toString()));
+      proc.stderr.on("data", (chunk: Buffer) => stderr.write(chunk.toString()));
 
       proc.on("close", (code) => {
+        stdout.flush();
+        stderr.flush();
         finish({
           status: code === 0 ? "ok" : "failed",
           exitCode: code ?? 1,
@@ -151,11 +143,47 @@ export class LocalRunner {
       });
 
       proc.on("error", (err) => {
-        onLog(`[rovelink] Failed to start ${this.command}: ${err.message}\n`);
-        finish({ status: "error", exitCode: -1, logs: err.message, summary });
+        const message = getSafeErrorMessage(err, "Failed to start local runner");
+        onLog(`[rovelink] ${message}\n`);
+        finish({ status: "error", exitCode: -1, logs: message, summary });
       });
     });
   }
+}
+
+export function createRunnerOutputHandler(emit: (line: string) => void) {
+  let pending = "", privateKey = false;
+  const line = (value: string) => {
+    if (/-----BEGIN .*PRIVATE KEY/.test(value)) { privateKey = true; emit("[REDACTED PRIVATE KEY]"); }
+    if (privateKey) { if (/-----END .*PRIVATE KEY/.test(value)) privateKey = false; return; }
+    emit(getSafeErrorMessage(value, "[redacted output]"));
+  };
+  return {
+    write(chunk: string) {
+      pending += chunk;
+      let end: number;
+      while ((end = pending.indexOf("\n")) >= 0) { line(pending.slice(0, end)); pending = pending.slice(end + 1); }
+      // Bound a malicious unterminated line without exposing its partial contents.
+      if (pending.length > 65536) { pending = ""; privateKey = true; emit("[REDACTED OVERSIZED OUTPUT]"); }
+    },
+    flush() { if (pending) line(pending); pending = ""; },
+  };
+}
+
+export function buildLocalRunnerArgs(options: LocalRunOptions): string[] {
+  for (const value of [options.inventoryPath, options.playbookPath, options.credentialPath]) {
+    if (value !== undefined && (!value || value.startsWith("-") || /[\r\n\0]/.test(value))) throw new Error("Unsafe runner path argument");
+  }
+  if (options.limitExpr && (options.limitExpr.length > 1024 || !/^[A-Za-z0-9_.:\[\],*!&?@-]+$/.test(options.limitExpr) || options.limitExpr.startsWith("-"))) {
+    throw new Error("Unsafe inventory limit");
+  }
+  const args = ["-i", options.inventoryPath, options.playbookPath];
+  if (options.limitExpr) args.push("--limit", options.limitExpr);
+  if (options.checkMode) args.push("--check");
+  if (options.diffMode) args.push("--diff");
+  if (options.credentialPath) args.push("--private-key", options.credentialPath);
+  if (options.extraVars) { validateExtraVars(options.extraVars); args.push("--extra-vars", JSON.stringify(options.extraVars)); }
+  return args;
 }
 
 export function isLocalRunnerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

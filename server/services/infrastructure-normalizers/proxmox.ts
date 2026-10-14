@@ -47,6 +47,7 @@ export class ProxmoxInfrastructureNormalizer implements InfrastructureProviderNo
     };
 
     for (const vm of input.items) {
+      if (!vm || typeof vm !== "object") { result.skipped.push({ reason: "Invalid provider VM record" }); continue; }
       try {
         const object = normalizeProxmoxVm(vm, input.provider, input.config, input.now);
         if (!object) {

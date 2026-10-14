@@ -23,6 +23,7 @@ import type {
   NormalizedInfrastructureRelationshipInput,
 } from "./infrastructure-normalizers/types";
 import type { IProviderCollector } from "./providers/types";
+import { normalizedInfrastructureSchema, customerScopeCandidateSchema, sanitizeIngestionMetadata } from "./ingestion-validation";
 
 export interface ProviderInfrastructureSyncResult {
   sourceId: string;
@@ -32,6 +33,7 @@ export interface ProviderInfrastructureSyncResult {
   customerScopeCandidatesUpserted: number;
   skipped: Array<{ externalId?: string; name?: string; reason: string; item?: unknown }>;
   errors: Array<{ externalId?: string; name?: string; message: string; item?: unknown }>;
+  validation?: { objectsFetched: number; objectsAccepted: number; objectsSkipped: number; validationErrors: number };
 }
 
 export class ProviderInfrastructureSyncNotSupportedError extends Error {
@@ -99,6 +101,7 @@ export async function syncProviderInfrastructureInventory(
   store: InfrastructureStorage = defaultStorage as IStorage,
   options: SyncOptions = {},
 ): Promise<ProviderInfrastructureSyncResult> {
+  if (provider.orgId !== orgId) throw new Error("Provider not found in organization");
   const azureDemo = provider.kind === "fake" && config.scenario === "azure";
   const proxmoxDemo = provider.kind === "fake" && config.scenario === "proxmox";
   const normalizer = azureDemo ? azureInfrastructureNormalizer : proxmoxDemo ? proxmoxInfrastructureNormalizer : normalizers[provider.kind as InfrastructureProviderType];
@@ -125,27 +128,44 @@ export async function syncProviderInfrastructureInventory(
   result.errors.push(...toErrors(normalized));
 
   const objectIdByRef = new Map<string, string>();
+  result.validation = { objectsFetched: normalized.objects.length, objectsAccepted: 0, objectsSkipped: 0, validationErrors: 0 };
 
   for (const objectInput of normalized.objects) {
+    if (!normalizedInfrastructureSchema.safeParse(objectInput).success) {
+      result.validation.objectsSkipped++;
+      result.validation.validationErrors++;
+      result.skipped.push({ reason: "Invalid normalized infrastructure record" });
+      continue;
+    }
     try {
       const object = await store.upsertInfrastructureObject({
         ...objectInput,
         ...((azureDemo || proxmoxDemo) ? { providerType: "fake" as const, metadata: { ...objectInput.metadata as Record<string, unknown>, demo: true, demoProfile: azureDemo ? "azure" : "proxmox" } } : {}),
         orgId,
         sourceId: provider.id,
+        metadata: sanitizeIngestionMetadata({ ...(objectInput.metadata ?? {}), ...((azureDemo || proxmoxDemo) ? { demo: true, demoProfile: azureDemo ? "azure" : "proxmox" } : {}) }) as Record<string, unknown>,
+        raw: sanitizeIngestionMetadata(objectInput.raw ?? null) as Record<string, unknown> | null,
+        labels: sanitizeIngestionMetadata(objectInput.labels ?? {}) as Record<string, unknown>,
+        tags: sanitizeIngestionMetadata(objectInput.tags ?? []) as unknown[],
       });
       objectIdByRef.set(objectRefKey(object.objectType, object.externalId), object.id);
       result.objectsUpserted++;
+      result.validation.objectsAccepted++;
     } catch (error: any) {
       result.errors.push({
         externalId: objectInput.externalId,
         name: objectInput.name ?? undefined,
-        message: error?.message || "Failed to upsert infrastructure object",
+        message: "Failed to upsert infrastructure object",
       });
     }
   }
 
   for (const candidate of normalized.customerScopeCandidates) {
+    if (!customerScopeCandidateSchema.safeParse(candidate).success) {
+      result.validation.validationErrors++;
+      result.skipped.push({ reason: "Invalid normalized CustomerScope candidate" });
+      continue;
+    }
     const objectId = objectIdByRef.get(objectRefKey(candidate.object.objectType, candidate.object.externalId));
     if (!objectId) {
       result.skipped.push({
@@ -161,12 +181,13 @@ export async function syncProviderInfrastructureInventory(
         orgId,
         sourceId: provider.id,
         objectId,
+        metadata: sanitizeIngestionMetadata(candidate.metadata ?? {}) as Record<string, unknown>,
       });
       result.customerScopeCandidatesUpserted++;
     } catch (error: any) {
       result.errors.push({
         externalId: candidate.object.externalId,
-        message: error?.message || "Failed to upsert provider customer scope candidate",
+        message: "Failed to upsert provider customer scope candidate",
       });
     }
   }
@@ -191,7 +212,7 @@ export async function syncProviderInfrastructureInventory(
         result.relationshipsUpserted++;
       } catch (error: any) {
         result.errors.push({
-          message: error?.message || "Failed to upsert infrastructure relationship",
+          message: "Failed to upsert infrastructure relationship",
           item: {
             fromObject: relationship.fromObject,
             toObject: relationship.toObject,
@@ -327,9 +348,9 @@ function emptyResult(
 }
 
 function toSkipped(normalized: InfrastructureNormalizationResult): ProviderInfrastructureSyncResult["skipped"] {
-  return normalized.skipped.map((item) => ({ reason: item.reason, item: item.item }));
+  return normalized.skipped.map(() => ({ reason: "Provider record skipped during normalization" }));
 }
 
 function toErrors(normalized: InfrastructureNormalizationResult): ProviderInfrastructureSyncResult["errors"] {
-  return normalized.errors.map((item) => ({ message: item.message, item: item.item }));
+  return normalized.errors.map(() => ({ message: "Provider record failed normalization" }));
 }

@@ -91,7 +91,7 @@ export function extractNetBoxTenantScope(rawVm: unknown): DiscoveredCustomerScop
 
   const externalId = stringValue(tenant.id);
   const name = stringValue(tenant.name);
-  if (!externalId || !name) return undefined;
+  if (!externalId || !/^[1-9]\d*$/.test(externalId) || !name || name.length > 2048 || /[\0-\x1f]/.test(name)) return undefined;
 
   return assertValidDiscoveredCustomerScope({
     externalId,

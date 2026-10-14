@@ -12,6 +12,7 @@ import {
 import { netboxService } from "../services/netbox";
 import { requireRole } from "../auth/roles";
 import { sendInternalError } from "../services/api-errors";
+import { normalizedNetboxVmSchema, sanitizeIngestionMetadata } from "../services/ingestion-validation";
 
 interface AuthRequest extends Request {
   userId?: string;
@@ -33,25 +34,30 @@ router.get("/vms", async (req: AuthRequest, res) => {
   }
 });
 
-router.post("/import", requireRole("admin"), async (req, res) => {
+router.post("/import", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    const { vms } = req.body;
+    const { vms, sourceId } = req.body;
     if (!Array.isArray(vms)) {
       return res.status(400).json({ message: "vms must be an array" });
     }
+    if (typeof sourceId !== "string" || !sourceId || !req.orgId) return res.status(400).json({ message: "Organization-owned sourceId required" });
+    if (!await storage.getNetboxInventorySource(sourceId, req.orgId)) return res.status(404).json({ message: "Source not found" });
     let imported = 0;
+    let skipped = 0;
     for (const vm of vms) {
-      await storage.upsertNetboxVm({
-        netboxId: vm.id,
-        name: vm.name,
-        ip: vm.primary_ip?.address || null,
-        operatingSystem: vm.platform?.name || null,
-        customFields: vm.custom_fields || {},
-        tags: (vm.tags || []).map((t: { name: string }) => t.name),
-      });
+      const input = {
+        sourceId, netboxId: vm?.id, name: vm?.name,
+        ip: vm?.primary_ip?.address || null,
+        operatingSystem: vm?.platform?.name || null,
+        customFields: sanitizeIngestionMetadata(vm?.custom_fields || {}),
+        tags: Array.isArray(vm?.tags) ? vm.tags.map((t: { name?: string } | null) => t?.name).filter((name: unknown) => typeof name === "string") : [],
+      };
+      const parsed = normalizedNetboxVmSchema.safeParse(input);
+      if (!parsed.success) { skipped++; continue; }
+      await storage.upsertNetboxVm(parsed.data);
       imported++;
     }
-    res.json({ imported, message: `Imported ${imported} VMs` });
+    res.json({ imported, validation: { recordsFetched: vms.length, recordsAccepted: imported, recordsSkipped: skipped, validationErrors: skipped }, message: `Imported ${imported} VMs` });
   } catch (err: any) {
     sendInternalError(res, err, "netbox.import", "Failed to import NetBox VMs");
   }

@@ -1,4 +1,5 @@
 import type { DriftMatchStatus, DriftSeverity, DriftStatus } from "@shared/schema";
+import { normalizedIpSchema } from "../ingestion-validation";
 
 export type VmMatchConfidence = "high" | "medium" | "low";
 export type VmMatchSignalType = "hostname" | "fqdn" | "name" | "ip";
@@ -115,7 +116,7 @@ export function normalizeIpList(value: unknown): string[] {
   return Array.from(new Set(
     values
       .map((entry) => typeof entry === "string" ? entry.trim() : "")
-      .filter(Boolean),
+      .filter(entry => normalizedIpSchema.safeParse(entry).success),
   )).sort();
 }
 

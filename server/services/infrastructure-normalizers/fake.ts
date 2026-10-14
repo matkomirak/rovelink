@@ -26,6 +26,7 @@ export class FakeInfrastructureNormalizer implements InfrastructureProviderNorma
     };
 
     for (const vm of input.items) {
+      if (!vm || typeof vm !== "object") { result.skipped.push({ reason: "Invalid provider VM record" }); continue; }
       if (!vm.externalId) {
         result.skipped.push({ reason: "Fake VM is missing stable externalId", item: { name: vm.name } });
         continue;

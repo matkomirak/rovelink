@@ -49,31 +49,42 @@ export class AzureInfrastructureNormalizer implements InfrastructureProviderNorm
     };
 
     for (const discovery of input.items) {
+      if (!discovery || typeof discovery !== "object") { result.skipped.push({ reason: "Invalid Azure discovery record" }); continue; }
       const subscriptionId = discovery.subscriptionId;
 
-      for (const vm of discovery.vms ?? []) {
+      for (const vm of validRecords(discovery.vms, result)) {
+        safelyNormalize(result, () => {
         addObject(result, normalizeAzureVm(vm, input.now));
         result.customerScopeCandidates.push(...buildCandidates("vm", vm.id, vm, input.now, subscriptionId));
+        });
       }
 
-      for (const nic of discovery.nics ?? []) {
+      for (const nic of validRecords(discovery.nics, result)) {
+        safelyNormalize(result, () => {
         addObject(result, normalizeAzureNic(nic, input.now));
         result.customerScopeCandidates.push(...buildCandidates("network_interface", nic.id, nic, input.now, subscriptionId));
+        });
       }
 
-      for (const vnet of discovery.vnets ?? []) {
+      for (const vnet of validRecords(discovery.vnets, result)) {
+        safelyNormalize(result, () => {
         addObject(result, normalizeAzureVNet(vnet, input.now));
         result.customerScopeCandidates.push(...buildCandidates("vnet", vnet.id, vnet, input.now, subscriptionId));
 
-        for (const subnet of vnet.subnets ?? []) {
+        for (const subnet of validRecords(vnet.subnets, result)) {
+          safelyNormalize(result, () => {
           addObject(result, normalizeAzureSubnet(subnet, input.now, vnet));
           result.customerScopeCandidates.push(...buildCandidates("subnet", subnet.id, subnet, input.now, subscriptionId));
+          });
         }
+        });
       }
 
-      for (const publicIp of discovery.publicIps ?? []) {
+      for (const publicIp of validRecords(discovery.publicIps, result)) {
+        safelyNormalize(result, () => {
         addObject(result, normalizeAzurePublicIp(publicIp, input.now));
         result.customerScopeCandidates.push(...buildCandidates("public_ip", publicIp.id, publicIp, input.now, subscriptionId));
+        });
       }
     }
 
@@ -82,6 +93,20 @@ export class AzureInfrastructureNormalizer implements InfrastructureProviderNorm
 }
 
 export const azureInfrastructureNormalizer = new AzureInfrastructureNormalizer();
+
+function validRecords<T>(items: T[] | undefined, result: InfrastructureNormalizationResult): T[] {
+  if (items === undefined) return [];
+  if (!Array.isArray(items)) { result.skipped.push({ reason: "Invalid Azure record collection" }); return []; }
+  return items.filter(item => {
+    if (item && typeof item === "object" && !Array.isArray(item)) return true;
+    result.skipped.push({ reason: "Invalid Azure object record" });
+    return false;
+  });
+}
+
+function safelyNormalize(result: InfrastructureNormalizationResult, action: () => void): void {
+  try { action(); } catch { result.errors.push({ message: "Invalid Azure object record" }); }
+}
 
 function addObject(result: InfrastructureNormalizationResult, object: NormalizedInfrastructureObjectInput | null) {
   if (!object?.externalId) {

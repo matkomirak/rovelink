@@ -39,6 +39,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import type { GovernanceReadinessData } from "./services/governance-readiness-report";
+import { normalizedNetboxVmSchema, normalizedInfrastructureSchema, sanitizeIngestionMetadata } from "./services/ingestion-validation";
 import { eq, desc, gte, lte, and, lt, sql, inArray, isNull } from "drizzle-orm";
 
 const SECRET_METADATA_KEYS = new Set([
@@ -702,6 +703,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertInfrastructureObject(input: InsertInfrastructureObject): Promise<InfrastructureObject> {
+    if (!normalizedInfrastructureSchema.safeParse(input).success) throw new Error("Invalid normalized infrastructure record");
     await this.assertProviderSourceInOrg(input.sourceId, input.orgId);
     const existing = await this.getInfrastructureObjectByExternalId(
       input.orgId,
@@ -981,6 +983,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertNetboxVm(vm: InsertNetboxVm): Promise<NetboxVm> {
+    if (!normalizedNetboxVmSchema.safeParse(vm).success) throw new Error("Invalid normalized NetBox VM");
+    vm = { ...vm, customFields: sanitizeIngestionMetadata(vm.customFields ?? {}) as InsertNetboxVm["customFields"] };
     // Check for existing VM by sourceId and netboxId
     const existing = await db.select().from(netboxVms).where(
       and(

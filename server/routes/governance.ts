@@ -28,6 +28,7 @@ import type {
 import type { ResolvedCustomerScopeAssignment } from "@shared/customer-scope";
 import { decryptNetboxToken, encryptNetboxToken } from "../services/secrets";
 import { summarizeGovernanceReadiness } from "../services/governance-readiness-report";
+import { normalizedNetboxVmSchema, sanitizeIngestionMetadata } from "../services/ingestion-validation";
 
 interface AuthRequest extends Request {
   user?: { id?: string; role?: string; orgId?: string | null };
@@ -333,13 +334,15 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage, deps:
 
       const liveVms = await (deps.listNetboxVmsForSource ?? listLiveNetboxVmsForSource)(source);
       let importedCount = 0;
+      let validationErrors = 0;
       let customerScopesUpserted = 0;
       let customerAssignmentsUpserted = 0;
       let customerUnassignedCount = 0;
       let customerScopeResolutionErrors = 0;
       for (const liveVm of liveVms) {
         const cachedVm = toCachedNetboxVm(source.id, liveVm);
-        if (!Number.isFinite(cachedVm.netboxId)) continue;
+        if (!normalizedNetboxVmSchema.safeParse(cachedVm).success) { validationErrors++; continue; }
+        cachedVm.customFields = sanitizeIngestionMetadata(cachedVm.customFields) as Record<string, unknown>;
         const persistedVm = await storage.upsertNetboxVm(cachedVm);
         importedCount += 1;
 
@@ -385,6 +388,7 @@ export function createGovernanceRouter(storage: IStorage = defaultStorage, deps:
       res.json({
         sourceId: source.id,
         importedCount,
+        validation: { recordsFetched: liveVms.length, recordsAccepted: importedCount, recordsSkipped: validationErrors, validationErrors },
         cachedVmCount: importedCount,
         customerScopesUpserted,
         customerAssignmentsUpserted,

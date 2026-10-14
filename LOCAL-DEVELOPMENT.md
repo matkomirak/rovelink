@@ -51,6 +51,33 @@ unless the app host is intentionally allowed to run `ansible-playbook`.
 Bootstrap seeding is idempotent. If the admin user already exists, the seed step
 does not reset or overwrite the existing password.
 
+With a blank `BOOTSTRAP_ADMIN_PASSWORD`, credentials are displayed once during
+setup. Store them securely. No bootstrap credential output file is created.
+An explicitly supplied password is not printed.
+
+### Lost local admin password
+
+There is no dedicated password-reset command. If you lose the generated password
+in the local demo, reset the demo database or recreate the admin user using the
+documented development procedure. The supported disposable-stack procedure here
+is a database reset; rerunning the seed alone does not change existing passwords.
+
+For the self-contained demo only, the following removes **all data and volumes
+in that demo Compose project**, including NetBox data. Use only on a disposable
+local demo, with the same project name/options used to start it:
+
+```powershell
+docker compose --env-file .env.demo -f docker-compose.demo.yml down --volumes
+docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --build
+```
+
+The preserved private `.env.demo` supplies the recreated users' passwords. If it
+is also lost, run `npm.cmd run demo:setup` before starting the empty stack (use
+`npm` on Ubuntu). For host development, recreate only your disposable development
+database, then rerun the README schema and bootstrap seed commands. Provide a
+strong `BOOTSTRAP_ADMIN_PASSWORD` or securely store the once-displayed password.
+Do not apply this reset to a database containing data you need to retain.
+
 Docker Compose stores synced Git project checkouts in a named volume mounted at:
 
 ```text

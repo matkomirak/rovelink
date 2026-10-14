@@ -42,6 +42,18 @@ issuing system; removing it from a report or Git does not revoke it.
 
 ## Security-Sensitive Areas
 
+Public-alpha bootstrap setup no longer persists generated admin credentials to
+disk. Credentials are displayed once during setup. Store them securely and avoid
+capturing setup output in logs. Explicit `BOOTSTRAP_ADMIN_PASSWORD` values are
+not printed. Do not commit `.env`, `.env.demo`, passwords, tokens, or setup output
+files. Remove any credential output files left by older installations securely.
+
+The separate Docker demo's `demo:setup` generates private `.env.demo` environment
+configuration for its services; it preserves existing values. This local-only
+configuration contains secrets and must never be shared or committed. For
+production-like use, provide credentials through environment/secret management;
+the alpha does not provide a supported production deployment procedure.
+
 - Provider credentials, API keys, CMDB tokens, and SSH credentials.
 - Encrypted credential storage and encryption-key handling.
 - HttpOnly authentication cookies and organization/source isolation.

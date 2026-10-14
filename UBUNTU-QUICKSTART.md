@@ -21,7 +21,9 @@ npx --no-install cross-env NODE_ENV=development node --env-file=.env --import=ts
 
 Use `DATABASE_CLIENT=pg` for ordinary Postgres. Open the app at
 `http://localhost:5000/login`. Use your configured bootstrap credentials or the
-private one-time credentials file. Seeding never resets an existing password.
+password displayed once during setup. Store it securely. Seeding never resets an
+existing password. For a lost local password, see the disposable database reset
+procedure in [Local Development](LOCAL-DEVELOPMENT.md#lost-local-admin-password).
 
 In another terminal:
 

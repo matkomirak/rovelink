@@ -1,6 +1,5 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { db } from "./db";
@@ -41,17 +40,19 @@ export function shouldCreateBootstrapAdmin(existingAdmin: unknown): boolean {
   return !existingAdmin;
 }
 
-function writeBootstrapCredentials(adminUsername: string, adminPassword: string): string {
-  const credFile = path.resolve(process.cwd(), "bootstrap-credentials.txt");
-  const content =
-    [
-      "Rovelink bootstrap credentials - delete this file after first login",
-      `Username: ${adminUsername}`,
-      `Password: ${adminPassword}`,
-      `Generated: ${new Date().toISOString()}`,
-    ].join("\n") + "\n";
-  fs.writeFileSync(credFile, content, { mode: 0o600 });
-  return credFile;
+export function displayBootstrapCredentials(
+  adminUsername: string,
+  adminPassword: string,
+  providedPassword: string | undefined,
+  print: (message: string) => void = console.log,
+): void {
+  if (providedPassword) {
+    print("Bootstrap admin password set from BOOTSTRAP_ADMIN_PASSWORD environment variable.");
+    return;
+  }
+  print("Credentials are displayed once during setup. Store them securely.");
+  print(`Username: ${adminUsername}\nPassword: ${adminPassword}`);
+  print("Change the password after first login. Do not save or share setup output.");
 }
 
 async function seed() {
@@ -108,13 +109,7 @@ async function seed() {
 
     console.log(`Bootstrap admin user '${admin.username}' created (id: ${admin.id}).`);
 
-    if (!providedPassword) {
-      const credFile = writeBootstrapCredentials(adminUsername, adminPassword);
-      console.log(`One-time bootstrap credentials written to: ${credFile}`);
-      console.log("Password was not printed. Delete the credentials file and change the password immediately after first login.");
-    } else {
-      console.log("Bootstrap admin password set from BOOTSTRAP_ADMIN_PASSWORD environment variable.");
-    }
+    displayBootstrapCredentials(adminUsername, adminPassword, providedPassword);
 
     process.exit(0);
   } catch (error) {

@@ -18,13 +18,17 @@ Do not expose the demo stack as a public service.
 
 Set strong private secrets using [.env.example](.env.example).
 For host Postgres, set `DATABASE_CLIENT=pg` and a host-reachable `DATABASE_URL`.
-A blank `BOOTSTRAP_ADMIN_PASSWORD` generates one-time credentials in
-`bootstrap-credentials.txt`; retrieve them privately and remove the file after
-login. Compose supplies its own local demo defaults unless overridden.
+A blank `BOOTSTRAP_ADMIN_PASSWORD` generates a password. Credentials are displayed
+once during setup. Store them securely. No bootstrap credential file is written.
+Compose supplies its own local demo defaults unless overridden.
 
 Seeding does not reset an existing user's password. There is no universal
 default password for all installation paths. Do not paste credentials into
 issues or use sample SQL to overwrite password hashes.
+
+There is no dedicated password-reset command. If you lose the generated password
+in the local demo, reset the demo database using the disposable-stack procedure
+in [Local Development](LOCAL-DEVELOPMENT.md#lost-local-admin-password).
 
 ## Before Any Production Deployment
 
